@@ -19,6 +19,13 @@ Controls are unconstrained unless they belong to a control set:
   convex quadratic one gives a saturated (clipped) control.
 - :class:`UnitVector` -- a direction ``||(u_1, ..., u_k)|| = 1``, such as a
   thrust direction or a heading. The Hamiltonian must be linear in it.
+
+State limits are :class:`PathConstraint` objects, ``g(t, x, p) <= 0`` along
+the whole trajectory. The derivation finds each one's order, the number of
+time derivatives of ``g`` it takes for a control to appear. Propagation
+locates every crossing of ``g = 0``; it can stop there (see
+``Kernels.propagate``), and a constraint with a ``penalty`` weight adds the
+exterior penalty ``penalty / 2 * max(0, g)**2`` to the running cost.
 """
 
 from dataclasses import dataclass
@@ -66,6 +73,28 @@ class UnitVector:
             raise ValueError("a UnitVector needs at least two components")
 
 
+@dataclass(frozen=True)
+class PathConstraint:
+    """A state limit ``expr <= 0``, enforced along the whole trajectory.
+
+    ``expr`` may depend on time, states and parameters, but not on the
+    controls. ``penalty`` is an optional weight (a number or an expression in
+    the parameters, usually a parameter so a continuation can raise it). When
+    given, ``penalty / 2 * max(0, expr)**2`` is added to the running cost.
+    Without it the constraint is only detected: its crossings are reported
+    and propagation can stop at a violation.
+    """
+
+    expr: sp.Expr
+    name: str
+    penalty: sp.Expr
+
+    def __init__(self, expr, name="", penalty=None):
+        object.__setattr__(self, "expr", sp.sympify(expr))
+        object.__setattr__(self, "name", str(name))
+        object.__setattr__(self, "penalty", None if penalty is None else sp.sympify(penalty))
+
+
 class OptimalControlProblem:
     """An optimal control problem in Bolza form, expressed with SymPy.
 
@@ -97,12 +126,16 @@ class OptimalControlProblem:
         Runtime parameters, in the order of the parameter vector.
     control_sets : sequence of Box or UnitVector
         Constraints on the controls; each control is in at most one set.
+    path_constraints : sequence of PathConstraint or Expr
+        State limits ``g(t, x, p) <= 0``. A bare expression is a constraint
+        without a penalty.
     name : str
     """
 
     def __init__(self, *, time, states, controls, dynamics, running_cost=0, terminal_cost=0,
                  initial_state=None, final_state=None, terminal_constraints=(),
-                 initial_time=0, final_time=None, params=(), control_sets=(), name=""):
+                 initial_time=0, final_time=None, params=(), control_sets=(), path_constraints=(),
+                 name=""):
         if not isinstance(time, sp.Symbol):
             raise TypeError("time must be a SymPy Symbol")
         self.time = time
@@ -151,6 +184,18 @@ class OptimalControlProblem:
                     raise ValueError(f"control {u} is in more than one control set")
                 owner[u] = cs
 
+        constraints = []
+        for k, c in enumerate(path_constraints):
+            if not isinstance(c, PathConstraint):
+                c = PathConstraint(c)
+            if not c.name:
+                c = PathConstraint(c.expr, f"g{k}", c.penalty)
+            constraints.append(c)
+        names = [c.name for c in constraints]
+        if len(set(names)) != len(names):
+            raise ValueError(f"path constraint names must be unique: {names}")
+        self.path_constraints = tuple(constraints)
+
         self._check_symbols()
 
     @property
@@ -191,12 +236,20 @@ class OptimalControlProblem:
             check(c, t | x | p, "terminal constraint")
         for v in self.initial_state.values():
             check(v, p, "initial_state")
+        for c in self.path_constraints:
+            check(c.expr, t | x | p, f"path constraint {c.name!r}")
+            if not c.expr.free_symbols & x:
+                raise ValueError(f"path constraint {c.name!r} does not depend on the states")
+            if c.penalty is not None:
+                check(c.penalty, p, f"penalty of path constraint {c.name!r}")
         check(self.initial_time, p, "initial_time")
         if self.final_time is not None:
             check(self.final_time, p, "final_time")
 
     def __repr__(self):
         label = f" {self.name!r}" if self.name else ""
+        limits = (f"{len(self.path_constraints)} path constraints, "
+                  if self.path_constraints else "")
         return (f"<OptimalControlProblem{label}: {len(self.states)} states, "
-                f"{len(self.controls)} controls, {len(self.params)} params, "
+                f"{len(self.controls)} controls, {len(self.params)} params, {limits}"
                 f"{'free' if self.free_final_time else 'fixed'} final time>")

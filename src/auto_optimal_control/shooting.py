@@ -22,6 +22,12 @@ The fixed initial states are eliminated, so their residual rows are dropped
 and the system stays square. The Jacobian is exact. It chains the generated
 boundary-condition Jacobians with the STM that ``propagate`` integrates,
 switching jumps included, and with ``dz/dt_f`` when the final time is free.
+
+Path constraints enter in two ways. A penalty weight is a runtime parameter,
+so :func:`parameter_continuation` can raise it from solve to solve. And
+``terminate`` makes any propagation that violates a constraint fail with
+:class:`ShootingError`, which :meth:`SingleShooting.solve` reports to the
+root finder as a large residual.
 """
 
 from dataclasses import dataclass
@@ -39,7 +45,9 @@ class ShootingSolution:
 
     ``success`` means the residual norm reached the requested tolerance. A
     nonzero residual can still be a converged *local* solve; MINPACK's own
-    report is in ``result``.
+    report is in ``result``. ``max_violation`` is the largest ``max(0, g)``
+    over the path constraints along the solution (0 without constraints);
+    a penalized solution violates its limits slightly.
     """
 
     v: np.ndarray
@@ -52,6 +60,7 @@ class ShootingSolution:
     success: bool
     nfev: int
     result: object = None
+    max_violation: float = 0.0
 
     @property
     def z0(self):
@@ -70,12 +79,14 @@ class SingleShooting:
     x0 : sequence of float, optional
         The fixed initial state. Defaults to the problem's. Entries for free
         initial states are ignored; they are unknowns.
-    method, rtol, atol, max_switches
-        Passed to ``Kernels.propagate``.
+    method, rtol, atol, max_switches, terminate, n_interior
+        Passed to ``Kernels.propagate``. With ``terminate``, unknowns whose
+        extremal violates one of those path constraints raise
+        :class:`ShootingError`.
     """
 
     def __init__(self, kernels, params=(), *, x0=None, method="DOP853", rtol=1e-12, atol=1e-12,
-                 max_switches=10000):
+                 max_switches=10000, terminate=False, n_interior=4):
         self.kernels = k = kernels
         self.params = np.asarray(params, dtype=float).reshape(-1)
         if len(self.params) != k.N_PARAMS:
@@ -96,7 +107,8 @@ class SingleShooting:
         if np.isnan(x).any():
             raise ValueError("x0 is NaN at a fixed initial state")
         self.x0 = x
-        self.options = dict(method=method, rtol=rtol, atol=atol, max_switches=max_switches)
+        self.options = dict(method=method, rtol=rtol, atol=atol, max_switches=max_switches,
+                            terminate=terminate, n_interior=n_interior)
 
         self.n_free = len(self.free_states)
         self.n_unknowns = self.n_free + n + k.N_MULTIPLIERS + int(k.FREE_FINAL_TIME)
@@ -155,6 +167,8 @@ class SingleShooting:
         if not tf > self.t0:
             raise ShootingError(f"final time {tf} is not after the initial time {self.t0}")
         r = self.kernels.propagate(self.t0, z0, tf, self.params, stm=stm, **self.options)
+        if r["status"] == self.kernels.STATUS_VIOLATED:
+            raise ShootingError(f"path constraint violated at t = {r['t']}")
         if r["status"] != 0:
             raise ShootingError(f"propagation failed with status {r['status']}")
         return r
@@ -233,9 +247,13 @@ class SingleShooting:
         R, _ = self._safe(sol.x)
         err = float(np.linalg.norm(R))
         x0, lam0, nu, tf = self.unpack(sol.x)
+        violation = 0.0
+        if self.kernels.N_CONSTRAINTS and err < tol:
+            violation = float(np.max(self.constraint_violation(sol.x)))
         return ShootingSolution(v=sol.x, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
                                 residual_norm=err, success=err < tol,
-                                nfev=int(getattr(sol, "nfev", 0)), result=sol)
+                                nfev=int(getattr(sol, "nfev", 0)), result=sol,
+                                max_violation=violation)
 
     def multistart(self, sample, n_tries=50, seed=0, **solve_options):
         """Solve from random guesses ``sample(rng) -> v`` until one succeeds.
@@ -260,11 +278,53 @@ class SingleShooting:
                 break
         return best, tries
 
+    def constraint_violation(self, v, n_points=2001):
+        """Per path constraint, the largest ``max(0, g)`` along the extremal at ``v``.
+
+        Samples the dense output at ``n_points`` times, plus the midpoints of
+        the intervals on which a constraint is violated, between its crossings.
+        """
+        k = self.kernels
+        if not k.N_CONSTRAINTS:
+            return np.zeros(0)
+        x0, lam0, _, tf = self.unpack(v)
+        opts = {key: val for key, val in self.options.items() if key != "terminate"}
+        tr = k.trajectory(self.t0, np.concatenate([x0, lam0]), tf, self.params,
+                          n_points=n_points, **opts)
+        ts = np.concatenate([[self.t0], tr["constraint_times"], [tf]])
+        mids = 0.5 * (ts[:-1] + ts[1:])
+        extra = k.trajectory(self.t0, np.concatenate([x0, lam0]), tf, self.params,
+                             t_eval=mids, **opts)["g"] if len(mids) else np.zeros((0, 1))
+        g = np.vstack([tr["g"], extra])
+        return np.maximum(g.max(axis=0), 0.0)
+
     def trajectory(self, v, **kwargs):
         """The extremal at ``v``, sampled; see ``Kernels.trajectory``."""
         x0, lam0, _, tf = self.unpack(v)
         return self.kernels.trajectory(self.t0, np.concatenate([x0, lam0]), tf, self.params,
                                        **kwargs)
+
+
+def parameter_continuation(kernels, params, name, values, v0, *, shooting_options=None,
+                           solve_options=None, **continuation_options):
+    """:func:`continuation` in one runtime parameter, such as a penalty weight.
+
+    Builds a :class:`SingleShooting` at ``params`` with parameter ``name``
+    (or index) set to each value in turn, solving from the previous solution.
+    ``v0`` must solve the system at ``params`` as given. Returns the list of
+    ``(value, ShootingSolution)``.
+    """
+    params = np.asarray(params, dtype=float).reshape(-1).copy()
+    i = list(kernels.param_names).index(name) if isinstance(name, str) else int(name)
+    shooting_options = dict(shooting_options or {})
+    solve_options = dict(solve_options or {})
+
+    def solve_at(value, guess):
+        p = params.copy()
+        p[i] = value
+        return SingleShooting(kernels, p, **shooting_options).solve(guess, **solve_options)
+
+    return continuation(solve_at, params[i], values, v0, **continuation_options)
 
 
 def continuation(solve_at, start, values, v0, *, min_step=1e-7, shrink=0.5):

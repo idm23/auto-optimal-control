@@ -174,6 +174,69 @@ subject to  x' = f(t, x, u),   x_i(t_0) fixed (or free),   psi(t_f, x(t_f)) = 0,
 - Declare positive quantities (masses, thrust, speeds) with `positive=True`.
   The derivation relies on it to simplify norms and to prove convexity.
 
+## Path constraints
+
+State limits `g(t, x, p) <= 0`, such as joint limits, a keep-out radius or a
+speed limit, are declared on the problem:
+
+```python
+from auto_optimal_control.problem import PathConstraint
+
+OptimalControlProblem(..., params=[ell, rho],
+                      path_constraints=[PathConstraint(x - ell, "x_max", penalty=rho)])
+```
+
+- **Order.** `derive` differentiates `g` along the dynamics until a control
+  appears. The number of derivatives is the constraint's *order*
+  (`pmp.path_constraints[i].order`). A box on a control is order 0. A
+  position limit on a double integrator is order 2. Order 3 or more warns:
+  optimal solutions that ride such a limit generally chatter, with
+  infinitely many touch points. A limit no control can reach raises an error.
+- **Penalty.** With `penalty=w` (a parameter), `w/2 max(0, g)^2` is added to
+  the running cost. Raise `w` by continuation
+  (`shooting.parameter_continuation`) and the solution approaches the
+  constrained one from below. Each constraint has its own flag in the arc
+  (`N_MODES = N_SWITCHING + N_CONSTRAINTS` flags). Crossings of `g = 0` are
+  located as events and switch the penalty on and off. The dynamics are
+  continuous there, so the STM has no jump. Without a penalty, a constraint
+  only monitors: crossings are reported and the extremal is unchanged.
+- **Termination.** `propagate(..., terminate=True)` (or indices or names)
+  stops at the first violation with status `-4`, and `t` is its time. It
+  stops at `t0` if the start already violates. `propagate_batch`,
+  `trajectory` and `SingleShooting(terminate=...)` take it too, and shooting
+  then raises `ShootingError`. This is the death penalty for gradient-free
+  search: any violating extremal is rejected outright. For a safety margin,
+  put it in `g` as a parameter.
+- **Results.** `propagate` returns `constraint_times` / `constraint_index`,
+  `trajectory` returns `g` along the extremal, and `ShootingSolution` has
+  `max_violation`.
+
+**Detecting crossings inside a step.** An integrator that checks `g` only at
+the ends of its steps misses a violation that starts and ends within one
+step. Away from the limit the solution is smooth and steps are long, so this
+happens easily. A missed crossing makes the residual run and the STM run
+disagree about the dynamics, and Newton stalls. Two mechanisms prevent it:
+
+```
+ g   +           ╭──●──╮                ġ = 0 at the peak is an event: FNI splits
+   0 ──────────┼─┼─────┼─┼──────        the step there, and g is monotone on each
+     ●━━━━━━━━━╯         ╰━━━━━━●        side, so each side crosses zero at most once
+     t_a        rise │ fall      t_b
+```
+
+- Every constraint gets a second event on `dg/dt`, the peaks and troughs of
+  `g`. It has no reset map. FNI (0.4+) splits a step at every root it finds,
+  so between consecutive peaks and troughs, `g` crosses zero at most once and
+  the crossing is found.
+- A peak and a trough can still fall in the same step. With the penalty off,
+  the flow overshoots, then turns back. For that case, kernels with path
+  constraints also use FNI's interior sign tests, at `n_interior` points per
+  step (default 4). `n_interior=0` turns them off. They cost 3 extra RHS
+  evaluations per step with DOP853.
+
+The reset map sets each constraint's flag from the sign of `dg/dt` at the
+crossing, so the flag always matches the side the flow moves to.
+
 ## What `derive` produces
 
 `derive(problem)` returns a `PontryaginSystem`:
@@ -187,6 +250,8 @@ subject to  x' = f(t, x, u),   x_i(t_0) fixed (or free),   psi(t_f, x(t_f)) = 0,
 | `hamiltonian` | `H` at `u*`; constant along extremals when `is_autonomous` |
 | `dynamics` | `z' = F(t, z, p)` for `z = [x, lam]`: `x' = dH/dlam`, `lam' = -dH/dx` |
 | `running_cost` | `L` at `u*`, to accumulate the cost |
+| `path_constraints` | `StateConstraint(name, expr, order, derivatives, penalty)` per path constraint |
+| `penalty` | `sum w/2 max(0, g)^2`, included in `hamiltonian`, `dynamics` and `running_cost` |
 | `boundary` | the boundary conditions: `residuals`, `unknowns` and the boundary symbols |
 
 The boundary residuals are the fixed initial states (or `lam_i(t_0) = 0` when
@@ -197,7 +262,8 @@ when the final time is free. There are as many residuals as unknowns.
 `auto_optimal_control.examples` has the problems the tests use: Zermelo's
 navigation problem, minimum-time and minimum-energy double integrators
 (unbounded and saturated), a terminal-cost LQ problem and a fuel-optimal
-planar low-thrust transfer.
+planar low-thrust transfer, and the Bryson–Denham problem (an order-2
+state limit).
 
 ## Tests
 
@@ -228,13 +294,19 @@ planar low-thrust transfer.
 - **`test_jacobian_chain.py`:** a bare Newton iteration built from the
   kernels converges quadratically, which shows the derivatives compose into
   an exact Jacobian, using the raw kernels rather than the shooting module.
+- **`test_path_constraints.py`:** constraint order (1, 2 and 3 on a jerk
+  chain, a planet radius, an unreachable limit). Monitor constraints leave the
+  dynamics alone. Every run of one extremal sees the same crossings, and the
+  STM matches finite differences across them. Bryson–Denham penalty
+  continuation reaches both closed forms. Termination is checked in
+  `propagate`, batches, `trajectory` and shooting.
 - **`test_shooting.py`:** `SingleShooting`'s unknown layout, its Jacobian
   against finite differences (including a free initial state), solves
   against closed forms, multistart and continuation.
 
 ## Benchmarks against the literature
 
-`benchmarks/` solves five canonical problems from scratch and compares each
+`benchmarks/` solves six canonical problems from scratch and compares each
 indirect solution with a published value. It starts from random costate
 guesses, uses continuation where needed, and for the cart-pole lifts
 costates from a direct solution. Run them with
@@ -244,6 +316,8 @@ checks them too. They are solved with `auto_optimal_control.shooting`.
 | Benchmark | Quantity | This package | Reference | Source |
 |---|---|---|---|---|
 | Brachistochrone (3 cases) | `t_f` | matches to 1e-13 | closed-form cycloid | — |
+| Bryson–Denham, touch point (`l = 0.2`, ρ = 1e8) | `∫u²/2` | 2.2399263 | 2.24 | closed form (Bryson, Denham & Dreyfus 1963) |
+| Bryson–Denham, boundary arc (`l = 0.1`, ρ = 1e7) | `∫u²/2` | 4.4430848 | 4.4444444 | closed form, `4/(9l)` |
 | Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
 | Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
@@ -259,6 +333,10 @@ Notes:
 - **Robot arm:** pure bang-bang with five switches, found by continuation
   from `L = 1 + ε Σu²` (saturated controls) to ε = 1e-4, then solved exactly.
   The `u_θ` switch falls at `t_f/2`, by the problem's symmetry.
+- **Bryson–Denham:** the exterior penalty approaches the closed form from
+  below. The gap shrinks as ρ grows, about 3e-5 and 3e-4 at the final
+  weights. Single shooting limits how far ρ can go on the boundary arc: its
+  conditioning grows with ρ.
 - **Cart-pole:** Kelly's direct method from his straight-line guess converges
   to an extremal where the cart overshoots to `x = 1.18`, with `J = 58.808`.
   Polishing it indirectly reproduces the published value. Random costate
@@ -278,6 +356,9 @@ Notes:
   Bang-bang switches are located exactly.
 - **Tangential switches** (`dS/dt = 0` at the switch) have no jump and stop
   propagation with status `-3`.
+- **Path constraints are penalties, not exact arcs.** The solution approaches
+  the constrained one as the weight grows. Exact boundary arcs and touch
+  points (costate jumps, junction conditions) for order 1 and 2 are planned.
 
 ## Developing against a local fast-numerical-integration
 
@@ -311,7 +392,9 @@ to a local FNI checkout (here a sibling directory):
    cart-pole, brachistochrone~~. Next: modified equinoctial elements and
    many-revolution transfers (Earth–Dionysus, GTO–GEO), and minimum-time
    attitude slews.
-5. Ways to choose initial costates, as separate optional layers on top of the
+5. ~~Path constraints: order, exterior penalty with located crossings,
+   termination~~. Next: exact boundary arcs for order 1 and 2.
+6. Ways to choose initial costates, as separate optional layers on top of the
    forward map: ~~single shooting and continuation~~; next, gradient-free
    search (PSO, differential evolution) and learned samplers of the costate
    space.

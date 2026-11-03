@@ -6,9 +6,11 @@ Do not edit: regenerate with ``auto_optimal_control.build.build_kernels``.
 
 import numpy as np
 
+from libc.math cimport INFINITY
+
 from fast_numerical_integration.integrators cimport (
     EventFunction, OdeSystem, fni_event, fni_hybrid_options, fni_integrate_hybrid, fni_options,
-    fni_rhs_fn, fni_stats, FNI_DOP853, FNI_OK, FNI_RESET_CONTINUE, FNI_RESET_STOP, FNI_RK23,
+    fni_options_init, fni_rhs_fn, FNI_EVENTS_INTERIOR, fni_stats, FNI_DOP853, FNI_OK, FNI_RESET_CONTINUE, FNI_RESET_STOP, FNI_RK23,
     FNI_RK45, FNI_STATUS_EVENT, FNI_STATUS_RESET_LIMIT)
 
 cdef extern from "{{header}}" nogil:
@@ -20,6 +22,9 @@ cdef extern from "{{header}}" nogil:
     int P_stm_jump "{{P}}stm_jump"(int k, double t, double* y, const double* p, const int* arc, int with_p)
     int P_switching "{{P}}switching"(double t, const double* z, const double* p, double* S)
     int P_switching_grad "{{P}}switching_grad"(double t, const double* z, const double* p, double* St, double* Sz, double* Sp)
+    int P_constraint "{{P}}constraint"(double t, const double* z, const double* p, double* g)
+    int P_modes "{{P}}modes"(double t, const double* z, const double* p, double* M)
+    int P_constraint_rate_arc "{{P}}constraint_rate_arc"(double t, const double* z, const double* p, const int* arc, double* gd)
     int P_control "{{P}}control"(double t, const double* z, const double* p, double* u)
     int P_hamiltonian "{{P}}hamiltonian"(double t, const double* z, const double* p, double* H)
     int P_cost_rate "{{P}}cost_rate"(double t, const double* z, const double* p, double* L)
@@ -31,17 +36,26 @@ cdef enum:
     NZ = {{NZ}}
     NP = {{NP}}
     NSW = {{NSW}}
+    NC = {{NC}}
+    NM = {{NM}}
     NU = {{NU}}
     NNU = {{NNU}}
     NR = {{NR}}
     NP1 = {{NP1}}
     NSW1 = {{NSW1}}
+    NC1 = {{NC1}}
+    NM1 = {{NM1}}
+    NE = {{NM}} + {{NC}}    # FNI events: the NM mode guards, then one peak guard per constraint
+    NE1 = {{NM1}} + {{NC1}}
     NNU1 = {{NNU1}}
 
 N_STATES = NZ // 2
 N_Z = NZ
 N_PARAMS = NP
 N_SWITCHING = NSW
+N_CONSTRAINTS = NC
+N_MODES = NM
+CONSTRAINT_NAMES = {{constraint_names}}
 N_CONTROLS = NU
 N_MULTIPLIERS = NNU
 N_RESIDUALS = NR
@@ -76,15 +90,32 @@ def _params(params):
 
 
 def _arc(arc):
-    out = np.zeros(NSW1, dtype=np.intc)
+    """The mode flags: one per switching function, then one per path constraint."""
+    out = np.zeros(NM1, dtype=np.intc)
     if arc is None:
-        if NSW:
-            raise TypeError(f"arc is required ({NSW} flags)")
+        if NM:
+            raise TypeError(f"arc is required ({NM} flags)")
         return out
     a = np.asarray(arc).reshape(-1)
-    if a.shape[0] != NSW or not np.all((a == 0) | (a == 1)):
-        raise ValueError(f"arc must be {NSW} flags of 0 or 1")
-    out[:NSW] = a
+    if a.shape[0] != NM or not np.all((a == 0) | (a == 1)):
+        raise ValueError(f"arc must be {NM} flags of 0 or 1")
+    out[:NM] = a
+    return out
+
+
+def _stop_mask(terminate):
+    """Per path constraint, 1 if propagation stops when it is violated."""
+    out = np.zeros(NC1, dtype=np.intc)
+    if terminate is None or terminate is False:
+        return out
+    if terminate is True:
+        out[:NC] = 1
+        return out
+    for item in ([terminate] if isinstance(terminate, (str, int)) else terminate):
+        c = CONSTRAINT_NAMES.index(item) if isinstance(item, str) else int(item)
+        if not 0 <= c < NC:
+            raise ValueError(f"path constraint {item!r} out of range ({NC} constraints)")
+        out[c] = 1
     return out
 
 
@@ -100,13 +131,15 @@ cdef int _check(int rc, str what) except -1:
 
 cdef struct _ctx:
     const double* p
-    int arc[NSW1]
+    int arc[NM1]
+    int stop_on[NC1]    # stop when path constraint c becomes violated
     int with_p
     int with_cost       # last entry of the state is J = int L dt
 
 
 cdef struct _ev_ctx:
     const double* p
+    const int* arc      # constraint rates only: the arc the flow is on
     int k
 
 
@@ -132,9 +165,25 @@ cdef int _stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ct
 
 cdef int _event_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
     cdef _ev_ctx* c = <_ev_ctx*> ctx
-    cdef double S[NSW1]
-    cdef int rc = P_switching(t, y, c.p, S)
-    g[0] = S[c.k]
+    cdef double M[NM1]
+    cdef int rc = P_modes(t, y, c.p, M)
+    g[0] = M[c.k]
+    return rc
+
+
+cdef int _constraint_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
+    cdef _ev_ctx* c = <_ev_ctx*> ctx
+    cdef double G[NC1]
+    cdef int rc = P_constraint(t, y, c.p, G)
+    g[0] = G[c.k]
+    return rc
+
+
+cdef int _rate_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
+    cdef _ev_ctx* c = <_ev_ctx*> ctx
+    cdef double Gd[NC1]
+    cdef int rc = P_constraint_rate_arc(t, y, c.p, c.arc, Gd)
+    g[0] = Gd[c.k]
     return rc
 
 
@@ -157,6 +206,9 @@ cdef class Dynamics(OdeSystem):
 cdef class ArcDynamics(OdeSystem):
     """``z' = F(t, z, p)`` on a fixed arc: ``arc[k] = 1`` puts bang-bang control k at its upper bound.
 
+    The arc has ``N_MODES`` flags: one per switching function, then one per
+    path constraint, 1 where its penalty is on (``g > 0``).
+
     With ``stm=True`` the state is ``[z, Phi]`` (``N_STM`` values, ``Phi`` the
     NZ x NZ state transition matrix, row-major). With ``param_sensitivity=True``
     as well, ``Psi = dz/dp`` (NZ x NP) is appended (``N_STM_PARAMS`` values).
@@ -173,18 +225,18 @@ cdef class ArcDynamics(OdeSystem):
         self.ctx.p = self._params_ptr()
         self.ctx.with_p = 1 if param_sensitivity else 0
         self.ctx.with_cost = 0
-        self.arc = np.zeros(NSW, dtype=np.intc) if arc is None else arc
+        self.arc = np.zeros(NM, dtype=np.intc) if arc is None else arc
         self.c_fn = _stm_fn if stm else _rhs_arc_fn
         self.c_ctx = &self.ctx
 
     @property
     def arc(self):
-        return np.array([self.ctx.arc[k] for k in range(NSW)], dtype=np.intc)
+        return np.array([self.ctx.arc[k] for k in range(NM)], dtype=np.intc)
 
     @arc.setter
     def arc(self, value):
         a = _arc(value)
-        for k in range(NSW):
+        for k in range(NM):
             self.ctx.arc[k] = a[k]
 
 
@@ -203,6 +255,64 @@ cdef class Switching(EventFunction):
         self.ctx.k = k
         self.c_fn = _event_fn
         self.c_ctx = &self.ctx
+
+
+cdef class Constraint(EventFunction):
+    """Event on path constraint ``c``: its value is ``g``, so direction +1 finds violations."""
+
+    cdef _ev_ctx ctx
+
+    def __init__(self, c, params=None, terminal=False, double direction=0.0):
+        super().__init__(terminal, direction)
+        if isinstance(c, str):
+            c = CONSTRAINT_NAMES.index(c)
+        if not 0 <= c < NC:
+            raise ValueError(f"path constraint index {c} out of range ({NC} constraints)")
+        if NP:
+            self._init_params(_params(params)[:NP], PARAM_NAMES)
+        self.ctx.p = self._params_ptr()
+        self.ctx.k = c
+        self.c_fn = _constraint_fn
+        self.c_ctx = &self.ctx
+
+
+cdef class ConstraintRate(EventFunction):
+    """Event on ``dg/dt`` of path constraint ``c`` along the flow on ``arc``.
+
+    Its zeros are the peaks and troughs of ``g``. Between two of them ``g``
+    is monotone, so it crosses zero at most once, and FNI splits the step at
+    every root it finds, so with this event registered next to
+    :class:`Constraint`, a violation inside one step cannot hide. Set
+    ``arc`` whenever the flow's arc changes.
+    """
+
+    cdef _ev_ctx ctx
+    cdef int arc_buf[NM1]
+
+    def __init__(self, c, params=None, arc=None, terminal=False, double direction=0.0):
+        super().__init__(terminal, direction)
+        if isinstance(c, str):
+            c = CONSTRAINT_NAMES.index(c)
+        if not 0 <= c < NC:
+            raise ValueError(f"path constraint index {c} out of range ({NC} constraints)")
+        if NP:
+            self._init_params(_params(params)[:NP], PARAM_NAMES)
+        self.ctx.p = self._params_ptr()
+        self.ctx.k = c
+        self.ctx.arc = self.arc_buf
+        self.arc = np.zeros(NM, dtype=np.intc) if arc is None else arc
+        self.c_fn = _rate_fn
+        self.c_ctx = &self.ctx
+
+    @property
+    def arc(self):
+        return np.array([self.arc_buf[i] for i in range(NM)], dtype=np.intc)
+
+    @arc.setter
+    def arc(self, value):
+        a = _arc(value)
+        for i in range(NM):
+            self.arc_buf[i] = a[i]
 
 
 # -----------------------------------------------------------------------------
@@ -296,9 +406,45 @@ def switching_gradient(double t, z, params=None):
     return st[:NSW], sz[:NSW * NZ].reshape(NSW, NZ), sp_[:NSW * NP].reshape(NSW, NP)
 
 
+def constraint(double t, z, params=None):
+    """Path-constraint values ``g`` (NC,); ``g <= 0`` is feasible."""
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(NC1)
+    cdef double[::1] ov = out
+    _check(P_constraint(t, &zv[0], &pv[0], &ov[0]), "constraint")
+    return out[:NC]
+
+
+def constraint_rate(double t, z, params=None, arc=None):
+    """``dg/dt`` along the flow on ``arc`` (NC,); default arc: the one ``z`` is on."""
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef int[::1] av = _arc(initial_arc(t, zv[:NZ], np.asarray(pv)[:NP] if NP else None)
+                            if arc is None else arc)
+    out = np.zeros(NC1)
+    cdef double[::1] ov = out
+    _check(P_constraint_rate_arc(t, &zv[0], &pv[0], &av[0], &ov[0]), "constraint_rate")
+    return out[:NC]
+
+
+def modes(double t, z, params=None):
+    """The mode functions (NM,): switching functions, then ``-g`` per path constraint."""
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(NM1)
+    cdef double[::1] ov = out
+    _check(P_modes(t, &zv[0], &pv[0], &ov[0]), "modes")
+    return out[:NM]
+
+
 def initial_arc(double t, z, params=None):
-    """The arc at ``(t, z)``: 1 where a switching function is negative (upper bound)."""
-    return (switching(t, z, params) < 0).astype(np.intc)
+    """The arc at ``(t, z)``: 1 where a mode function is negative.
+
+    That is the upper bound for a bang-bang control where its switching
+    function is negative, and the penalty on for a violated path constraint.
+    """
+    return (modes(t, z, params) < 0).astype(np.intc)
 
 
 def residual(z0, zf, nu=None, double tf=np.nan, params=None):
@@ -351,6 +497,9 @@ def stm_jump(int k, double t, y, params=None, arc=None, param_sensitivity=False)
 cdef enum:
     STATUS_TOO_MANY_SWITCHES = -2
     STATUS_JUMP_FAILED = -3
+    STATUS_CONSTRAINT_VIOLATED = -4
+
+STATUS_VIOLATED = STATUS_CONSTRAINT_VIOLATED
 
 
 cdef struct _switch_ctx:
@@ -360,20 +509,43 @@ cdef struct _switch_ctx:
     int* sw_k
     Py_ssize_t* n_sw
     int jump_failed
+    int violated
+
+
+cdef int _flag_after(int k, double t, const double* y, _ctx* c) noexcept nogil:
+    """Arc flag ``k`` just after its mode function crosses zero at ``t``.
+
+    A path constraint's flag is set from the sign of ``dg/dt`` there (1 when
+    entering the violated side), so it always matches the side the flow
+    moves to. A tangential touch (``dg/dt = 0``) flips it."""
+    cdef double Gd[NC1]
+    if k >= NSW and P_constraint_rate_arc(t, y, c.p, c.arc, Gd) == 0:
+        if Gd[k - NSW] > 0:
+            return 1
+        if Gd[k - NSW] < 0:
+            return 0
+    return 1 - c.arc[k]
 
 
 cdef int _switch_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n,
                        void* ctx) noexcept nogil:
-    """FNI reset map at a switch: record it, jump the STM, flip the arc."""
+    """FNI reset map at a mode change: record it, jump the STM, set the arc.
+
+    A path constraint marked to stop ends the integration when it becomes
+    violated."""
     cdef _switch_ctx* r = <_switch_ctx*> ctx
     cdef int k = <int> event
+    cdef int flag = _flag_after(k, t, y, r.c)
     r.sw_t[r.n_sw[0]] = t
     r.sw_k[r.n_sw[0]] = k
     r.n_sw[0] += 1
-    if r.stm and P_stm_jump(k, t, y, r.c.p, r.c.arc, r.c.with_p) != 0:
+    if k >= NSW and flag == 1 and r.c.stop_on[k - NSW]:
+        r.violated = 1
+        return FNI_RESET_STOP
+    if r.stm and k < NSW and P_stm_jump(k, t, y, r.c.p, r.c.arc, r.c.with_p) != 0:
         r.jump_failed = 1
         return FNI_RESET_STOP
-    r.c.arc[k] = 1 - r.c.arc[k]
+    r.c.arc[k] = flag
     return FNI_RESET_CONTINUE
 
 
@@ -385,22 +557,37 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
                     double t1, const fni_options* opt, double* y_out, double* sw_t,
                     int* sw_k, Py_ssize_t max_sw, Py_ssize_t* n_sw, Py_ssize_t* nfev,
                     int* status, double* t_final) noexcept nogil:
-    """One hybrid integration in FNI: each switching function is a guard, and
-    its reset map jumps the STM (saltation matrix) and flips the arc."""
-    cdef fni_event events[NSW1]
-    cdef _ev_ctx evc[NSW1]
+    """One hybrid integration in FNI: each mode function is a guard, and its
+    reset map jumps the STM (saltation matrix) and sets the arc. Each path
+    constraint also gets a plain event on ``dg/dt`` (no reset): FNI splits the
+    step at its roots, the peaks and troughs of ``g``, so a violation that
+    starts and ends inside one step is still found."""
+    cdef fni_event events[NE1]
+    cdef _ev_ctx evc[NE1]
     cdef fni_hybrid_options hopt
     cdef _switch_ctx rctx
     cdef fni_stats st
     cdef int k, rc
+    cdef Py_ssize_t i
 
-    for k in range(NSW):
+    n_sw[0] = 0
+    for k in range(NC):
+        if ctx.stop_on[k] and ctx.arc[NSW + k]:
+            # Already violated at t0: stop before the first step.
+            for i in range(ny):
+                y_out[i] = y[i]
+            nfev[0] = 0
+            t_final[0] = t0
+            status[0] = STATUS_CONSTRAINT_VIOLATED
+            return FNI_OK
+    for k in range(NE):
         evc[k].p = ctx.p
-        evc[k].k = k
-        events[k].fn = _event_fn
+        evc[k].arc = ctx.arc
+        evc[k].k = k if k < NM else k - NM
+        events[k].fn = _event_fn if k < NM else _rate_fn
         events[k].ctx = &evc[k]
         events[k].direction = 0.0
-        events[k].max_events = 1.0
+        events[k].max_events = 1.0 if k < NM else INFINITY
     hopt.max_resets = max_sw
     hopt.min_dwell = 0.0
     hopt.reselect_step = False
@@ -410,15 +597,17 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     rctx.sw_k = sw_k
     rctx.n_sw = n_sw
     rctx.jump_failed = 0
-    n_sw[0] = 0
-    rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events, NSW,
+    rctx.violated = 0
+    rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events, NE,
                               _switch_reset, &rctx, &hopt, y_out, NULL, NULL, NULL, NULL,
                               NULL, 0, &st, NULL)
     nfev[0] = st.nfev
     t_final[0] = st.t_final
     if rc != FNI_OK:
         return rc
-    if rctx.jump_failed:
+    if rctx.violated:
+        status[0] = STATUS_CONSTRAINT_VIOLATED
+    elif rctx.jump_failed:
         status[0] = STATUS_JUMP_FAILED
     elif st.status == FNI_STATUS_RESET_LIMIT:
         status[0] = STATUS_TOO_MANY_SWITCHES
@@ -428,13 +617,17 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
 
 
 cdef int _setup_options(fni_options* opt, double rtol, double atol, first_step,
-                        double max_step) except -1:
+                        double max_step, Py_ssize_t n_interior) except -1:
     if not max_step > 0:
         raise ValueError("max_step must be positive")
+    if n_interior < 0:
+        raise ValueError("n_interior must be non-negative")
+    fni_options_init(opt)
+    if NC and n_interior:
+        opt.event_detection = FNI_EVENTS_INTERIOR
+        opt.n_interior = n_interior
     opt.rtol = rtol
-    opt.rtol_vec = NULL
     opt.atol = atol
-    opt.atol_vec = NULL
     opt.first_step = -1.0 if first_step is None else float(first_step)
     opt.max_step = max_step
     return 0
@@ -444,6 +637,33 @@ def _layout(stm, param_sensitivity, cost):
     if param_sensitivity and not stm:
         raise ValueError("param_sensitivity requires stm=True")
     return NZ + (NZ * NZ if stm else 0) + (NZ * NP if param_sensitivity else 0) + (1 if cost else 0)
+
+
+def _split_events(times, index):
+    """Bang-bang switches and path-constraint crossings, from the combined event record."""
+    times = np.asarray(times)
+    index = np.asarray(index, dtype=np.intp)
+    sw = index < NSW
+    return times[sw], index[sw], times[~sw], index[~sw] - NSW
+
+
+def _split_events_rows(times, index, n):
+    """:func:`_split_events` for padded (m, width) arrays with ``n`` valid entries per row."""
+    m, width = index.shape
+    valid = np.arange(width)[None, :] < n[:, None]
+    out = []
+    for keep in (valid & (index < NSW), valid & (index >= NSW)):
+        order = np.argsort(~keep, axis=1, kind="stable")
+        count = keep.sum(axis=1)
+        t = np.take_along_axis(times, order, axis=1)
+        k = np.take_along_axis(index, order, axis=1)
+        pad = np.arange(width)[None, :] >= count[:, None]
+        t = np.where(pad, np.nan, t)
+        k = np.where(pad, -1, k)
+        out.append((t, k, count))
+    (st, sk, sn), (ct, ck, cn) = out
+    ck = np.where(ck >= 0, ck - NSW, -1)
+    return st, sk, sn, ct, ck, cn
 
 
 def _initial_y(z, stm, Py_ssize_t ny):
@@ -456,12 +676,15 @@ def _initial_y(z, stm, Py_ssize_t ny):
 
 def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensitivity=False,
               cost=False, arc=None, method="DOP853", double rtol=1e-10, double atol=1e-12,
-              first_step=None, double max_step=np.inf, Py_ssize_t max_switches=10000):
+              first_step=None, double max_step=np.inf, Py_ssize_t max_switches=10000,
+              terminate=False, Py_ssize_t n_interior=4):
     """Integrate the extremal from ``z0 = [x0, lambda0]`` from ``t0`` to ``t1``.
 
     The integration runs arc by arc and stops at every switch, so each
     bang-bang arc is integrated with its control fixed and no step straddles
-    a discontinuity. Runs without the GIL. This is the forward map
+    a discontinuity. Every crossing of a path constraint's ``g = 0`` is
+    located the same way, and its penalty (if it has one) switches on or off
+    there. Runs without the GIL. This is the forward map
     ``lambda0 -> trajectory``; it knows nothing about how ``lambda0`` was chosen.
 
     Parameters
@@ -474,16 +697,32 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     cost : bool
         Also accumulate ``J = int_{t0}^{t1} L dt`` (the running cost at ``u*``).
     arc : array_like of 0/1, optional
-        The arc at ``t0``. By default, from the signs of the switching functions.
+        The ``N_MODES`` flags at ``t0`` (see :class:`ArcDynamics`). By
+        default, from the signs of the mode functions.
+    max_switches : int
+        The most mode changes (switches and constraint crossings) allowed.
+    terminate : bool, int, str or sequence
+        Path constraints that stop the integration when they become violated:
+        ``True`` for all, or their indices or names. The result then has
+        status -4 and ``t`` is the time of the violation (``t0`` if ``z0``
+        already violates one).
+    n_interior : int
+        With path constraints, also test the guards' signs at this many
+        points inside every step (FNI's ``event_detection="interior"``), so a
+        peak and a trough of ``g`` in the same step are told apart. ``0``
+        tests only the ends of each step. The peaks and troughs of ``g`` are
+        guards too, so between test points ``g`` crosses zero at most once.
 
     Returns
     -------
     dict
         ``t`` (final time), ``z`` (NZ,), ``stm`` (NZ, NZ) or None, ``dz_dp``
         (NZ, NP) or None, ``cost`` (float) or None, ``dz_dt1`` (the dynamics
-        at the end, NZ), ``switch_times``, ``switch_index``, ``arc0``, ``arc``
-        (final), ``nfev`` and ``status`` (0 finished, -1 step size too small,
-        -2 too many switches, -3 tangential switch).
+        at the end, NZ), ``switch_times``, ``switch_index``,
+        ``constraint_times``, ``constraint_index`` (crossings of ``g = 0``, in
+        either direction), ``arc0``, ``arc`` (final), ``nfev`` and ``status``
+        (0 finished, -1 step size too small, -2 too many switches, -3
+        tangential switch, -4 path constraint violated).
     """
     cdef fni_options opt
     cdef _ctx ctx
@@ -498,11 +737,12 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     meth = _METHODS[method]
     if max_switches < 0:
         raise ValueError("max_switches must be >= 0")
-    _setup_options(&opt, rtol, atol, first_step, max_step)
+    _setup_options(&opt, rtol, atol, first_step, max_step, n_interior)
     z = _buffer(z0, NZ, "z0")
     p_arr = _params(params)
-    arc0 = initial_arc(t0, z[:NZ], p_arr[:NP] if NP else None) if arc is None else _arc(arc)[:NSW]
+    arc0 = initial_arc(t0, z[:NZ], p_arr[:NP] if NP else None) if arc is None else _arc(arc)[:NM]
     arc_buf = _arc(arc0)
+    stop = _stop_mask(terminate)
 
     y = _initial_y(z[:NZ], stm, ny)
     y_out = np.zeros(ny)
@@ -517,8 +757,10 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     ctx.p = &pv[0]
     ctx.with_p = 1 if param_sensitivity else 0
     ctx.with_cost = 1 if cost else 0
-    for k in range(NSW):
+    for k in range(NM):
         ctx.arc[k] = arc_buf[k]
+    for k in range(NC1):
+        ctx.stop_on[k] = stop[k]
 
     with nogil:
         rc = _propagate(meth, &ctx, do_stm, ny, t0, &yv[0], t1, &opt, &yo[0], &tv[0], &kv[0],
@@ -526,8 +768,9 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     if rc != FNI_OK:
         raise RuntimeError(f"integration failed with code {rc}")
 
-    arc_end = np.array([ctx.arc[k] for k in range(NSW)], dtype=np.intc)
+    arc_end = np.array([ctx.arc[k] for k in range(NM)], dtype=np.intc)
     o = NZ + NZ * NZ
+    st, sk, ct, ck = _split_events(sw_t[:n_sw], sw_k[:n_sw])
     return {
         "t": t_final,
         "z": y_out[:NZ].copy(),
@@ -535,9 +778,11 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
         "dz_dp": y_out[o:o + NZ * NP].reshape(NZ, NP).copy() if param_sensitivity else None,
         "cost": float(y_out[ny - 1]) if cost else None,
         "dz_dt1": rhs_arc(t_final, y_out[:NZ], p_arr[:NP] if NP else None,
-                          arc_end if NSW else None),
-        "switch_times": sw_t[:n_sw].copy(),
-        "switch_index": sw_k[:n_sw].astype(np.intp),
+                          arc_end if NM else None),
+        "switch_times": st.copy(),
+        "switch_index": sk,
+        "constraint_times": ct.copy(),
+        "constraint_index": ck,
         "arc0": np.asarray(arc0, dtype=np.intc),
         "arc": arc_end,
         "nfev": nfev,
@@ -551,22 +796,24 @@ cdef int _propagate_rows(int meth, int do_stm, int with_p, int with_cost, Py_ssi
                          int[:, ::1] arc_end, double[:, ::1] sw_t, int[:, ::1] sw_k,
                          Py_ssize_t max_sw, Py_ssize_t[::1] n_sw, Py_ssize_t[::1] nfev,
                          int[::1] status, double[::1] t_final, const fni_options* opt,
-                         Py_ssize_t start, Py_ssize_t stop) noexcept nogil:
+                         const int* stop_on, Py_ssize_t start, Py_ssize_t stop) noexcept nogil:
     cdef _ctx ctx
     cdef Py_ssize_t r, k
     cdef int rc
     ctx.p = p
     ctx.with_p = with_p
     ctx.with_cost = with_cost
+    for k in range(NC1):
+        ctx.stop_on[k] = stop_on[k]
     for r in range(start, stop):
-        for k in range(NSW):
+        for k in range(NM):
             ctx.arc[k] = arc0[r, k]
         rc = _propagate(meth, &ctx, do_stm, ny, t0[r], &y[r, 0], t1[r], opt, &y_out[r, 0],
                         &sw_t[r, 0], &sw_k[r, 0], max_sw, &n_sw[r], &nfev[r], &status[r],
                         &t_final[r])
         if rc != FNI_OK:
             return rc
-        for k in range(NSW):
+        for k in range(NM):
             arc_end[r, k] = ctx.arc[k]
     return FNI_OK
 
@@ -574,7 +821,7 @@ cdef int _propagate_rows(int meth, int do_stm, int with_p, int with_cost, Py_ssi
 def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=False, cost=False,
                     arc=None, method="DOP853", double rtol=1e-10, double atol=1e-12,
                     first_step=None, double max_step=np.inf, Py_ssize_t max_switches=64,
-                    n_threads=1):
+                    n_threads=1, terminate=False, Py_ssize_t n_interior=4):
     """:func:`propagate` for many initial states at once, without the GIL.
 
     ``z0`` has shape (m, NZ); ``t0`` and ``t1`` are scalars or length-m
@@ -585,7 +832,9 @@ def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=Fal
     Returns a dict of arrays with a leading dimension m: ``t``, ``z``,
     ``stm``, ``dz_dp``, ``cost`` (None when not requested), ``switch_times``
     (m, max_switches; NaN past ``n_switches``), ``switch_index`` (-1 past it),
-    ``n_switches``, ``arc0``, ``arc``, ``nfev`` and ``status``.
+    ``n_switches``, ``constraint_times``, ``constraint_index`` and
+    ``n_crossings`` (padded the same way), ``arc0``, ``arc``, ``nfev`` and
+    ``status``. ``max_switches`` bounds switches and crossings together.
     """
     cdef fni_options opt
     cdef Py_ssize_t m, ny, r, k
@@ -598,7 +847,7 @@ def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=Fal
     meth = _METHODS[method]
     if max_switches < 0:
         raise ValueError("max_switches must be >= 0")
-    _setup_options(&opt, rtol, atol, first_step, max_step)
+    _setup_options(&opt, rtol, atol, first_step, max_step, n_interior)
     Z = np.array(z0, dtype=np.float64, ndmin=2)
     if Z.ndim != 2 or Z.shape[1] != NZ:
         raise ValueError(f"z0 must have shape (m, {NZ})")
@@ -606,13 +855,14 @@ def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=Fal
     t0_arr = np.array(np.broadcast_to(np.asarray(t0, dtype=np.float64), (m,)))
     t1_arr = np.array(np.broadcast_to(np.asarray(t1, dtype=np.float64), (m,)))
     p_arr = _params(params)
-    arcs0 = np.zeros((m, NSW1), dtype=np.intc)
+    stop = _stop_mask(terminate)
+    arcs0 = np.zeros((m, NM1), dtype=np.intc)
     if arc is None:
         for r in range(m):
-            arcs0[r, :NSW] = initial_arc(t0_arr[r], Z[r], p_arr[:NP] if NP else None)
+            arcs0[r, :NM] = initial_arc(t0_arr[r], Z[r], p_arr[:NP] if NP else None)
     else:
-        a = np.asarray(arc).reshape(-1, NSW) if NSW else np.zeros((1, 0))
-        arcs0[:, :NSW] = np.broadcast_to(a, (m, NSW))
+        a = np.asarray(arc).reshape(-1, NM) if NM else np.zeros((1, 0))
+        arcs0[:, :NM] = np.broadcast_to(a, (m, NM))
         if not np.all((arcs0 == 0) | (arcs0 == 1)):
             raise ValueError("arc flags must be 0 or 1")
 
@@ -621,7 +871,7 @@ def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=Fal
     if stm:
         y[:, NZ:NZ + NZ * NZ] = np.eye(NZ).reshape(-1)
     y_out = np.zeros((m, ny))
-    arc_end = np.zeros((m, NSW1), dtype=np.intc)
+    arc_end = np.zeros((m, NM1), dtype=np.intc)
     msw = max(max_switches, 1)
     sw_t = np.full((m, msw), np.nan)
     sw_k = np.full((m, msw), -1, dtype=np.intc)
@@ -646,13 +896,14 @@ def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=Fal
     cdef int do_stm = 1 if stm else 0
     cdef int with_p = 1 if param_sensitivity else 0
     cdef int with_cost = 1 if cost else 0
+    cdef const int[::1] stopv = stop
 
     def run(Py_ssize_t start, Py_ssize_t stop):
         cdef int rc
         with nogil:
             rc = _propagate_rows(meth, do_stm, with_p, with_cost, ny, &pv[0], t0v, t1v, yv, yov,
                                  a0v, aev, swtv, swkv, max_switches, nswv, nfv, stv, tfv, &opt,
-                                 start, stop)
+                                 &stopv[0], start, stop)
         if rc != FNI_OK:
             raise RuntimeError(f"integration failed with code {rc}")
 
@@ -667,17 +918,22 @@ def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=Fal
                     fut.result()
 
     o = NZ + NZ * NZ
+    st, sk, sn, ct, ck, cn = _split_events_rows(sw_t[:, :max_switches],
+                                                sw_k[:, :max_switches].astype(np.intp), n_sw)
     return {
         "t": t_final,
         "z": y_out[:, :NZ].copy(),
         "stm": y_out[:, NZ:o].reshape(m, NZ, NZ).copy() if stm else None,
         "dz_dp": y_out[:, o:o + NZ * NP].reshape(m, NZ, NP).copy() if param_sensitivity else None,
         "cost": y_out[:, ny - 1].copy() if cost else None,
-        "switch_times": sw_t[:, :max_switches],
-        "switch_index": sw_k[:, :max_switches].astype(np.intp),
-        "n_switches": n_sw,
-        "arc0": arcs0[:, :NSW].copy(),
-        "arc": arc_end[:, :NSW].copy(),
+        "switch_times": st,
+        "switch_index": sk,
+        "n_switches": sn.astype(np.intp),
+        "constraint_times": ct,
+        "constraint_index": ck,
+        "n_crossings": cn.astype(np.intp),
+        "arc0": arcs0[:, :NM].copy(),
+        "arc": arc_end[:, :NM].copy(),
         "nfev": nfev,
         "status": status,
     }

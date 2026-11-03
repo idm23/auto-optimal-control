@@ -9,6 +9,8 @@ into a :class:`PontryaginSystem`, which holds every expression an indirect
 - switching functions for bang-bang controls;
 - the augmented dynamics of ``z = [x, lambda]``:
   ``x' = dH/dlambda``, ``lambda' = -dH/dx``, evaluated at ``u*``;
+- for each path constraint ``g <= 0``, its order and time derivatives, and
+  the exterior penalty it adds to the running cost, if it has a weight;
 - the boundary-condition residuals: fixed initial states (or
   ``lambda_i(t_0) = 0`` for free ones), terminal constraints, transversality
   ``lambda(t_f) = dPhi/dx`` with ``Phi = phi + nu . psi``, and, for a free
@@ -35,6 +37,7 @@ quantities (masses, thrust, exhaust speed) with ``positive=True`` so SymPy can
 simplify the same way.
 """
 
+import warnings
 from dataclasses import dataclass
 
 import sympy as sp
@@ -50,6 +53,24 @@ class SwitchingFunction:
     expr: sp.Expr
     lower: sp.Expr
     upper: sp.Expr
+
+
+@dataclass(frozen=True)
+class StateConstraint:
+    """A path constraint ``g(t, x, p) <= 0`` after derivation.
+
+    ``order`` is the number of time derivatives of ``g``, taken along the
+    dynamics with the controls left symbolic, before a control appears.
+    ``derivatives`` holds ``g, g', ..., g^(order)``; only the last depends on
+    the controls. ``penalty`` is the weight of ``penalty / 2 * max(0, g)**2``
+    in the running cost, or ``None``.
+    """
+
+    name: str
+    expr: sp.Expr
+    order: int
+    derivatives: tuple
+    penalty: sp.Expr
 
 
 @dataclass(frozen=True)
@@ -105,6 +126,8 @@ class PontryaginSystem:
     state_dynamics: tuple          # x' at u*
     costate_dynamics: tuple        # lambda' at u*
     boundary: BoundaryConditions
+    path_constraints: tuple = ()   # StateConstraint per path constraint
+    penalty: sp.Expr = sp.S.Zero   # sum of the exterior penalties, part of L and H above
 
     @property
     def z(self):
@@ -123,6 +146,7 @@ class PontryaginSystem:
     def __repr__(self):
         return (f"<PontryaginSystem for {self.problem!r}: "
                 f"{len(self.switching_functions)} switching functions, "
+                f"{len(self.path_constraints)} path constraints, "
                 f"{len(self.boundary.unknowns)} shooting unknowns>")
 
 
@@ -305,6 +329,45 @@ def _boundary_conditions(problem, H_star, costates, taken):
         hamiltonian=tuple(hamiltonian))
 
 
+MAX_CONSTRAINT_ORDER = 8
+
+
+def constraint_derivatives(problem, expr):
+    """``(g, g', ..., g^(q))`` along the dynamics, stopping at the first that involves a control.
+
+    Each derivative is ``dg/dt + dg/dx . f(t, x, u, p)`` with the controls
+    symbolic, so ``q`` is the order of the constraint ``g <= 0``. Raises
+    ``ValueError`` if no control appears within ``MAX_CONSTRAINT_ORDER``
+    derivatives.
+    """
+    t, controls = problem.time, problem.controls
+    g = sp.sympify(expr)
+    derivatives = [g]
+    for _ in range(MAX_CONSTRAINT_ORDER):
+        g = sp.simplify(sp.diff(g, t) + sp.Add(*[sp.diff(g, x) * f for x, f in
+                                                 zip(problem.states, problem.dynamics)]))
+        derivatives.append(g)
+        if any(not _is_zero(sp.diff(g, u)) for u in controls):
+            return tuple(derivatives)
+    raise ValueError(f"no control appears in the first {MAX_CONSTRAINT_ORDER} time derivatives "
+                     f"of the path constraint {expr} <= 0: the controls cannot influence it")
+
+
+def _state_constraints(problem):
+    out = []
+    for c in problem.path_constraints:
+        derivatives = constraint_derivatives(problem, c.expr)
+        order = len(derivatives) - 1
+        if order >= 3:
+            warnings.warn(
+                f"path constraint {c.name!r} has order {order}. Optimal solutions that ride a "
+                "constraint of order 3 or more generally chatter (infinitely many touch points), "
+                "so only its penalty and termination are meaningful", stacklevel=3)
+        out.append(StateConstraint(name=c.name, expr=c.expr, order=order,
+                                   derivatives=derivatives, penalty=c.penalty))
+    return tuple(out)
+
+
 def derive(problem):
     """Derive the first-order necessary conditions of ``problem``.
 
@@ -323,10 +386,20 @@ def derive(problem):
     state_dynamics = tuple(sp.simplify(f.subs(law)) for f in problem.dynamics)
     costate_dynamics = tuple(sp.simplify(-sp.diff(H, s).subs(law)) for s in problem.states)
 
-    boundary = _boundary_conditions(problem, H_star, costates, taken)
+    # Path-constraint penalties depend on the state only, so they leave the
+    # control law alone and add w max(0, g) dg/dx to -lambda'.
+    constraints = _state_constraints(problem)
+    penalized = [c for c in constraints if c.penalty is not None]
+    penalty = sp.Add(*[c.penalty / 2 * sp.Max(0, c.expr) ** 2 for c in penalized])
+    costate_dynamics = tuple(
+        e - sp.Add(*[c.penalty * sp.Max(0, c.expr) * sp.diff(c.expr, s) for c in penalized])
+        for e, s in zip(costate_dynamics, problem.states))
+
+    boundary = _boundary_conditions(problem, H_star + penalty, costates, taken)
     return PontryaginSystem(
         problem=problem, time=problem.time, states=problem.states, costates=costates,
-        controls=problem.controls, params=problem.params, hamiltonian_full=H,
-        control_law=law, switching_functions=switching, hamiltonian=H_star,
-        running_cost=sp.simplify(problem.running_cost.subs(law)),
-        state_dynamics=state_dynamics, costate_dynamics=costate_dynamics, boundary=boundary)
+        controls=problem.controls, params=problem.params, hamiltonian_full=H + penalty,
+        control_law=law, switching_functions=switching, hamiltonian=H_star + penalty,
+        running_cost=sp.simplify(problem.running_cost.subs(law)) + penalty,
+        state_dynamics=state_dynamics, costate_dynamics=costate_dynamics, boundary=boundary,
+        path_constraints=constraints, penalty=penalty)

@@ -79,6 +79,9 @@ def _render_wrapper(pmp, prefix, header_name, macros):
         "header": header_name,
         "P": prefix,
         "param_names": repr(params),
+        "constraint_names": repr(tuple(c.name for c in pmp.path_constraints)),
+        "NC1": str(max(macros["NC"], 1)),
+        "NM1": str(max(macros["NM"], 1)),
         "free_tf": repr(bool(macros["FREE_TF"])),
         "NP1": str(max(macros["NP"], 1)),
         "NSW1": str(max(macros["NSW"], 1)),
@@ -173,10 +176,10 @@ class Kernels:
 
     The generated module's functions are available as attributes (``rhs``,
     ``rhs_arc``, ``jacobian``, ``dfdp``, ``control``, ``hamiltonian``,
-    ``cost_rate``, ``switching``, ``switching_gradient``, ``initial_arc``,
-    ``residual``, ``residual_jacobian``, ``stm_jump``, ``propagate``,
-    ``propagate_batch``) and so are its FNI types (``Dynamics``,
-    ``ArcDynamics``, ``Switching``). All of them take ``z = [x, lambda]`` and
+    ``cost_rate``, ``switching``, ``switching_gradient``, ``constraint``,
+    ``modes``, ``initial_arc``, ``residual``, ``residual_jacobian``,
+    ``stm_jump``, ``propagate``, ``propagate_batch``) and so are its FNI types
+    (``Dynamics``, ``ArcDynamics``, ``Switching``, ``Constraint``). All of them take ``z = [x, lambda]`` and
     the parameter vector in the orders of ``system.z`` and ``system.params``.
     """
 
@@ -237,42 +240,99 @@ class Kernels:
         return [self.module.Switching(k, params, terminal, direction)
                 for k in range(self.module.N_SWITCHING)]
 
+    def constraint_events(self, params=None, terminal=False, direction=0.0):
+        """One native FNI event per path constraint (value ``g``)."""
+        return [self.module.Constraint(c, params, terminal, direction)
+                for c in range(self.module.N_CONSTRAINTS)]
+
     def trajectory(self, t0, z0, t1, params=None, *, t_eval=None, n_points=201, arc=None,
-                   method="DOP853", rtol=1e-10, atol=1e-12, max_switches=10000):
-        """The extremal from ``z0``, sampled: states, costates, controls and ``H``.
+                   method="DOP853", rtol=1e-10, atol=1e-12, max_switches=10000,
+                   terminate=False, n_interior=4):
+        """The extremal from ``z0``, sampled: states, costates, controls, ``H`` and ``g``.
 
         Integrates like :func:`propagate`, as one FNI hybrid integration
-        (``solve_hybrid`` on :class:`ArcDynamics`, with each switching
-        function a guard whose reset map flips the arc). Then it samples the
-        piecewise dense output at ``t_eval`` (default: ``n_points`` evenly
-        spaced times).
+        (``solve_hybrid`` on :class:`ArcDynamics`, with each mode function a
+        guard whose reset map flips the arc). Then it samples the piecewise
+        dense output at ``t_eval`` (default: ``n_points`` evenly spaced
+        times). With ``terminate`` (as in :func:`propagate`) the integration
+        stops at a violation and only the times reached are sampled.
+        ``n_interior`` is as in :func:`propagate`.
 
         Returns a dict with ``t``, ``z`` (len, NZ), ``u`` (len, NU), ``H``
-        (len,), ``switch_times``, ``switch_index`` and ``status``.
+        (len,), ``g`` (len, NC), ``switch_times``, ``switch_index``,
+        ``constraint_times``, ``constraint_index`` and ``status`` (-4 if it
+        stopped at a violation).
         """
         mod = self.module
-        nsw = mod.N_SWITCHING
+        nsw, nm = mod.N_SWITCHING, mod.N_MODES
         p = None if params is None else np.asarray(params, dtype=float)
         z = np.asarray(z0, dtype=float)
         arc = mod.initial_arc(t0, z, p) if arc is None else np.asarray(arc, dtype=np.intc)
-        dynamics = mod.ArcDynamics(p, arc if nsw else None)
+        stop = np.zeros(mod.N_CONSTRAINTS, dtype=bool)
+        if mod.N_CONSTRAINTS:
+            stop[:] = mod._stop_mask(terminate)[:mod.N_CONSTRAINTS]
+        dynamics = mod.ArcDynamics(p, arc if nm else None)
+        violated = []
+
+        rates = [mod.ConstraintRate(c, p, arc) for c in range(mod.N_CONSTRAINTS)]
 
         def flip(k, t, y):
+            # As the compiled reset map: a constraint's flag follows the sign
+            # of dg/dt at the crossing, and a touch flips it.
             a = dynamics.arc
-            a[k] = 1 - a[k]
+            flag = 1 - a[k]
+            if k >= nsw:
+                rate = mod.constraint_rate(t, y[:mod.N_Z], p, a)[k - nsw]
+                flag = 1 if rate > 0 else 0 if rate < 0 else flag
+                if flag == 1 and stop[k - nsw]:
+                    violated.append((t, k))
+                    return None
+            a[k] = flag
             dynamics.arc = a
+            for r in rates:
+                r.arc = a
             return y
 
-        events = [mod.Switching(k, p, True, 0.0) for k in range(nsw)]
-        sol = solve_hybrid(dynamics, (t0, t1), z, events or None, flip if nsw else None,
-                           method=method, dense_output=True, rtol=rtol, atol=atol,
-                           max_resets=max_switches)
+        status = 0
+        if any(stop[c] and arc[nsw + c] for c in range(mod.N_CONSTRAINTS)):
+            t_end, sol = t0, None
+            status = mod.STATUS_VIOLATED
+        else:
+            detection = ({"event_detection": "interior", "n_interior": int(n_interior)}
+                         if mod.N_CONSTRAINTS and n_interior else {})
+            events = ([mod.Switching(k, p, True, 0.0) for k in range(nsw)]
+                      + [mod.Constraint(c, p, True, 0.0) for c in range(mod.N_CONSTRAINTS)]
+                      + rates)
+            # Constraint events report g, the mode function is -g: same zeros.
+            # The rate events (peaks and troughs of g) only split steps.
+            sol = solve_hybrid(dynamics, (t0, t1), z, events or None, flip if nm else None,
+                               method=method, dense_output=True, rtol=rtol, atol=atol,
+                               max_resets=max_switches, **detection)
+            t_end = sol.t[-1]
+            status = mod.STATUS_VIOLATED if violated else sol.status
         if t_eval is None:
-            t_eval = np.linspace(t0, t1, n_points)
+            t_eval = np.linspace(t0, t_end, n_points)
         t_eval = np.asarray(t_eval, dtype=float)
-        Z = sol.sol(t_eval).T.reshape(len(t_eval), mod.N_Z)
+        if sol is None:
+            t_eval = np.array([t0])
+            Z = z[None, :].copy()
+        else:
+            lo, hi = sorted((t0, t_end))
+            t_eval = t_eval[(t_eval >= lo) & (t_eval <= hi)]
+            Z = sol.sol(t_eval).T.reshape(len(t_eval), mod.N_Z)
         U = np.array([mod.control(ti, zi, p) for ti, zi in zip(t_eval, Z)]).reshape(
             len(t_eval), mod.N_CONTROLS)
         H = np.array([mod.hamiltonian(ti, zi, p) for ti, zi in zip(t_eval, Z)])
-        return {"t": t_eval, "z": Z, "u": U, "H": H, "switch_times": sol.t_resets,
-                "switch_index": sol.reset_events.astype(np.intp), "status": sol.status}
+        G = np.array([mod.constraint(ti, zi, p) for ti, zi in zip(t_eval, Z)]).reshape(
+            len(t_eval), mod.N_CONSTRAINTS)
+        times = np.zeros(0) if sol is None else np.asarray(sol.t_resets, dtype=float)
+        index = (np.zeros(0, dtype=np.intp) if sol is None
+                 else np.asarray(sol.reset_events, dtype=np.intp))
+        if violated:                     # a stopping reset is not recorded by FNI
+            times = np.append(times, violated[0][0])
+            index = np.append(index, violated[0][1])
+        sw = index < nsw
+        c_times, c_index = times[~sw], index[~sw] - nsw
+        return {"t": t_eval, "z": Z, "u": U, "H": H, "g": G, "switch_times": times[sw],
+                "switch_index": index[sw], "constraint_times": c_times,
+                "constraint_index": c_index, "status": status}

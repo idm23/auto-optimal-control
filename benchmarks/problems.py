@@ -17,6 +17,9 @@ Robotics:
 
 Classical:
 - **brachistochrone**: minimum-time descent; closed-form cycloid.
+- **bryson_denham**: minimum energy with the order-2 state limit ``x <= l``
+  (Bryson, Denham & Dreyfus 1963), solved by exterior-penalty continuation in
+  both regimes: a touch point and a boundary arc.
 """
 
 import time
@@ -26,10 +29,12 @@ import numpy as np
 import sympy as sp
 from scipy.optimize import brentq
 
+from auto_optimal_control import examples
 from auto_optimal_control.build import build_kernels
 from auto_optimal_control.pontryagin import derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, UnitVector
-from auto_optimal_control.shooting import ShootingError, SingleShooting, continuation
+from auto_optimal_control.shooting import (ShootingError, SingleShooting, continuation,
+                                           parameter_continuation)
 
 
 @dataclass
@@ -424,8 +429,44 @@ def simulate_cart_pole(k, lam0, p, n=4001):
     return sol.y[4, -1], sol.y[:4, -1]
 
 
+# =============================================================================
+# Bryson-Denham: an order-2 state limit
+# =============================================================================
+
+def bryson_denham_exact(ell):
+    """Closed-form cost: touch at t = 1/2 for 1/6 <= l < 1/4, boundary arc below."""
+    if ell < 1 / 6:
+        return 4 / (9 * ell)
+    a, b = -4 + 12 * ell, 4 - 16 * ell        # x = t + a t^2 + b t^3 on [0, 1/2]
+    c0, c1, T = 2 * a, 6 * b, 0.5              # u = c0 + c1 t
+    return c0 ** 2 * T + c0 * c1 * T ** 2 + c1 ** 2 * T ** 3 / 3
+
+
+def run_bryson_denham(cache_dir=None, seed=0):
+    """Raise the penalty weight rho from 1 by continuation. The penalty
+    solution approaches the exact cost from below; the gap shrinks as rho
+    grows, so the tolerance reflects the final rho, not the integration."""
+    k = _kernels(examples.bryson_denham(), cache_dir)
+    rows = []
+    for ell, rho_max, tol, rtol in [(0.2, 1e8, 1e-10, 1e-4), (0.1, 1e7, 1e-8, 1e-3)]:
+        start = time.perf_counter()
+        v = SingleShooting(k, [ell, 1.0]).solve([0, 2.0, 0, 0]).v
+        path = parameter_continuation(k, [ell, 1.0], "rho",
+                                      np.logspace(0, np.log10(rho_max), 33), v,
+                                      solve_options=dict(tol=tol))
+        rho, sol = path[-1]
+        r = k.propagate(0, sol.z0, 1.0, [ell, rho], cost=True)
+        regime = "touch" if ell >= 1 / 6 else "boundary arc"
+        rows.append(Result("bryson_denham", f"J (l={ell}, {regime}, rho={rho:.0e})", r["cost"],
+                           bryson_denham_exact(ell), "closed form (Bryson, Denham & Dreyfus 1963)",
+                           rtol, time.perf_counter() - start,
+                           {"max_violation": sol.max_violation, "solves": len(path)}))
+    return rows
+
+
 ALL = {
     "brachistochrone": run_brachistochrone,
+    "bryson_denham": run_bryson_denham,
     "orbit_raising": run_orbit_raising,
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,
