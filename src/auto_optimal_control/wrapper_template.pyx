@@ -6,10 +6,10 @@ Do not edit: regenerate with ``auto_optimal_control.build.build_kernels``.
 
 import numpy as np
 
-from libc.string cimport memcpy
 from fast_numerical_integration.integrators cimport (
-    EventFunction, OdeSystem, fni_event, fni_integrate, fni_options, fni_rhs_fn, fni_stats,
-    FNI_DOP853, FNI_OK, FNI_RK23, FNI_RK45, FNI_STATUS_EVENT, FNI_STATUS_FINISHED)
+    EventFunction, OdeSystem, fni_event, fni_hybrid_options, fni_integrate_hybrid, fni_options,
+    fni_rhs_fn, fni_stats, FNI_DOP853, FNI_OK, FNI_RESET_CONTINUE, FNI_RESET_STOP, FNI_RK23,
+    FNI_RK45, FNI_STATUS_EVENT, FNI_STATUS_RESET_LIMIT)
 
 cdef extern from "{{header}}" nogil:
     int P_rhs "{{P}}rhs"(double t, const double* z, const double* p, double* dz)
@@ -353,59 +353,78 @@ cdef enum:
     STATUS_JUMP_FAILED = -3
 
 
+cdef struct _switch_ctx:
+    _ctx* c
+    int stm
+    double* sw_t
+    int* sw_k
+    Py_ssize_t* n_sw
+    int jump_failed
+
+
+cdef int _switch_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n,
+                       void* ctx) noexcept nogil:
+    """FNI reset map at a switch: record it, jump the STM, flip the arc."""
+    cdef _switch_ctx* r = <_switch_ctx*> ctx
+    cdef int k = <int> event
+    r.sw_t[r.n_sw[0]] = t
+    r.sw_k[r.n_sw[0]] = k
+    r.n_sw[0] += 1
+    if r.stm and P_stm_jump(k, t, y, r.c.p, r.c.arc, r.c.with_p) != 0:
+        r.jump_failed = 1
+        return FNI_RESET_STOP
+    r.c.arc[k] = 1 - r.c.arc[k]
+    return FNI_RESET_CONTINUE
+
+
+cdef inline fni_rhs_fn fn_of(int stm) noexcept nogil:
+    return _stm_fn if stm else _rhs_arc_fn
+
+
 cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, double* y,
                     double t1, const fni_options* opt, double* y_out, double* sw_t,
                     int* sw_k, Py_ssize_t max_sw, Py_ssize_t* n_sw, Py_ssize_t* nfev,
                     int* status, double* t_final) noexcept nogil:
+    """One hybrid integration in FNI: each switching function is a guard, and
+    its reset map jumps the STM (saltation matrix) and flips the arc."""
     cdef fni_event events[NSW1]
     cdef _ev_ctx evc[NSW1]
-    cdef Py_ssize_t rec_e[1]
-    cdef double rec_t[1]
+    cdef fni_hybrid_options hopt
+    cdef _switch_ctx rctx
     cdef fni_stats st
     cdef int k, rc
-    cdef double t = t0
-    cdef fni_rhs_fn fn = _stm_fn if stm else _rhs_arc_fn
 
     for k in range(NSW):
         evc[k].p = ctx.p
         evc[k].k = k
         events[k].fn = _event_fn
         events[k].ctx = &evc[k]
-        # On the upper arc S < 0, so the next switch is an upward crossing.
-        # Watching only that direction ignores the round-off sign of S right
-        # at a restart.
-        events[k].direction = 1.0 if ctx.arc[k] else -1.0
+        events[k].direction = 0.0
         events[k].max_events = 1.0
+    hopt.max_resets = max_sw
+    hopt.min_dwell = 0.0
+    hopt.reselect_step = False
+    rctx.c = ctx
+    rctx.stm = stm
+    rctx.sw_t = sw_t
+    rctx.sw_k = sw_k
+    rctx.n_sw = n_sw
+    rctx.jump_failed = 0
     n_sw[0] = 0
-    nfev[0] = 0
-    while True:
-        rc = fni_integrate(method, fn, ctx, ny, t, y, t1, opt, events, NSW, y_out,
-                           rec_e, rec_t, NULL, 1, &st)
-        if rc != FNI_OK:
-            return rc
-        nfev[0] += st.nfev
-        t = st.t_final
-        t_final[0] = t
-        if st.status != FNI_STATUS_EVENT:
-            status[0] = st.status
-            return FNI_OK
-        k = <int> rec_e[0]
-        if n_sw[0] >= max_sw:
-            status[0] = STATUS_TOO_MANY_SWITCHES
-            return FNI_OK
-        sw_t[n_sw[0]] = t
-        sw_k[n_sw[0]] = k
-        n_sw[0] += 1
-        if stm:
-            if P_stm_jump(k, t, y_out, ctx.p, ctx.arc, ctx.with_p) != 0:
-                status[0] = STATUS_JUMP_FAILED
-                return FNI_OK
-        ctx.arc[k] = 1 - ctx.arc[k]
-        events[k].direction = -events[k].direction
-        memcpy(y, y_out, ny * sizeof(double))
-        if t == t1:
-            status[0] = FNI_STATUS_FINISHED
-            return FNI_OK
+    rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events, NSW,
+                              _switch_reset, &rctx, &hopt, y_out, NULL, NULL, NULL, NULL,
+                              NULL, 0, &st, NULL)
+    nfev[0] = st.nfev
+    t_final[0] = st.t_final
+    if rc != FNI_OK:
+        return rc
+    if rctx.jump_failed:
+        status[0] = STATUS_JUMP_FAILED
+    elif st.status == FNI_STATUS_RESET_LIMIT:
+        status[0] = STATUS_TOO_MANY_SWITCHES
+    else:
+        status[0] = st.status
+    return FNI_OK
 
 
 cdef int _setup_options(fni_options* opt, double rtol, double atol, first_step,
