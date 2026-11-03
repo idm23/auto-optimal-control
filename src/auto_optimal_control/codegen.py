@@ -8,15 +8,25 @@ Functions, for a prefix ``P`` (``aoc_<name>_``)::
 
     int P_rhs(t, z, p, dz)                   z' = F(t, z, p), bang-bang controls switch inside
     int P_rhs_arc(t, z, p, arc, dz)          F on a fixed arc: arc[k] = 1 puts bang-bang
-                                             control k at its upper bound, 0 at its lower one
+                                             control k at its upper bound, 0 at its lower one;
+                                             arc[NSW + c] = 1 turns path constraint c's
+                                             penalty on (NM = NSW + NC flags in all)
     int P_jac_arc(t, z, p, arc, A)           A = dF/dz        (NZ x NZ)
     int P_dfdp_arc(t, z, p, arc, B)          B = dF/dp        (NZ x NP)
     int P_stm_rhs(t, y, p, arc, with_p, dy)  y = [z, Phi (NZ x NZ), Psi (NZ x NP) if with_p]:
                                              Phi' = A Phi, Psi' = A Psi + B
-    int P_stm_jump(k, t, y, p, arc, with_p)  apply the jump of Phi (and Psi) when switching
-                                             function k changes sign; arc is the arc before
+    int P_stm_jump(k, t, y, p, arc, with_p)  apply the jump of Phi (and Psi) when mode k
+                                             changes sign; arc is the arc before. A path
+                                             constraint (k >= NSW) has no jump.
     int P_switching(t, z, p, S)              switching functions (NSW)
     int P_switching_grad(t, z, p, St, Sz, Sp)  dS/dt (NSW), dS/dz (NSW x NZ), dS/dp (NSW x NP)
+    int P_constraint(t, z, p, g)             path constraints g (NC); g <= 0 is feasible
+    int P_modes(t, z, p, M)                  the NM mode functions: S, then -g. Flag k of
+                                             the arc is 1 exactly where M[k] < 0
+    int P_constraint_rate_arc(t, z, p, arc, gd)  dg/dt along the flow on a fixed arc (NC).
+                                             Its zeros are the peaks and troughs of g:
+                                             between them g is monotone and crosses zero
+                                             at most once
     int P_control(t, z, p, u)                optimal control u* (NU)
     int P_hamiltonian(t, z, p, H)            H at u* (one value)
     int P_cost_rate(t, z, p, L)              running cost at u* (one value)
@@ -32,6 +42,9 @@ at ``t_s``, with ``F-`` and ``F+`` the dynamics on the arcs before and after
 it and ``Sdot = dS/dt + dS/dz . F-``. Then
 ``Phi+ = Phi- + (F+ - F-) (dS/dz Phi-) / Sdot`` and
 ``Psi+ = Psi- + (F+ - F-) (dS/dz Psi- + dS/dp) / Sdot``.
+
+A path constraint's penalty ``w/2 max(0, g)^2`` and its gradient vanish at
+``g = 0``, so ``F`` is continuous across a crossing and the STM has no jump.
 """
 
 import re
@@ -141,23 +154,31 @@ class _Function:
 
 
 def _arc_dynamics(pmp, flags):
-    """Dynamics and running cost with each bang-bang control fixed by a 0/1 flag.
+    """Dynamics and running cost with each mode fixed by a 0/1 flag.
 
-    On an arc, control k equals ``flag_k * upper + (1 - flag_k) * lower``, a
-    smooth expression, so derivatives with respect to parameters in the bounds
-    come out right.
+    On an arc, bang-bang control k equals ``flag_k * upper + (1 - flag_k) *
+    lower``, a smooth expression, so derivatives with respect to parameters in
+    the bounds come out right. Path constraint c's penalty is
+    ``flag_{NSW + c} * w / 2 * g**2``.
     """
+    nsw = len(pmp.switching_functions)
     bang = {sw.control: flag * sw.upper + (1 - flag) * sw.lower
-            for sw, flag in zip(pmp.switching_functions, flags)}
+            for sw, flag in zip(pmp.switching_functions, flags[:nsw])}
     # Other laws may contain a bang-bang law; replace it there too.
     on_arc = {pmp.control_law[u]: value for u, value in bang.items()}
     law = {u: bang[u] if u in bang else _smooth(e.xreplace(on_arc))
            for u, e in pmp.control_law.items()}
-    H = pmp.hamiltonian_full
+    H = pmp.hamiltonian_full - pmp.penalty      # the penalty is added per arc below
     xdot = [f.subs(law) for f in pmp.problem.dynamics]
     lamdot = [-sp.diff(H, x).subs(law) for x in pmp.states]
-    cost = _smooth(pmp.problem.running_cost.subs(law))
-    return [_smooth(e) for e in xdot + lamdot], cost
+    cost = pmp.problem.running_cost.subs(law)
+    for c, flag in zip(pmp.path_constraints, flags[nsw:]):
+        if c.penalty is None:
+            continue
+        cost += flag * c.penalty / 2 * c.expr ** 2
+        lamdot = [e - flag * c.penalty * c.expr * sp.diff(c.expr, x)
+                  for e, x in zip(lamdot, pmp.states)]
+    return [_smooth(e) for e in xdot + lamdot], _smooth(cost)
 
 
 def generate_c(pmp, name=None):
@@ -167,6 +188,8 @@ def generate_c(pmp, name=None):
     n = len(pmp.states)
     NZ, NP = 2 * n, len(pmp.params)
     NSW, NU = len(pmp.switching_functions), len(pmp.controls)
+    NC = len(pmp.path_constraints)
+    NM = NSW + NC
     bc = pmp.boundary
     NNU, NR = len(bc.nu), len(bc.residuals)
     free_tf = pmp.problem.free_final_time
@@ -182,8 +205,8 @@ def generate_c(pmp, name=None):
     if free_tf:
         bc_map[bc.tf] = sp.Symbol("tf")
 
-    flags = [sp.Symbol(f"on{k}") for k in range(NSW)]
-    flag_lines = [line for k in range(NSW) for line in
+    flags = [sp.Symbol(f"on{k}") for k in range(NM)]
+    flag_lines = [line for k in range(NM) for line in
                   (f"    const double on{k} = arc[{k}] ? 1.0 : 0.0;", f"    (void)on{k};")]
 
     F = [_smooth(e) for e in pmp.dynamics]
@@ -191,6 +214,7 @@ def generate_c(pmp, name=None):
     z_c = [mapping[s] for s in pmp.z]
     p_c = [mapping[s] for s in pmp.params]
     S = [_smooth(sw.expr) for sw in pmp.switching_functions]
+    G = [_smooth(c.expr) for c in pmp.path_constraints]
 
     tzp = "double t, const double* z, const double* p"
     functions = []
@@ -240,6 +264,27 @@ def generate_c(pmp, name=None):
             f.out(f"Sz[{k * NZ + j}]", sp.diff(e, zj))
         for j, pj in enumerate(p_c):
             f.out(f"Sp[{k * NP + j}]", sp.diff(e, pj))
+    functions.append(f)
+
+    f = _Function(f"int {P}constraint({tzp}, double* g)", ["t", "z", "p", "g"])
+    for c, e in enumerate(G):
+        f.out(f"g[{c}]", e)
+    functions.append(f)
+
+    xdot_arc = F_arc[:n]
+    Gdot = [_smooth(sp.diff(c.expr, pmp.time)
+                    + sum(sp.diff(c.expr, x) * xd for x, xd in zip(pmp.states, xdot_arc)))
+            for c in pmp.path_constraints]
+    f = _Function(f"int {P}constraint_rate_arc({tzp}, const int* arc, double* gd)",
+                  ["t", "z", "p", "arc", "gd"])
+    f.pre = flag_lines
+    for c, e in enumerate(Gdot):
+        f.out(f"gd[{c}]", e)
+    functions.append(f)
+
+    f = _Function(f"int {P}modes({tzp}, double* M)", ["t", "z", "p", "M"])
+    for k, e in enumerate(S + [-e for e in G]):
+        f.out(f"M[{k}]", e)
     functions.append(f)
 
     f = _Function(f"int {P}control({tzp}, double* u)", ["t", "z", "p", "u"])
@@ -295,7 +340,8 @@ def generate_c(pmp, name=None):
     body = "\n\n".join(fn.render(mapping if not fn.signature.startswith(f"int {P}residual")
                                  else bc_map) for fn in functions)
 
-    macros = dict(NZ=NZ, NP=NP, NSW=NSW, NU=NU, NNU=NNU, NR=NR, FREE_TF=int(free_tf))
+    macros = dict(NZ=NZ, NP=NP, NSW=NSW, NC=NC, NM=NM, NU=NU, NNU=NNU, NR=NR,
+                  FREE_TF=int(free_tf))
     guard = f"AOC_{ident.upper()}_H"
     header_lines = [
         f"/* Generated by auto-optimal-control for problem {pmp.problem.name!r}. Do not edit. */",
@@ -313,7 +359,7 @@ def generate_c(pmp, name=None):
     header_lines += ["", f"#endif /* {guard} */", ""]
     header = "\n".join(header_lines)
 
-    NP1, NSW1 = max(NP, 1), max(NSW, 1)
+    NP1, NSW1, NM1 = max(NP, 1), max(NSW, 1), max(NM, 1)
     stm = f"""
 int {P}stm_rhs(double t, const double* y, const double* p, const int* arc, int with_p, double* dy) {{
     double A[{NZ * NZ}];
@@ -348,14 +394,15 @@ int {P}stm_rhs(double t, const double* y, const double* p, const int* arc, int w
 }}
 
 int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int with_p) {{
-    int arc_after[{NSW1}];
+    int arc_after[{NM1}];
     double Fm[{NZ}], Fp[{NZ}], dF[{NZ}];
     double St[{NSW1}], Sz[{NSW1 * NZ}], Sp[{NSW1 * NP1}];
     double* Phi = y + {NZ};
     double Sdot;
     int rc;
+    if (k >= {NSW} && k < {NM}) return 0;  /* path constraint: F is continuous */
     if (k < 0 || k >= {NSW}) return 1;
-    for (int i = 0; i < {NSW}; ++i) arc_after[i] = arc[i];
+    for (int i = 0; i < {NM}; ++i) arc_after[i] = arc[i];
     arc_after[k] = !arc[k];
     rc = {P}rhs_arc(t, y, p, arc, Fm);
     if (rc) return rc;
@@ -392,8 +439,8 @@ int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int
         # No switches: keep the symbol so callers link, but nothing can jump.
         stm = stm.split(f"int {P}stm_jump")[0] + (
             f"int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int with_p) {{\n"
-            "    (void)k; (void)t; (void)y; (void)p; (void)arc; (void)with_p;\n"
-            "    return 1;\n}\n")
+            "    (void)t; (void)y; (void)p; (void)arc; (void)with_p;\n"
+            f"    return (k >= 0 && k < {NM}) ? 0 : 1;\n}}\n")
     source = "\n".join([
         f"/* Generated by auto-optimal-control for problem {pmp.problem.name!r}. Do not edit. */",
         "#include <math.h>",

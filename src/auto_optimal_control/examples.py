@@ -6,7 +6,7 @@ Constants are runtime parameters, so a derived system serves every value.
 
 import sympy as sp
 
-from auto_optimal_control.problem import Box, OptimalControlProblem, UnitVector
+from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint, UnitVector
 
 
 def zermelo():
@@ -123,6 +123,26 @@ def planar_low_thrust_fuel():
         control_sets=[UnitVector([ax, ay]), Box(delta, 0, 1)])
 
 
+def bryson_denham():
+    """The Bryson-Denham problem: ``min int u^2/2``, ``x'' = u``, with ``x <= l``.
+
+    From ``x = 0, v = 1`` back to ``x = 0, v = -1`` at ``t = 1``. The limit
+    ``x - l <= 0`` has order 2 and carries the penalty weight ``rho``. In closed
+    form (Bryson, Denham and Dreyfus 1963) the limit is inactive for
+    ``l >= 1/4``, touched at ``t = 1/2`` for ``1/6 <= l < 1/4``, and ridden on
+    ``[3 l, 1 - 3 l]`` with cost ``4 / (9 l)`` for ``l < 1/6``.
+
+    params: ``l, rho``.
+    """
+    t, x, v, u = sp.symbols("t x v u", real=True)
+    ell, rho = sp.symbols("l rho", positive=True)
+    return OptimalControlProblem(
+        name="bryson_denham", time=t, states=[x, v], controls=[u], params=[ell, rho],
+        dynamics=[v, u], running_cost=u ** 2 / 2, initial_state=[0, 1],
+        final_state={x: 0, v: -1}, final_time=1,
+        path_constraints=[PathConstraint(x - ell, "x_max", penalty=rho)])
+
+
 def all_examples():
     """Every example, by name (the bounded minimum-energy variant included)."""
     return {
@@ -132,4 +152,5 @@ def all_examples():
         "min_energy_bounded": double_integrator_min_energy(bounded=True),
         "soft_terminal": soft_terminal_lq(),
         "low_thrust": planar_low_thrust_fuel(),
+        "bryson_denham": bryson_denham(),
     }

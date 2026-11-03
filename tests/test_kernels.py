@@ -49,7 +49,7 @@ def test_pointwise_functions_match_numpy_reference(compiled, name):
         assert k.cost_rate(t, z, p) == pytest.approx(num.cost_rate(t, z, p), rel=1e-12, abs=1e-13)
         np.testing.assert_allclose(k.switching(t, z, p), num.switching(t, z, p), rtol=1e-12, atol=1e-13)
         # On the arc the point lies on, the arc dynamics are the dynamics.
-        arc = k.initial_arc(t, z, p) if k.N_SWITCHING else None
+        arc = k.initial_arc(t, z, p) if k.N_MODES else None
         np.testing.assert_allclose(k.rhs_arc(t, z, p, arc), k.rhs(t, z, p), rtol=1e-12, atol=1e-13)
 
         z0, zf = rng.normal(size=len(z)), rng.normal(size=len(z))
@@ -63,10 +63,10 @@ def test_pointwise_functions_match_numpy_reference(compiled, name):
 def test_derivative_kernels_match_finite_differences(compiled, name):
     pmp, _, k = compiled[name]
     rng = np.random.default_rng(4)
-    nsw = k.N_SWITCHING
+    nsw, nm = k.N_SWITCHING, k.N_MODES
     for _ in range(5):
         t, z, p = random_point(pmp, rng)
-        for arc in ([None] if nsw == 0 else [np.zeros(nsw, int), np.ones(nsw, int)]):
+        for arc in ([None] if nm == 0 else [np.zeros(nm, int), np.ones(nm, int)]):
             A = k.jacobian(t, z, p, arc)
             np.testing.assert_allclose(A, fd(lambda zz: k.rhs_arc(t, zz, p, arc), z),
                                        rtol=1e-6, atol=1e-7)
