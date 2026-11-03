@@ -29,7 +29,7 @@ from scipy.optimize import brentq
 from auto_optimal_control.build import build_kernels
 from auto_optimal_control.pontryagin import derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, UnitVector
-from shooting import continuation, guess_multipliers, solve
+from auto_optimal_control.shooting import ShootingError, SingleShooting, continuation
 
 
 @dataclass
@@ -84,21 +84,13 @@ def run_brachistochrone(cache_dir=None, seed=0):
     rows = []
     rng = np.random.default_rng(seed)
     for g, xf, yf in [(9.81, 1.0, 1.0), (9.81, 2.0, 0.5), (1.0, 1.0, 2.0)]:
-        p = [g, xf, yf]
-        x0 = np.zeros(3)
-        for _ in range(100):
-            lam0 = rng.uniform(-1, 1, 3)
-            tf = rng.uniform(0.2, 3.0)
-            try:
-                nu = guess_multipliers(k, x0, lam0, p, tf=tf)
-            except (RuntimeError, ValueError, np.linalg.LinAlgError):
-                continue
-            v, err, _ = solve(k, x0, p, np.concatenate([lam0, nu, [tf]]))
-            if err < 1e-10:
-                break
-        rows.append(Result("brachistochrone", f"t_f (g={g}, x_f={xf}, y_f={yf})", v[-1],
+        shoot = SingleShooting(k, [g, xf, yf])
+        sol, _ = shoot.multistart(
+            lambda rng: shoot.guess_multipliers(rng.uniform(-1, 1, 3), tf=rng.uniform(0.2, 3.0)),
+            n_tries=100, seed=rng)
+        rows.append(Result("brachistochrone", f"t_f (g={g}, x_f={xf}, y_f={yf})", sol.tf,
                            brachistochrone_exact(g, xf, yf), "closed form (cycloid)", 1e-10,
-                           time.perf_counter() - start, {"residual": err}))
+                           time.perf_counter() - start, {"residual": sol.residual_norm}))
     return rows
 
 
@@ -127,17 +119,14 @@ def orbit_raising_problem():
 def run_orbit_raising(cache_dir=None, seed=0):
     start = time.perf_counter()
     k = _kernels(orbit_raising_problem(), cache_dir)
-    p, x0 = ORBIT_PARAMS, np.array([1.0, 0.0, 0.0, 1.0])
-    rng = np.random.default_rng(seed)
-    for tries in range(1, 201):
-        lam0 = rng.uniform(-2, 2, 4)
-        v, err, _ = solve(k, x0, p, np.concatenate([lam0, guess_multipliers(k, x0, lam0, p)]))
-        if err < 1e-10:
-            break
-    r = k.propagate(0.0, np.concatenate([x0, v[:4]]), p[-1], p)
+    shoot = SingleShooting(k, ORBIT_PARAMS)
+    sol, tries = shoot.multistart(lambda rng: shoot.guess_multipliers(rng.uniform(-2, 2, 4)),
+                                  n_tries=200, seed=seed)
+    r = k.propagate(sol.t0, sol.z0, sol.tf, ORBIT_PARAMS)
     return [Result("orbit_raising", "r(t_f)", r["z"][0], 1.5252775945,
                    "YAPSS orbit-raising example (IPOPT); Bryson & Ho 1975 pp. 66-69 give 1.525",
-                   1e-6, time.perf_counter() - start, {"residual": err, "random guesses": tries})]
+                   1e-6, time.perf_counter() - start,
+                   {"residual": sol.residual_norm, "random guesses": tries})]
 
 
 # =============================================================================
@@ -193,21 +182,17 @@ def run_earth_mars(cache_dir=None, seed=0):
     M = MARS
     x0 = np.concatenate([M["rE"], M["vE"], [1.0]])
     base = [M["mu"], M["T"], M["c"], M["tf"], *x0, *M["rM"], *M["vM"]]
-    rng = np.random.default_rng(seed)
-    for tries in range(1, 201):                     # costates in [0, 1], as in the paper
-        lam0 = rng.uniform(0, 1, 7)
-        v, err, _ = solve(kh, x0, base + [1.0], np.concatenate(
-            [lam0, guess_multipliers(kh, x0, lam0, base + [1.0])]))
-        if err < 1e-10:
-            break
+    energy = SingleShooting(kh, base + [1.0])
+    sol, tries = energy.multistart(        # costates in [0, 1], as in the paper
+        lambda rng: energy.guess_multipliers(rng.uniform(0, 1, 7)), n_tries=200, seed=seed)
 
     def at(eps, guess):
-        v, err, _ = solve(kh, x0, base + [eps], guess)
-        return v, err
+        return SingleShooting(kh, base + [eps]).solve(guess, tol=1e-9)
 
-    path = continuation(at, 1.0, [0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 1e-3, 1e-4], v)
-    v, err, _ = solve(kf, x0, base, path[-1][1])
-    r = kf.propagate(0.0, np.concatenate([x0, v[:7]]), M["tf"], base, cost=True)
+    path = continuation(at, 1.0, [0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 1e-3, 1e-4], sol.v)
+    sol = SingleShooting(kf, base).solve(path[-1][1].v)
+    err = sol.residual_norm
+    r = kf.propagate(sol.t0, sol.z0, sol.tf, base, cost=True)
     days = r["switch_times"] * TU / 86400.0
     return [Result("earth_mars", "m(t_f) [kg]", r["z"][6] * M["m0"], 603.935,
                    "arXiv:2409.01490 Table 2 (HTS/L2 smoothing, rho = 1e-5)", 2e-5,
@@ -248,27 +233,21 @@ def run_robot_arm(cache_dir=None, seed=0):
     start = time.perf_counter()
     kh = _kernels(robot_arm_problem(True), cache_dir)
     kb = _kernels(robot_arm_problem(False), cache_dir)
-    x0 = np.array([4.5, 0.0, np.pi / 4, 0.0, 0.0, 0.0])
-    rng = np.random.default_rng(seed)
-    for tries in range(1, 301):
-        lam0 = rng.uniform(-1, 1, 6) * 10 ** rng.uniform(-1, 1, 6)
-        tf = rng.uniform(5, 15)
-        try:
-            nu = guess_multipliers(kh, x0, lam0, [5.0, 1.0], tf=tf)
-        except (RuntimeError, ValueError, np.linalg.LinAlgError):
-            continue
-        v, err, _ = solve(kh, x0, [5.0, 1.0], np.concatenate([lam0, nu, [tf]]))
-        if err < 1e-10:
-            break
+    smooth = SingleShooting(kh, [5.0, 1.0])
+    sol, tries = smooth.multistart(
+        lambda rng: smooth.guess_multipliers(rng.uniform(-1, 1, 6) * 10 ** rng.uniform(-1, 1, 6),
+                                             tf=rng.uniform(5, 15)),
+        n_tries=300, seed=seed)
 
     def at(eps, guess):
-        v, err, _ = solve(kh, x0, [5.0, eps], guess)
-        return v, err
+        return SingleShooting(kh, [5.0, eps]).solve(guess, tol=1e-9)
 
-    path = continuation(at, 1.0, [0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 3e-3, 1e-3, 3e-4, 1e-4], v)
-    v, err, _ = solve(kb, x0, [5.0], path[-1][1])
-    r = kb.propagate(0.0, np.concatenate([x0, v[:6]]), v[-1], [5.0])
-    return [Result("robot_arm", "t_f", v[-1], 9.1409,
+    path = continuation(at, 1.0, [0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 3e-3, 1e-3, 3e-4, 1e-4],
+                        sol.v)
+    sol = SingleShooting(kb, [5.0]).solve(path[-1][1].v)
+    err = sol.residual_norm
+    r = kb.propagate(sol.t0, sol.z0, sol.tf, [5.0])
+    return [Result("robot_arm", "t_f", sol.tf, 9.1409,
                    "COPS robot arm; GAMS NOA / PROPT (nh = 800 discretization)", 2e-5,
                    time.perf_counter() - start,
                    {"residual": err, "random guesses": tries, "continuation steps": len(path),
@@ -381,14 +360,15 @@ def costates_from_direct(t, X, U, p):
 def run_cart_pole(cache_dir=None, seed=0, n_random=400):
     start = time.perf_counter()
     k = _kernels(cart_pole_problem(), cache_dir)
-    p, x0 = CART_POLE_PARAMS, np.zeros(4)
+    p = CART_POLE_PARAMS
+    shoot = SingleShooting(k, p)
 
     def polish(lam0):
-        v, err, _ = solve(k, x0, p, np.concatenate([lam0, guess_multipliers(k, x0, lam0, p)]))
-        z0 = np.concatenate([x0, v[:4]])
-        r = k.propagate(0.0, z0, p[6], p, cost=True)
-        tr = k.trajectory(0.0, z0, p[6], p, n_points=2001)
-        return v, err, r["cost"], float(np.abs(tr["z"][:, 0]).max()), float(np.abs(tr["u"]).max())
+        sol = shoot.solve(shoot.guess_multipliers(lam0))
+        r = k.propagate(sol.t0, sol.z0, sol.tf, p, cost=True)
+        tr = shoot.trajectory(sol.v, n_points=2001)
+        return (sol.v, sol.residual_norm, r["cost"], float(np.abs(tr["z"][:, 0]).max()),
+                float(np.abs(tr["u"]).max()))
 
     # 1) The published extremal: Kelly's direct method, then the indirect polish.
     t, X, U, J_direct = cart_pole_direct(p)
@@ -409,7 +389,7 @@ def run_cart_pole(cache_dir=None, seed=0, n_random=400):
         lam0 = rng.uniform(-60, 60, 4)
         try:
             v, err, J, xmax, umax = polish(lam0)
-        except (RuntimeError, ValueError, np.linalg.LinAlgError):
+        except (ShootingError, RuntimeError, ValueError, np.linalg.LinAlgError):
             continue
         if err < 1e-10:
             key = round(J, 6)

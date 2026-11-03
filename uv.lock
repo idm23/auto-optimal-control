@@ -19,6 +19,12 @@ dependencies = [
     { name = "sympy" },
 ]
 
+[package.optional-dependencies]
+shooting = [
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -31,9 +37,11 @@ requires-dist = [
     { name = "cython", specifier = ">=3.0" },
     { name = "fast-numerical-integration", specifier = ">=0.2" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "scipy", marker = "extra == 'shooting'", specifier = ">=1.13" },
     { name = "setuptools", specifier = ">=77" },
     { name = "sympy", specifier = ">=1.12" },
 ]
+provides-extras = ["shooting"]
 
 [package.metadata.requires-dev]
 dev = [
