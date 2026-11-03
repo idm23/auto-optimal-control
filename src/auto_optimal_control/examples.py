@@ -121,3 +121,15 @@ def planar_low_thrust_fuel():
                               vx ** 2 + vy ** 2 - mu / rf],
         final_time=tf,
         control_sets=[UnitVector([ax, ay]), Box(delta, 0, 1)])
+
+
+def all_examples():
+    """Every example, by name (the bounded minimum-energy variant included)."""
+    return {
+        "zermelo": zermelo(),
+        "min_time": double_integrator_min_time(),
+        "min_energy": double_integrator_min_energy(),
+        "min_energy_bounded": double_integrator_min_energy(bounded=True),
+        "soft_terminal": soft_terminal_lq(),
+        "low_thrust": planar_low_thrust_fuel(),
+    }
