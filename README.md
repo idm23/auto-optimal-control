@@ -19,7 +19,9 @@ extremal: pick `lambda(t_0)` and get the optimal trajectory, its controls,
 its cost, its switch times, its boundary residuals and, if you want them,
 exact sensitivities. The package doesn't decide how `lambda(t_0)` is chosen.
 Shooting, multiple shooting, continuation, or a learned sampler that proposes
-costates can all be built on top of the same calls.
+costates can all be built on top of the same calls. One such layer ships with
+the package, optionally: `auto_optimal_control.shooting`, a single-shooting
+system with exact Jacobians and a solver.
 
 ## Installation
 
@@ -120,6 +122,34 @@ own; they depend only on `<math.h>`.
 pure-Python reference (lambdified with SymPy); the kernel tests compare
 against it.
 
+## Single shooting (optional)
+
+`auto_optimal_control.shooting` turns the forward map into a square system
+`R(v) = 0`. Nothing else in the package imports it. The unknowns `v` are
+the free initial states, `lam0`, the terminal multipliers `nu`, and `t_f`
+when it is free. The Jacobian is exact: the generated boundary Jacobians
+chained with the STM, with the jumps at switches included.
+
+```python
+from auto_optimal_control.shooting import SingleShooting, continuation
+
+shoot = SingleShooting(k, params)              # x0 defaults to the problem's
+v = shoot.guess_multipliers(lam0, tf=2.0)      # least-squares nu for this lam0
+R, dR = shoot.residual_jacobian(v)             # NumPy only: drive it with anything
+sol = shoot.solve(v)                           # MINPACK hybr / lm, needs SciPy
+sol.success, sol.lam0, sol.tf, sol.z0
+```
+
+- **`multistart(sample, n_tries)`** solves from random guesses until one
+  converges.
+- **`continuation(solve_at, start, values, v0)`** follows a homotopy
+  parameter. It halves the step whenever a solve fails.
+- **`trajectory(v)`** samples the extremal at `v`.
+
+`solve` needs SciPy: `pip install auto-optimal-control[shooting]`. The
+residual and Jacobian need only NumPy, so a sampler or any other solver can
+use them directly.
+
 ## Defining a problem
 
 `OptimalControlProblem` is in Bolza form:
@@ -195,7 +225,10 @@ planar low-thrust transfer.
   above.
 - **`test_jacobian_chain.py`:** a bare Newton iteration built from the
   kernels converges quadratically, which shows the derivatives compose into
-  an exact Jacobian. It lives only in the tests; the package has no solver.
+  an exact Jacobian, using the raw kernels rather than the shooting module.
+- **`test_shooting.py`:** `SingleShooting`'s unknown layout, its Jacobian
+  against finite differences (including a free initial state), solves
+  against closed forms, multistart and continuation.
 
 ## Benchmarks against the literature
 
@@ -204,8 +237,7 @@ indirect solution with a published value. It starts from random costate
 guesses, uses continuation where needed, and for the cart-pole lifts
 costates from a direct solution. Run them with
 `uv run python benchmarks/run.py`; `uv run pytest --runslow`, which CI runs,
-checks them too. The small single-shooting harness they use
-(`benchmarks/shooting.py`) belongs to the benchmarks, not the package.
+checks them too. They are solved with `auto_optimal_control.shooting`.
 
 | Benchmark | Quantity | This package | Reference | Source |
 |---|---|---|---|---|
@@ -278,8 +310,9 @@ to a local FNI checkout (here a sibling directory):
    many-revolution transfers (Earth–Dionysus, GTO–GEO), and minimum-time
    attitude slews.
 5. Ways to choose initial costates, as separate optional layers on top of the
-   forward map: for example learned samplers of the costate space, shooting
-   and continuation.
+   forward map: ~~single shooting and continuation~~; next, gradient-free
+   search (PSO, differential evolution) and learned samplers of the costate
+   space.
 
 ## License
 
