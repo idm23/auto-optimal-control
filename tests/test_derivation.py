@@ -156,15 +156,7 @@ def test_derivation_errors():
 # Generic properties on every example, at random points
 # ---------------------------------------------------------------------------
 
-def _all_examples():
-    return {
-        "zermelo": examples.zermelo(),
-        "min_time": examples.double_integrator_min_time(),
-        "min_energy": examples.double_integrator_min_energy(),
-        "min_energy_bounded": examples.double_integrator_min_energy(bounded=True),
-        "soft_terminal": examples.soft_terminal_lq(),
-        "low_thrust": examples.planar_low_thrust_fuel(),
-    }
+_all_examples = examples.all_examples
 
 
 @pytest.fixture(scope="module")

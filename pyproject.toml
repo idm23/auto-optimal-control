@@ -19,9 +19,13 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
+# Cython and setuptools compile the generated kernels at runtime (with the
+# system C compiler).
 dependencies = [
+    "cython>=3.0",
     "fast-numerical-integration>=0.2",
     "numpy>=2.0",
+    "setuptools>=77",
     "sympy>=1.12",
 ]
 
@@ -35,6 +39,9 @@ dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+auto_optimal_control = ["wrapper_template.pyx"]
 
 # Co-developing with a local checkout of fast-numerical-integration: see
 # "Developing against a local fast-numerical-integration" in the README.
