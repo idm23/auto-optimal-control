@@ -35,7 +35,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cython", specifier = ">=3.0" },
-    { name = "fast-numerical-integration", specifier = ">=0.2" },
+    { name = "fast-numerical-integration", specifier = ">=0.3" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "scipy", marker = "extra == 'shooting'", specifier = ">=1.13" },
     { name = "setuptools", specifier = ">=77" },
@@ -98,7 +98,7 @@ wheels = [
 
 [[package]]
 name = "fast-numerical-integration"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -106,16 +106,16 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/0b/33069684f1db776d555b3ac66bb910163855d36d22c6e6ca4d5f78a60932/fast_numerical_integration-0.2.0.tar.gz", hash = "sha256:19e601f62dd3dd2cb598d2358de8f40380532d4db5edc25c8df875c98fefcd21", size = 113212, upload-time = "2026-11-02T23:26:24.892Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/7a/d7a2c8870207bf9f886b1713346534ced05614e8548f778653b39ec2e812/fast_numerical_integration-0.3.0.tar.gz", hash = "sha256:fda24eeab019738b7e9fca3056bb80ae20908e40b6cf54475f8a9b25dd243f3d", size = 124944, upload-time = "2026-11-03T16:16:39.292Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/f0/8143537ff67aa03f00dae06e5c12fbe8f0ebb0aeddd6b0e9ea3cbba41c48/fast_numerical_integration-0.2.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:1393f14c00ad87a43c0c2cd6c0b002cee90d15a0f1919dc7b89617169af7a4c2", size = 593901, upload-time = "2026-11-02T23:26:12.485Z" },
-    { url = "https://files.pythonhosted.org/packages/01/2d/8ddd57f6dc3d5454b9eccadef3065a93edb1c4194e5b749161f15501ede7/fast_numerical_integration-0.2.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4e2f5c78eb245b95df053764c0fc7e4b4c551cab95919dc208a60ec70d4850aa", size = 3629355, upload-time = "2026-11-02T23:26:14.009Z" },
-    { url = "https://files.pythonhosted.org/packages/9b/6f/af26f714efd06676a4f57e1b8aba1b3e00ade3de8d6d2b4704569754db45/fast_numerical_integration-0.2.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:19f7fbfff463afc3a7a352b42b59df2442b634d93142da70749f3e3bda2ccf3b", size = 599262, upload-time = "2026-11-02T23:26:15.707Z" },
-    { url = "https://files.pythonhosted.org/packages/4c/12/d5e975216120ef4e94ab5cd94feb4decee4a68e76850af91976edc2cb81e/fast_numerical_integration-0.2.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8016096c1ffef4a200daa4c7f9a04fe1ac2e496d0a8949b22b63f90f205f748f", size = 3605973, upload-time = "2026-11-02T23:26:17.085Z" },
-    { url = "https://files.pythonhosted.org/packages/4a/61/c4e429e8407c9da56ce1e5c6a846ea66f8b394179d6315c8c22599b8b419/fast_numerical_integration-0.2.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:f6c2d870de8d0bf79031572cba4fbee7349078b04a2df1316eae6dcd4c356fae", size = 598575, upload-time = "2026-11-02T23:26:18.844Z" },
-    { url = "https://files.pythonhosted.org/packages/78/be/6fc1968e01b7a4d401a06febcf8bd5e87f7556349a59a4a9c847257245a3/fast_numerical_integration-0.2.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d9ab9186fb1ff575c5a455336b214dc9a7632921be741b21f96ce7d864098de2", size = 3578880, upload-time = "2026-11-02T23:26:20.266Z" },
-    { url = "https://files.pythonhosted.org/packages/07/69/25dcbd25dfdca07df381f8a2efe0588c60f57a214f699a14ebe618da234f/fast_numerical_integration-0.2.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:d7916f55b6f6d9280f73c627988e3a0c4adbff8a149eabc9a57a51e03d89101e", size = 600830, upload-time = "2026-11-02T23:26:22.097Z" },
-    { url = "https://files.pythonhosted.org/packages/24/bd/8bbf61e89a5fb1a4fdf7eac0bfe087940271eff782a96792ad1b40973d79/fast_numerical_integration-0.2.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:41105eabfe42fc6dfe60dc5882d0110cbfc3bcaadc803cd16f3071bd7a365314", size = 3546510, upload-time = "2026-11-02T23:26:23.48Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/82/59b0cb939bd83d3ffe6ae1a9256e311f77fa70ae0b3d680e22f0c86efbfe/fast_numerical_integration-0.3.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:a4eda7c20d7c821246ec14101de1baec34aa3a361554d1b8e6b6c1d36ac8e64d", size = 629887, upload-time = "2026-11-03T16:16:26.398Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/22/09647139749411394edb8c3dc2380ab10da98c7d9017a4a120833e6a63e5/fast_numerical_integration-0.3.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:db485606eabe6570962f27a197db4710a98064c290031cb233670769d4c133f5", size = 3850504, upload-time = "2026-11-03T16:16:28.091Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/bd/de7bbae4675e3a1627502d22e185e5e43a5eb2e2efc8f5ff5d3fd7c2d387/fast_numerical_integration-0.3.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e27076bf29a8e41c3828021f07cb52ee49eacd12e907b54ed54d9182643842f6", size = 634913, upload-time = "2026-11-03T16:16:29.62Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/59/8145e9f604d43b38a0f8161f6cb472c9f4523fe14fb325048822eb083d7d/fast_numerical_integration-0.3.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:aeccc52c36f47a266c15e6e15d18467a29e506846d1ddcf544dcbde45b1e4dbd", size = 3829535, upload-time = "2026-11-03T16:16:31.084Z" },
+    { url = "https://files.pythonhosted.org/packages/40/90/3e22bb470c64224e80b77478f49ba2579d1ab54855965e0b22c2e455b998/fast_numerical_integration-0.3.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:8c9fd509b2ada7641d79b2b9d4a27f61082de9e6ee250f3d39196cc9638bbd83", size = 634316, upload-time = "2026-11-03T16:16:32.628Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/c2/75310eeb6dcf31950031cdfd4a3fb93f444b110cf35dc3164f11f94022d2/fast_numerical_integration-0.3.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:25b37e0676b8877f3a6fd044478bfbe27e207f00f933286252ab945260bd28d9", size = 3813533, upload-time = "2026-11-03T16:16:34.322Z" },
+    { url = "https://files.pythonhosted.org/packages/11/6f/ef551679a178a4c946d66becfbac2f621a787cfac7439dfb91bdbb638d9c/fast_numerical_integration-0.3.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:febc9c59f022e74019b44daf9dc9d13dd5817bb8ca822bd1dbec8f411a578798", size = 637530, upload-time = "2026-11-03T16:16:35.822Z" },
+    { url = "https://files.pythonhosted.org/packages/97/93/78a237262ea2e0c68d2b0da3baa1e1ea4775fb729ee9c62c72f3830885d6/fast_numerical_integration-0.3.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:520d9b86f3573dc7d5377af35e221a19be9d8820e52a1eca4a0fa04fafbce026", size = 3769009, upload-time = "2026-11-03T16:16:37.33Z" },
 ]
 
 [[package]]

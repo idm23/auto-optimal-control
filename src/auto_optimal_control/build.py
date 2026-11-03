@@ -30,7 +30,7 @@ import numpy as np
 
 import fast_numerical_integration
 from auto_optimal_control.codegen import c_identifier, generate_c
-from fast_numerical_integration.integrators import solve_ivp
+from fast_numerical_integration.integrators import solve_hybrid
 
 _TEMPLATE = Path(__file__).with_name("wrapper_template.pyx")
 
@@ -238,12 +238,14 @@ class Kernels:
                 for k in range(self.module.N_SWITCHING)]
 
     def trajectory(self, t0, z0, t1, params=None, *, t_eval=None, n_points=201, arc=None,
-                   method="DOP853", rtol=1e-10, atol=1e-12):
+                   method="DOP853", rtol=1e-10, atol=1e-12, max_switches=10000):
         """The extremal from ``z0``, sampled: states, costates, controls and ``H``.
 
-        Integrates arc by arc like :func:`propagate` (FNI ``solve_ivp`` on
-        :class:`ArcDynamics`, stopping at each switch), then samples the dense
-        output at ``t_eval`` (default: ``n_points`` evenly spaced times).
+        Integrates like :func:`propagate`, as one FNI hybrid integration
+        (``solve_hybrid`` on :class:`ArcDynamics`, with each switching
+        function a guard whose reset map flips the arc). Then it samples the
+        piecewise dense output at ``t_eval`` (default: ``n_points`` evenly
+        spaced times).
 
         Returns a dict with ``t``, ``z`` (len, NZ), ``u`` (len, NU), ``H``
         (len,), ``switch_times``, ``switch_index`` and ``status``.
@@ -253,38 +255,24 @@ class Kernels:
         p = None if params is None else np.asarray(params, dtype=float)
         z = np.asarray(z0, dtype=float)
         arc = mod.initial_arc(t0, z, p) if arc is None else np.asarray(arc, dtype=np.intc)
-        segments, switch_t, switch_k = [], [], []
-        t, status = float(t0), 0
-        while True:
-            events = [mod.Switching(k, p, True, 1.0 if arc[k] else -1.0) for k in range(nsw)]
-            sol = solve_ivp(mod.ArcDynamics(p, arc if nsw else None), (t, t1), z, method=method,
-                            events=events or None, dense_output=True, rtol=rtol, atol=atol)
-            segments.append((t, sol.t[-1], sol.sol, arc.copy()))
-            status = sol.status
-            if sol.status != 1:
-                break
-            k = next(k for k in range(nsw) if len(sol.t_events[k]))
-            t, z = sol.t[-1], sol.y[:, -1]
-            switch_t.append(t)
-            switch_k.append(k)
-            arc = arc.copy()
-            arc[k] = 1 - arc[k]
-            if t == t1:
-                status = 0
-                break
+        dynamics = mod.ArcDynamics(p, arc if nsw else None)
+
+        def flip(k, t, y):
+            a = dynamics.arc
+            a[k] = 1 - a[k]
+            dynamics.arc = a
+            return y
+
+        events = [mod.Switching(k, p, True, 0.0) for k in range(nsw)]
+        sol = solve_hybrid(dynamics, (t0, t1), z, events or None, flip if nsw else None,
+                           method=method, dense_output=True, rtol=rtol, atol=atol,
+                           max_resets=max_switches)
         if t_eval is None:
             t_eval = np.linspace(t0, t1, n_points)
         t_eval = np.asarray(t_eval, dtype=float)
-        forward = t1 >= t0
-        Z = np.zeros((len(t_eval), mod.N_Z))
-        U = np.zeros((len(t_eval), mod.N_CONTROLS))
-        H = np.zeros(len(t_eval))
-        for i, ti in enumerate(t_eval):
-            for a, b, dense, seg_arc in segments:
-                if (a <= ti <= b) if forward else (b <= ti <= a):
-                    Z[i] = dense(ti)
-                    break
-            U[i] = mod.control(ti, Z[i], p)
-            H[i] = mod.hamiltonian(ti, Z[i], p)
-        return {"t": t_eval, "z": Z, "u": U, "H": H, "switch_times": np.array(switch_t),
-                "switch_index": np.array(switch_k, dtype=np.intp), "status": status}
+        Z = sol.sol(t_eval).T.reshape(len(t_eval), mod.N_Z)
+        U = np.array([mod.control(ti, zi, p) for ti, zi in zip(t_eval, Z)]).reshape(
+            len(t_eval), mod.N_CONTROLS)
+        H = np.array([mod.hamiltonian(ti, zi, p) for ti, zi in zip(t_eval, Z)])
+        return {"t": t_eval, "z": Z, "u": U, "H": H, "switch_times": sol.t_resets,
+                "switch_index": sol.reset_events.astype(np.intp), "status": sol.status}

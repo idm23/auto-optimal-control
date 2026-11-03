@@ -90,9 +90,11 @@ if set. Building needs a C compiler.
 | `k.trajectory(t0, z0, t1, params, n_points=)` | sampled `t`, `z`, controls `u` and `H`, for plots and diagnostics |
 | `k.z0(lam0, params)` | `[x0, lam0]` from the problem's fixed initial state |
 
-Propagation runs **arc by arc**: it stops at each bang-bang switch and
-restarts with the control fixed, so no integration step straddles the jump
-in the control. The STM gets the saltation-matrix jump at every switch.
+Propagation runs **arc by arc**, as one FNI hybrid integration
+(`fni_integrate_hybrid`, FNI >= 0.3). Each switching function is a guard,
+located to round-off, and its reset map applies the saltation-matrix jump to
+the STM and flips the arc. No integration step straddles the jump in the
+control, and the step size carries across switches.
 
 **Pointwise kernels:** `rhs`, `rhs_arc`, `jacobian` (`dF/dz`), `dfdp`,
 `control`, `hamiltonian`, `cost_rate`, `switching`, `switching_gradient`,
