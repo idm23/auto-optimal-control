@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   test:
-    name: pytest (Python ${{ matrix.python-version }})
+    name: pytest --runslow (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -36,8 +36,8 @@ jobs:
       - name: Install project
         run: uv sync --locked
 
-      - name: Run tests
-        run: uv run pytest -ra
+      - name: Run tests, including the literature benchmarks
+        run: uv run pytest --runslow -ra
 
   # Single, stable status check to require in branch protection.
   all-tests:

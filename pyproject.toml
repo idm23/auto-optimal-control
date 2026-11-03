@@ -35,7 +35,7 @@ Repository = "https://github.com/idm23/auto-optimal-control"
 Issues = "https://github.com/idm23/auto-optimal-control/issues"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "scipy>=1.13"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -50,3 +50,4 @@ auto_optimal_control = ["wrapper_template.pyx"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
+markers = ["slow: literature benchmarks (run with --runslow)"]
