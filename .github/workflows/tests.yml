@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      # fast-numerical-integration comes from PyPI (pinned in uv.lock), as a
+      # pre-built wheel.
+      - name: Install project
+        run: uv sync --locked
+
+      - name: Run tests
+        run: uv run pytest -ra
+
+  # Single, stable status check to require in branch protection.
+  all-tests:
+    name: all-tests
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every matrix job to pass
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Test matrix result: ${{ needs.test.result }}"
+            exit 1
+          fi

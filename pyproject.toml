@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auto-optimal-control"
+version = "0.1.0"
+description = "Symbolic indirect (Pontryagin) optimal control: from dynamics and cost to every function a two-point BVP solver needs"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ian Mackey" }]
+requires-python = ">=3.11"
+keywords = ["optimal-control", "pontryagin", "costate", "indirect-method", "bvp", "sympy", "bang-bang"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "fast-numerical-integration>=0.2",
+    "numpy>=2.0",
+    "sympy>=1.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/idm23/auto-optimal-control"
+Repository = "https://github.com/idm23/auto-optimal-control"
+Issues = "https://github.com/idm23/auto-optimal-control/issues"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Co-developing with a local checkout of fast-numerical-integration: see
+# "Developing against a local fast-numerical-integration" in the README.
+# Do not commit an uncommented [tool.uv.sources] entry; CI installs from PyPI.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
