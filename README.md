@@ -169,7 +169,7 @@ planar low-thrust transfer.
 
 ## Tests
 
-`uv run pytest` (about 30 s; it compiles every example from scratch) checks:
+`uv run pytest` (about 30 s; it compiles every example from scratch) checks the following; `uv run pytest --runslow` (about 3 min) adds the benchmarks:
 
 - **`test_problem.py`:** problem validation.
 - **`test_derivation.py`:** each example's Hamiltonian, control law,
@@ -191,9 +191,48 @@ planar low-thrust transfer.
     switches.
   - Leaving out the jump gives the wrong STM.
   - Batches equal single propagations, and threads agree with serial runs.
+- **`test_benchmarks.py`** (slow; `--runslow`): every literature benchmark
+  above.
 - **`test_jacobian_chain.py`:** a bare Newton iteration built from the
   kernels converges quadratically, which shows the derivatives compose into
   an exact Jacobian. It lives only in the tests; the package has no solver.
+
+## Benchmarks against the literature
+
+`benchmarks/` solves five canonical problems from scratch and compares each
+indirect solution with a published value. It starts from random costate
+guesses, uses continuation where needed, and for the cart-pole lifts
+costates from a direct solution. Run them with
+`uv run python benchmarks/run.py`; `uv run pytest --runslow`, which CI runs,
+checks them too. The small single-shooting harness they use
+(`benchmarks/shooting.py`) belongs to the benchmarks, not the package.
+
+| Benchmark | Quantity | This package | Reference | Source |
+|---|---|---|---|---|
+| Brachistochrone (3 cases) | `t_f` | matches to 1e-13 | closed-form cycloid | — |
+| Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
+| Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
+| COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
+| Cart-pole swing-up (published extremal) | `∫u²` | 58.807667 | 58.80819 | Kelly (2017) SIAM Review; value from the ASSET reproduction |
+| Cart-pole swing-up (random search) | `∫u²` | **57.944780** | — | this work; checked by an independent simulation |
+
+Notes:
+- **The reference values come from direct (collocation) methods or smoothed
+  controls,** so agreement to 1e-6–1e-5 is what to expect. The indirect
+  solutions here locate switches exactly. On Earth–Mars, the exact bang-bang
+  solution keeps 0.005 kg more mass than the smoothed one (ρ = 1e-5), which is
+  the expected sign. It has four switches, at 46.6, 68.0, 142.7 and 290.3 days.
+- **Robot arm:** pure bang-bang with five switches, found by continuation
+  from `L = 1 + ε Σu²` (saturated controls) to ε = 1e-4, then solved exactly.
+  The `u_θ` switch falls at `t_f/2`, by the problem's symmetry.
+- **Cart-pole:** Kelly's direct method from his straight-line guess converges
+  to an extremal where the cart overshoots to `x = 1.18`, with `J = 58.808`.
+  Polishing it indirectly reproduces the published value. Random costate
+  search finds a different extremal that never passes `x = 1`, with
+  `J = 57.945`, 1.5% cheaper. Driving SciPy's integrator on Kelly's equations
+  with that control history confirms it reaches the target with that cost.
+  Indirect search over costate space found a better local optimum than the
+  published one.
 
 ## Limitations
 
@@ -234,8 +273,10 @@ to a local FNI checkout (here a sibling directory):
 1. ~~Symbolic problem definition and Pontryagin derivation~~
 2. ~~Generated C kernels, compiled and wrapped for FNI~~
 3. ~~State transition matrix, with jumps at switches; parameter sensitivities~~
-4. Problems that matter: low-thrust transfers in modified equinoctial
-   elements, the energy-to-fuel homotopy.
+4. ~~Literature benchmarks: orbit raising, Earth–Mars, COPS robot arm,
+   cart-pole, brachistochrone~~. Next: modified equinoctial elements and
+   many-revolution transfers (Earth–Dionysus, GTO–GEO), and minimum-time
+   attitude slews.
 5. Ways to choose initial costates, as separate optional layers on top of the
    forward map: for example learned samplers of the costate space, shooting
    and continuation.

@@ -87,9 +87,19 @@ def c_identifier(name):
     return ident
 
 
+def _abs(a):
+    return sp.Piecewise((a, a >= 0), (-a, True))
+
+
 def _smooth(expr):
-    """Min/Max (saturated controls) as Piecewise, so they differentiate and print."""
+    """Min/Max (saturated controls) and Abs as Piecewise, so they differentiate and print.
+
+    SymPy differentiates ``Abs`` through ``re``/``im`` unless it can prove the
+    argument real; as a Piecewise its derivative is the plain ``sign(a) a'``.
+    """
     expr = sp.sympify(expr)
+    if expr.has(sp.Abs):
+        expr = expr.replace(sp.Abs, _abs)
     if expr.has(sp.Min, sp.Max):
         expr = expr.rewrite(sp.Piecewise)
     return expr
