@@ -331,6 +331,9 @@ limit) and a velocity-limited move (an order-1 limit).
   - Batches equal single propagations, and threads agree with serial runs.
 - **`test_benchmarks.py`** (slow; `--runslow`): every literature benchmark
   above.
+- **`test_visuals.py`** (slow; skipped without matplotlib): records each
+  animated solve (cart-pole, Earth–Mars, Bryson–Denham), checks that its
+  stages end where the benchmark does, and renders a small GIF and the stills.
 - **`test_jacobian_chain.py`:** a bare Newton iteration built from the
   kernels converges quadratically, which shows the derivatives compose into
   an exact Jacobian, using the raw kernels rather than the shooting module.
@@ -393,6 +396,50 @@ Notes:
   with that control history confirms it reaches the target with that cost.
   Indirect search over costate space found a better local optimum than the
   published one.
+
+### Watching the solves
+
+`benchmarks/animate.py` records how a benchmark is solved and renders it as
+an animation. Every frame is a recorded solver iterate. It needs the `viz`
+dependency group, plus ffmpeg for MP4 or Pillow (included) for GIF:
+
+```bash
+uv run --group viz python benchmarks/animate.py cart_pole --stills   # outputs/cart_pole.mp4
+uv run --group viz python benchmarks/animate.py earth_mars --stills
+uv run --group viz python benchmarks/animate.py bryson_denham --stills
+uv run --group viz python benchmarks/animate.py cart_pole --reuse --out outputs/cart_pole.gif
+```
+
+Recording runs the solves (about a minute each) and saves `<out>.npz`, so
+`--reuse` re-renders without solving. The rendered videos are in
+[`docs/visuals/`](docs/visuals).
+
+- **Cart-pole** ([`cart_pole.mp4`](docs/visuals/cart_pole.mp4)):
+  1. Kelly's direct-method iterates, from a dynamically infeasible
+     straight-line guess.
+  2. Every Newton evaluation of the indirect polish. Each is a real swing-up
+     that misses the target until the residual vanishes.
+  3. Random costate search, where every converged start finds the cheaper
+     extremal.
+  4. Both extremals swinging up side by side.
+- **Earth–Mars** ([`earth_mars.mp4`](docs/visuals/earth_mars.mp4)):
+  1. Energy-optimal shooting from random costates, showing every Newton
+     evaluation of the winning start as a real flight from Earth.
+  2. The energy-to-fuel continuation, with the throttle sharpening into
+     bang-bang and the arrival mass rising.
+  3. The exact fuel-optimal flight: Earth, Mars and the spacecraft moving,
+     with the switching function deciding thrust and coast.
+- **Bryson–Denham** ([`bryson_denham.mp4`](docs/visuals/bryson_denham.mp4)),
+  for the touch regime and then the boundary-arc regime:
+  1. Penalty continuation in ρ pushing the mass back to the wall, with the
+     cost climbing to the closed form from below.
+  2. The exact multi-arc solve seeded from it, with the costate jump at the
+     contact.
+  3. Both solutions moving against their walls.
+
+| | | |
+|---|---|---|
+| ![cart-pole](docs/visuals/cart_pole_polish.png) | ![earth-mars](docs/visuals/earth_mars_flight.png) | ![bryson-denham](docs/visuals/bryson_denham_arc_exact.png) |
 
 ## Limitations
 
