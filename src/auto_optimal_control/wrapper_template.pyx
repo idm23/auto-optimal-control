@@ -611,14 +611,31 @@ cdef struct _switch_ctx:
 cdef int _flag_after(int k, double t, const double* y, _ctx* c) noexcept nogil:
     """Arc flag ``k`` just after its mode function crosses zero at ``t``.
 
-    A path constraint's flag is set from the sign of ``dg/dt`` there (1 when
-    entering the violated side), so it always matches the side the flow
-    moves to. A tangential touch (``dg/dt = 0``) flips it."""
+    The flag follows the side the flow moves to, from the sign of the mode
+    function's rate there: a path constraint's flag is 1 when ``dg/dt > 0``
+    (entering the violated side), a bang-bang flag 1 (upper bound) when
+    ``dS/dt < 0``. So a "crossing" that rounding reports where the function
+    starts at zero leaves the flag alone. A tangential zero (rate 0) flips it."""
     cdef double Gd[NC1]
+    cdef double St[NSW1]
+    cdef double Sz[NSW1 * NZ]
+    cdef double Sp[NSW1 * NP1]
+    cdef double F[NZ]
+    cdef double Sdot
+    cdef int i
     if k >= NSW and P_constraint_rate_arc(t, y, c.p, c.arc, Gd) == 0:
         if Gd[k - NSW] > 0:
             return 1
         if Gd[k - NSW] < 0:
+            return 0
+    if k < NSW and P_switching_grad(t, y, c.p, St, Sz, Sp) == 0 \
+            and P_rhs_arc(t, y, c.p, c.arc, F) == 0:
+        Sdot = St[k]
+        for i in range(NZ):
+            Sdot += Sz[k * NZ + i] * F[i]
+        if Sdot < 0:
+            return 1
+        if Sdot > 0:
             return 0
     return 1 - c.arc[k]
 
@@ -637,6 +654,8 @@ cdef int _switch_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n,
         r.too_many = 1
         return FNI_RESET_STOP
     cdef int flag = _flag_after(k, t, y, r.c)
+    if k < NSW and flag == r.c.arc[k]:
+        return FNI_RESET_CONTINUE       # already on that side: not a switch
     r.sw_t[r.n_sw[0]] = t
     r.sw_k[r.n_sw[0]] = k
     r.n_sw[0] += 1

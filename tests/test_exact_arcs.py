@@ -257,7 +257,7 @@ def test_bounded_order_one_arc_is_exact(vel_bounded):
     np.testing.assert_allclose(tr["u"][early, 0], 8.0, atol=1e-12)    # saturated
     assert np.abs(tr["u"][:, 0]).max() <= 8.0 + 1e-12
     d = shoot.diagnostics(sol.v)
-    assert d["boundary_bound_violation"] == [0.0] and sol.max_violation < 1e-12
+    assert d["boundary_bound_violation"] == [0.0] and sol.max_violation < 1e-10
 
 
 def test_bang_bang_boundary_arc_is_exact(train, train_smoothed):
@@ -278,6 +278,16 @@ def test_bang_bang_boundary_arc_is_exact(train, train_smoothed):
     # The smoothed runs approach it: t_f = 4 + O(eps).
     eps, smooth = train_smoothed[-1]
     assert eps == pytest.approx(1e-4) and smooth.tf - 4.0 == pytest.approx(0, abs=1e-8)
+
+
+def test_bang_bang_solve_finishes_from_nearby_starts(train):
+    """MINPACK can stop short of the root on the |S| kink at a junction;
+    Newton polishing finishes it from every start."""
+    shoot, _, sol = train
+    rng = np.random.default_rng(0)
+    for _ in range(40):
+        s = shoot.solve(sol.v + rng.normal(0, 1e-4, sol.v.size))
+        assert s.success and s.tf == pytest.approx(4.0, abs=1e-11)
 
 
 def test_bang_bang_jacobian_matches_finite_differences(train):

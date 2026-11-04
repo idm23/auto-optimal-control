@@ -254,7 +254,10 @@ class SingleShooting:
         x0, lam0, nu, tf = self.unpack(sol.x)
         violation = 0.0
         if self.kernels.N_CONSTRAINTS and err < tol:
-            violation = float(np.max(self.constraint_violation(sol.x)))
+            try:
+                violation = float(np.max(self.constraint_violation(sol.x)))
+            except (ShootingError, RuntimeError, ValueError):
+                err = violation = float("inf")      # the solution does not propagate again
         return ShootingSolution(v=sol.x, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
                                 residual_norm=err, success=err < tol,
                                 nfev=int(getattr(sol, "nfev", 0)), result=sol,
@@ -420,13 +423,16 @@ class MultiArcShooting(SingleShooting):
         k, p = self.kernels, self.params
         if not tb > ta:
             raise ShootingError(f"arc times out of order: {ta} then {tb}")
-        if c is None:
-            r = k.propagate(ta, z, tb, p, stm=jac, cost=cost, constraint_events=False,
-                            **self.options)
-            Fa = k.rhs_arc(ta, z, p, r["arc0"] if k.N_MODES else None)
-        else:
-            r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost, **self.options)
-            Fa = k.boundary_rhs(c, ta, z, p)
+        try:
+            if c is None:
+                r = k.propagate(ta, z, tb, p, stm=jac, cost=cost, constraint_events=False,
+                                **self.options)
+                Fa = k.rhs_arc(ta, z, p, r["arc0"] if k.N_MODES else None)
+            else:
+                r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost, **self.options)
+                Fa = k.boundary_rhs(c, ta, z, p)
+        except RuntimeError as exc:
+            raise ShootingError(f"propagation failed on [{ta}, {tb}]: {exc}") from exc
         if r["status"] != 0:
             raise ShootingError(f"propagation failed with status {r['status']}")
         if jac:
@@ -528,10 +534,40 @@ class MultiArcShooting(SingleShooting):
         or ``"lm"`` with bang-bang controls: there the control jumps at a
         junction, ``H`` continuity reads ``|S| = 0`` (a kink at the root) and
         the Broyden updates of ``"hybr"`` stall on it, while ``"lm"`` takes the
-        exact Jacobian at every step."""
+        exact Jacobian at every step. If MINPACK still stops short of ``tol``
+        there, plain Newton steps finish the solve: the exact Jacobian carries
+        the sign of ``S``, so each is Newton's step on the smooth ``S``."""
         if method is None:
             method = "lm" if self.kernels.N_SWITCHING else "hybr"
-        return super().solve(guess, method=method, tol=tol, options=options)
+        sol = super().solve(guess, method=method, tol=tol, options=options)
+        if sol.success or not self.kernels.N_SWITCHING:
+            return sol
+        v, best, steps = sol.v, sol.residual_norm, 0
+        for steps in range(1, 21):
+            try:
+                R, J = self.residual_jacobian(v)
+                w = v - np.linalg.lstsq(J, R, rcond=None)[0]
+                err = float(np.linalg.norm(self.residual(w)))
+            except (ShootingError, RuntimeError, ValueError, np.linalg.LinAlgError):
+                break
+            if not err < best:
+                break
+            v, best = w, err
+            if best < tol:
+                break
+        if best >= sol.residual_norm:
+            return sol
+        x0, lam0, nu, tf = self.unpack(v)
+        violation = 0.0
+        if best < tol:
+            try:
+                violation = float(np.max(self.constraint_violation(v)))
+            except (ShootingError, RuntimeError, ValueError):
+                best = violation = float("inf")
+        return ShootingSolution(v=v, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
+                                residual_norm=best, success=best < tol,
+                                nfev=sol.nfev + 2 * steps, result=sol.result,
+                                max_violation=violation)
 
     # -- results ------------------------------------------------------------
 

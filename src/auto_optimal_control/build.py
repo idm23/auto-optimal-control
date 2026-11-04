@@ -287,15 +287,24 @@ class Kernels:
 
         rates = [mod.ConstraintRate(c, p, arc) for c in range(nc)]
         kinks = [mod.Kink(i, p, arc, True, 0.0) for i in range(mod.N_KINKS)]
+        unchanged = []                   # resets that left the arc as it was
 
         def flip(k, t, y):
-            # As the compiled reset map: a constraint's flag follows the sign
-            # of dg/dt at the crossing, and a touch flips it. A saturation
-            # kink only restarts the step.
+            # As the compiled reset map: a flag follows the sign of its mode
+            # function's rate at the crossing, and a tangential zero flips it.
+            # A saturation kink only restarts the step.
             if k >= nsw + nc:
                 return y
             a = dynamics.arc
             flag = 1 - a[k]
+            if k < nsw:
+                # As for constraints: the side S moves to (upper where it falls).
+                St, Sz, _ = mod.switching_gradient(t, y[:mod.N_Z], p)
+                rate = St[k] + Sz[k] @ mod.rhs_arc(t, y[:mod.N_Z], p, a)
+                flag = 1 if rate < 0 else 0 if rate > 0 else flag
+                if flag == a[k]:
+                    unchanged.append((t, k))
+                    return y
             if k >= nsw:
                 rate = mod.constraint_rate(t, y[:mod.N_Z], p, a)[k - nsw]
                 flag = 1 if rate > 0 else 0 if rate < 0 else flag
@@ -344,7 +353,8 @@ class Kernels:
         times = np.zeros(0) if sol is None else np.asarray(sol.t_resets, dtype=float)
         index = (np.zeros(0, dtype=np.intp) if sol is None
                  else np.asarray(sol.reset_events, dtype=np.intp))
-        keep = index < nsw + nc          # drop the kinks
+        keep = (index < nsw + nc) & ~np.array(   # drop the kinks and the no-op resets
+            [(ti, ki) in unchanged for ti, ki in zip(times, index)], dtype=bool).reshape(-1)
         times, index = times[keep], index[keep]
         if violated:                     # a stopping reset is not recorded by FNI
             times = np.append(times, violated[0][0])
