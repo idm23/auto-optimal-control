@@ -1,6 +1,6 @@
 """Symbolic definition of an optimal control problem.
 
-The problem is
+The problem is::
 
     minimize    J = phi(t_f, x(t_f)) + integral_{t_0}^{t_f} L(t, x, u) dt
     subject to  x' = f(t, x, u)

@@ -6,6 +6,9 @@ problem: the Hamiltonian, the optimal control law, switching functions for
 bang-bang controls, the state–costate dynamics and the boundary-condition
 residuals.
 
+**Documentation:** https://idm23.github.io/auto-optimal-control/, including a
+lecture course on the indirect method built around one cart-pole.
+
 Integration runs on
 [fast-numerical-integration](https://github.com/idm23/fast-numerical-integration)
 (FNI), which this package depends on from PyPI.
