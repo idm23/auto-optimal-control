@@ -22,8 +22,11 @@ The controls are eliminated one control set at a time, in this order:
    linear in the vector, with coefficient ``b``; then ``u* = -b / ||b||``.
 2. :class:`~auto_optimal_control.problem.Box` controls. If ``H`` is linear in
    ``u`` with coefficient ``S`` (the switching function), ``u* = upper`` where
-   ``S < 0`` and ``lower`` where ``S > 0`` (bang-bang; singular arcs, where
-   ``S`` vanishes on an interval, are not handled). If ``H`` is a convex
+   ``S < 0`` and ``lower`` where ``S > 0`` (bang-bang). Where ``S`` vanishes
+   on an interval the arc is singular; ``derive(problem, singular=True)``
+   derives the singular control (see :class:`SingularArc`), which
+   :class:`~auto_optimal_control.shooting.MultiArcShooting` follows on arcs
+   the structure names. If ``H`` is a convex
    quadratic in ``u``, ``u*`` is the unconstrained minimizer clipped to the
    bounds.
 3. Unconstrained controls, from ``dH/du = 0`` solved jointly, keeping the
@@ -53,6 +56,39 @@ class SwitchingFunction:
     expr: sp.Expr
     lower: sp.Expr
     upper: sp.Expr
+
+
+@dataclass(frozen=True)
+class SingularArc:
+    """The extremal while switching function ``S`` of a bang-bang control vanishes.
+
+    ``derivatives`` holds ``S, S', S''``, taken along the state-costate
+    dynamics with the control left symbolic. ``S'`` does not involve the
+    control; ``S'' = a + b u`` does (an order-1 arc, ``b != 0``), and
+    ``S'' = 0`` gives the singular control ``u_s = -a / b`` (``control``,
+    with the other controls at their laws). Along ``dynamics``, ``z' = F(u_s)``,
+    ``S`` and ``S'`` stay constant, so an arc that enters with ``S = S' = 0``
+    keeps them at zero; ``H`` is continuous at both junctions because
+    ``S = 0`` there. ``legendre_clebsch`` is ``-dS''/du = -b``, which is
+    ``>= 0`` along a minimizing singular arc (the generalized
+    Legendre-Clebsch condition of Kelley, Kopp & Moyer, 1967). The control
+    must also stay within its bounds; shooting reports both.
+    """
+
+    control: sp.Symbol
+    derivatives: tuple
+    law: dict
+    dynamics: tuple
+    hamiltonian: sp.Expr
+    running_cost: sp.Expr
+    legendre_clebsch: sp.Expr
+    lower: sp.Expr
+    upper: sp.Expr
+
+    @property
+    def junction(self):
+        """``(S, S')``: zero at the entry of the arc."""
+        return self.derivatives[:2]
 
 
 @dataclass(frozen=True)
@@ -162,6 +198,8 @@ class PontryaginSystem:
     boundary: BoundaryConditions
     path_constraints: tuple = ()   # StateConstraint per path constraint
     penalty: sp.Expr = sp.S.Zero   # sum of the exterior penalties, part of L and H above
+    singular_arcs: tuple = ()      # per switching function: SingularArc, or None
+    singular_unsupported: tuple = ()   # per switching function: why not, when None
 
     @property
     def z(self):
@@ -436,10 +474,56 @@ def _state_constraints(problem, H=None, costates=()):
     return tuple(out)
 
 
-def derive(problem):
+def _singular_arc(problem, H, law, costates, sw):
+    """The :class:`SingularArc` of switching function ``sw``, or ``(None, reason)``.
+
+    The singular expressions are not simplified: ``simplify`` on the
+    singular control of Goddard's rocket takes minutes, and code
+    generation shares the common subexpressions anyway.
+    """
+    if any(isinstance(cs, UnitVector) for cs in problem.control_sets):
+        return None, "unit-vector control sets are not supported with singular arcs"
+    u = sw.control
+    others = {w: e for w, e in law.items() if w != u}
+    if any(e.has(sp.Piecewise, sp.Min, sp.Max) for e in others.values()):
+        return None, "the other controls must have smooth laws (no bounds) on a singular arc"
+    t, z = problem.time, problem.states + costates
+    # The flow with u symbolic: H is linear in u, so u enters only there.
+    F = [f.subs(others) for f in problem.dynamics] + [
+        -sp.diff(H, x).subs(others) for x in problem.states]
+
+    def rate(e):
+        return sp.diff(e, t) + sp.Add(*[sp.diff(e, zi) * fi for zi, fi in zip(z, F)])
+
+    S = sw.expr
+    S1 = rate(S)
+    if not _is_zero(sp.diff(S1, u)):         # cannot happen for one control (Kelley et al.)
+        return None, f"S' depends on {u}"
+    S1 = sp.factor_terms(S1.subs(u, 0))
+    S2 = rate(S1)
+    b = sp.diff(S2, u)
+    if not _is_zero(sp.diff(b, u)):
+        return None, f"S'' is not linear in {u}"
+    if _is_zero(b):
+        return None, (f"{u} does not appear in S'': the arc has order 2 or more, where "
+                      "bang-singular junctions chatter (Fuller's phenomenon)")
+    a = S2.subs(u, 0)
+    u_s = -a / b
+    sing = {u: u_s, **{w: e.subs(u, u_s) for w, e in others.items()}}
+    xdot = tuple(f.subs(sing) for f in problem.dynamics)
+    lamdot = tuple(-sp.diff(H, x).subs(sing) for x in problem.states)
+    return SingularArc(control=u, derivatives=(S, S1, S2), law=sing, dynamics=xdot + lamdot,
+                       hamiltonian=H.subs(sing), running_cost=problem.running_cost.subs(sing),
+                       legendre_clebsch=-b, lower=sw.lower,
+                       upper=sw.upper), ""
+
+
+def derive(problem, singular=False):
     """Derive the first-order necessary conditions of ``problem``.
 
-    Returns a :class:`PontryaginSystem`.
+    With ``singular=True``, also derive the singular arc of each bang-bang
+    control (:class:`SingularArc`), for exact shooting over structures with
+    singular arcs. Returns a :class:`PontryaginSystem`.
     """
     taken = {s.name for s in (problem.time, *problem.states, *problem.controls, *problem.params)}
     costates = tuple(_new_symbol(f"lam_{s.name}", taken, real=True) for s in problem.states)
@@ -463,6 +547,13 @@ def derive(problem):
         e - sp.Add(*[c.penalty * sp.Max(0, c.expr) * sp.diff(c.expr, s) for c in penalized])
         for e, s in zip(costate_dynamics, problem.states))
 
+    singular_arcs, singular_unsupported = [], []
+    for sw in switching:
+        arc, why = (_singular_arc(problem, H, law, costates, sw) if singular
+                    else (None, "not derived: use derive(problem, singular=True)"))
+        singular_arcs.append(arc)
+        singular_unsupported.append(why)
+
     boundary = _boundary_conditions(problem, H_star + penalty, costates, taken)
     return PontryaginSystem(
         problem=problem, time=problem.time, states=problem.states, costates=costates,
@@ -470,4 +561,5 @@ def derive(problem):
         control_law=law, switching_functions=switching, hamiltonian=H_star + penalty,
         running_cost=sp.simplify(problem.running_cost.subs(law)) + penalty,
         state_dynamics=state_dynamics, costate_dynamics=costate_dynamics, boundary=boundary,
-        path_constraints=constraints, penalty=penalty)
+        path_constraints=constraints, penalty=penalty, singular_arcs=tuple(singular_arcs),
+        singular_unsupported=tuple(singular_unsupported))

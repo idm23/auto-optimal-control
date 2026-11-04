@@ -42,6 +42,13 @@ Functions, for a prefix ``P`` (``aoc_<name>_``)::
                                              dR/dz0, dR/dzf (NR x NZ), dR/dnu (NR x NNU),
                                              dR/dtf (NR), dR/dp (NR x NP)
 
+Exact boundary arcs of path constraint ``c`` get ``P_b<c>_*`` functions
+(dispatched by ``P_boundary_*(c, ...)``), and singular arcs of switching
+function ``k`` get ``P_s<k>_*`` (dispatched by ``P_singular_*(k, ...)``):
+the dynamics at the singular control, its Jacobian, the control, ``H``, the
+running cost, the Legendre-Clebsch coefficient ``-dS''/du``, and the
+junction conditions ``(S, S')`` with their gradients in ``t`` and ``z``.
+
 The jump uses the saltation matrix. Let switching function ``S`` cross zero
 at ``t_s``, with ``F-`` and ``F+`` the dynamics on the arcs before and after
 it and ``Sdot = dS/dt + dS/dz . F-``. Then
@@ -464,32 +471,74 @@ def generate_c(pmp, name=None):
                     f.out(f"Nxx[{(i * n + j) * n + k2}]", sp.diff(d, xk))
         functions.append(f)
 
-    dispatch_specs = [
-        ("rhs", "double* dz", "dz"), ("jac", "double* A", "A"), ("hamiltonian", "double* H", "H"),
-        ("hamiltonian_grad", "double* Ht, double* Hz", "Ht, Hz"),
-        ("cost_rate", "double* L", "L"), ("control", "double* u", "u"),
-        ("multiplier", "double* mu", "mu"), ("tangency", "double* N", "N"),
-        ("tangency_grad", "double* Nt, double* Nx", "Nt, Nx"),
-        ("tangency_hess", "double* Nxx, double* Nxt", "Nxx, Nxt"),
-    ]
-    dispatch, dispatch_sigs = [], []
-    for name, outs, out_args in dispatch_specs:
-        sig = f"int {P}boundary_{name}(int c, {tzp}, {outs})"
-        dispatch_sigs.append(sig)
-        cases = "".join(f"    case {c}: return {P}b{c}_{name}(t, z, p, {out_args});\n"
-                        for c in exact)
-        voids = "".join(f" (void){a.strip()};" for a in out_args.split(","))
-        dispatch.append(f"{sig} {{\n    (void)t; (void)z; (void)p;{voids}\n"
-                        f"    switch (c) {{\n{cases}    default: return 3;\n    }}\n}}\n")
-    stm_b_sig = f"int {P}boundary_stm_rhs(int c, double t, const double* y, const double* p, double* dy)"
-    dispatch_sigs.append(stm_b_sig)
-    dispatch.append(f"""{stm_b_sig} {{
+    # Singular arcs: per bang-bang control k with a derived SingularArc, the
+    # dynamics at the singular control and the junction conditions (S, S').
+    singular = []
+    for k_sw, arc in enumerate(pmp.singular_arcs):
+        if arc is None:
+            continue
+        singular.append(k_sw)
+        Fs = [_smooth(e) for e in arc.dynamics]
+        Fs_c = [e.xreplace(mapping) for e in Fs]
+        tag = f"{P}s{k_sw}_"
+        f = _Function(f"int {tag}rhs({tzp}, double* dz)", ["t", "z", "p"])
+        for i, e in enumerate(Fs):
+            f.out(f"dz[{i}]", e)
+        functions.append(f)
+        f = _Function(f"int {tag}jac({tzp}, double* A)", ["t", "z", "p", "A"])
+        f.zero_fill("A", NZ * NZ)
+        for i, e in enumerate(Fs_c):
+            for j, zj in enumerate(z_c):
+                f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
+        functions.append(f)
+        f = _Function(f"int {tag}hamiltonian({tzp}, double* H)", ["t", "z", "p"])
+        f.out("H[0]", _smooth(arc.hamiltonian))
+        functions.append(f)
+        f = _Function(f"int {tag}cost_rate({tzp}, double* L)", ["t", "z", "p"])
+        f.out("L[0]", _smooth(arc.running_cost))
+        functions.append(f)
+        f = _Function(f"int {tag}control({tzp}, double* u)", ["t", "z", "p", "u"])
+        for kk, u in enumerate(pmp.controls):
+            f.out(f"u[{kk}]", _smooth(arc.law[u]))
+        functions.append(f)
+        f = _Function(f"int {tag}legendre({tzp}, double* LC)", ["t", "z", "p"])
+        f.out("LC[0]", _smooth(arc.legendre_clebsch))
+        functions.append(f)
+        J_c = [_smooth(e).xreplace(mapping) for e in arc.junction]
+        f = _Function(f"int {tag}junction({tzp}, double* N)", ["t", "z", "p", "N"])
+        for i, e in enumerate(J_c):
+            f.out(f"N[{i}]", e)
+        functions.append(f)
+        f = _Function(f"int {tag}junction_grad({tzp}, double* Nt, double* Nz)",
+                      ["t", "z", "p", "Nt", "Nz"])
+        f.zero_fill("Nt", 2)
+        f.zero_fill("Nz", 2 * NZ)
+        for i, e in enumerate(J_c):
+            f.out(f"Nt[{i}]", sp.diff(e, t_sym))
+            for j, zj in enumerate(z_c):
+                f.out(f"Nz[{i * NZ + j}]", sp.diff(e, zj))
+        functions.append(f)
+
+    def dispatchers(group, letter, ids, specs):
+        out, sigs = [], []
+        for name, outs, out_args in specs:
+            sig = f"int {P}{group}_{name}(int c, {tzp}, {outs})"
+            sigs.append(sig)
+            cases = "".join(f"    case {c}: return {P}{letter}{c}_{name}(t, z, p, {out_args});\n"
+                            for c in ids)
+            voids = "".join(f" (void){a.strip()};" for a in out_args.split(","))
+            out.append(f"{sig} {{\n    (void)t; (void)z; (void)p;{voids}\n"
+                       f"    switch (c) {{\n{cases}    default: return 3;\n    }}\n}}\n")
+        stm_sig = (f"int {P}{group}_stm_rhs(int c, double t, const double* y, const double* p, "
+                   "double* dy)")
+        sigs.append(stm_sig)
+        out.append(f"""{stm_sig} {{
     double A[{NZ * NZ}];
     const double* Phi = y + {NZ};
     double* dPhi = dy + {NZ};
-    int rc = {P}boundary_rhs(c, t, y, p, dy);
+    int rc = {P}{group}_rhs(c, t, y, p, dy);
     if (rc) return rc;
-    rc = {P}boundary_jac(c, t, y, p, A);
+    rc = {P}{group}_jac(c, t, y, p, A);
     if (rc) return rc;
     for (int i = 0; i < {NZ}; ++i) {{
         for (int j = 0; j < {NZ}; ++j) {{
@@ -501,6 +550,24 @@ def generate_c(pmp, name=None):
     return 0;
 }}
 """)
+        return out, sigs
+
+    common_specs = [
+        ("rhs", "double* dz", "dz"), ("jac", "double* A", "A"), ("hamiltonian", "double* H", "H"),
+        ("cost_rate", "double* L", "L"), ("control", "double* u", "u"),
+    ]
+    dispatch, dispatch_sigs = dispatchers("boundary", "b", exact, common_specs + [
+        ("hamiltonian_grad", "double* Ht, double* Hz", "Ht, Hz"),
+        ("multiplier", "double* mu", "mu"), ("tangency", "double* N", "N"),
+        ("tangency_grad", "double* Nt, double* Nx", "Nt, Nx"),
+        ("tangency_hess", "double* Nxx, double* Nxt", "Nxx, Nxt"),
+    ])
+    more, more_sigs = dispatchers("singular", "s", singular, common_specs + [
+        ("legendre", "double* LC", "LC"), ("junction", "double* N", "N"),
+        ("junction_grad", "double* Nt, double* Nz", "Nt, Nz"),
+    ])
+    dispatch += more
+    dispatch_sigs += more_sigs
 
     body = "\n\n".join(fn.render(mapping if not fn.signature.startswith(f"int {P}residual")
                                  else bc_map) for fn in functions)
