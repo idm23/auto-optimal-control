@@ -331,6 +331,9 @@ limit) and a velocity-limited move (an order-1 limit).
   - Batches equal single propagations, and threads agree with serial runs.
 - **`test_benchmarks.py`** (slow; `--runslow`): every literature benchmark
   above.
+- **`test_visuals.py`** (slow; skipped without matplotlib): records the
+  cart-pole solve, checks the stages end where the benchmark does, and
+  renders a small GIF and the stills.
 - **`test_jacobian_chain.py`:** a bare Newton iteration built from the
   kernels converges quadratically, which shows the derivatives compose into
   an exact Jacobian, using the raw kernels rather than the shooting module.
@@ -393,6 +396,37 @@ Notes:
   with that control history confirms it reaches the target with that cost.
   Indirect search over costate space found a better local optimum than the
   published one.
+
+### Watching the solves
+
+`benchmarks/animate.py` records how a benchmark is solved and renders it as
+an animation. It needs the `viz` dependency group, plus ffmpeg for MP4 or
+Pillow (included) for GIF:
+
+```bash
+uv run --group viz python benchmarks/animate.py cart_pole --stills   # outputs/cart_pole.mp4
+uv run --group viz python benchmarks/animate.py cart_pole --reuse --out outputs/cart_pole.gif
+```
+
+The cart-pole animation ([`docs/visuals/cart_pole.mp4`](docs/visuals/cart_pole.mp4))
+follows the solve in four stages:
+
+1. **Direct method.** Kelly's collocation iterates, which start out
+   dynamically infeasible, converging as their defects vanish.
+2. **Indirect polish.** Every Newton evaluation from the lifted costates.
+   Each is a real swing-up that misses the target until the residual
+   vanishes.
+3. **Random costate search.** Every converged start lands on the cheaper
+   extremal.
+4. **The two extremals**, swinging up side by side with their forces.
+
+Recording runs the solves (about a minute) and saves `<out>.npz`, so
+`--reuse` re-renders without solving.
+
+| | |
+|---|---|
+| ![direct](docs/visuals/cart_pole_direct.png) | ![polish](docs/visuals/cart_pole_polish.png) |
+| ![search](docs/visuals/cart_pole_search.png) | ![motion](docs/visuals/cart_pole_motion.png) |
 
 ## Limitations
 

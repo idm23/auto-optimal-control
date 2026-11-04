@@ -40,6 +40,8 @@ Issues = "https://github.com/idm23/auto-optimal-control/issues"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "scipy>=1.13"]
+# benchmarks/animate.py: matplotlib, and Pillow for GIF output (MP4 needs ffmpeg).
+viz = ["matplotlib>=3.8", "pillow>=10", "scipy>=1.13"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
