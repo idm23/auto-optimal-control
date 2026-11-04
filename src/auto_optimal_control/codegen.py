@@ -190,6 +190,7 @@ def generate_c(pmp, name=None):
     NSW, NU = len(pmp.switching_functions), len(pmp.controls)
     NC = len(pmp.path_constraints)
     NM = NSW + NC
+    QMAX = 2                       # the highest constraint order with exact arcs
     bc = pmp.boundary
     NNU, NR = len(bc.nu), len(bc.residuals)
     free_tf = pmp.problem.free_final_time
@@ -337,10 +338,129 @@ def generate_c(pmp, name=None):
             f.out(f"Rp[{i * NP + j}]", sp.diff(r, s))
     functions.append(f)
 
+    # Exact boundary arcs: per supported constraint c, the dynamics riding
+    # g = 0 and the tangency conditions N = (g, ..., g^(q-1)) with their first
+    # and second derivatives (for the costate jump and its Jacobian).
+    x_c = z_c[:n]
+    H_c = _smooth(pmp.hamiltonian).xreplace(mapping)
+    f = _Function(f"int {P}hamiltonian_grad({tzp}, double* Ht, double* Hz)",
+                  ["t", "z", "p", "Ht", "Hz"])
+    f.zero_fill("Hz", NZ)
+    f.out("Ht[0]", sp.diff(H_c, t_sym))
+    for j, zj in enumerate(z_c):
+        f.out(f"Hz[{j}]", sp.diff(H_c, zj))
+    functions.append(f)
+
+    exact = []
+    for c, sc in enumerate(pmp.path_constraints):
+        arc = sc.boundary
+        if arc is None:
+            continue
+        exact.append(c)
+        q = sc.order
+        Fb = [_smooth(e) for e in arc.dynamics]
+        Fb_c = [e.xreplace(mapping) for e in Fb]
+        tag = f"{P}b{c}_"
+        f = _Function(f"int {tag}rhs({tzp}, double* dz)", ["t", "z", "p"])
+        for i, e in enumerate(Fb):
+            f.out(f"dz[{i}]", e)
+        functions.append(f)
+        f = _Function(f"int {tag}jac({tzp}, double* A)", ["t", "z", "p", "A"])
+        f.zero_fill("A", NZ * NZ)
+        for i, e in enumerate(Fb_c):
+            for j, zj in enumerate(z_c):
+                f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
+        functions.append(f)
+        Hb_c = _smooth(arc.hamiltonian).xreplace(mapping)
+        f = _Function(f"int {tag}hamiltonian({tzp}, double* H)", ["t", "z", "p"])
+        f.out("H[0]", _smooth(arc.hamiltonian))
+        functions.append(f)
+        f = _Function(f"int {tag}hamiltonian_grad({tzp}, double* Ht, double* Hz)",
+                      ["t", "z", "p", "Ht", "Hz"])
+        f.zero_fill("Hz", NZ)
+        f.out("Ht[0]", sp.diff(Hb_c, t_sym))
+        for j, zj in enumerate(z_c):
+            f.out(f"Hz[{j}]", sp.diff(Hb_c, zj))
+        functions.append(f)
+        f = _Function(f"int {tag}cost_rate({tzp}, double* L)", ["t", "z", "p"])
+        f.out("L[0]", _smooth(arc.running_cost))
+        functions.append(f)
+        f = _Function(f"int {tag}control({tzp}, double* u)", ["t", "z", "p", "u"])
+        for k, u in enumerate(pmp.controls):
+            f.out(f"u[{k}]", _smooth(arc.control[u]))
+        functions.append(f)
+        f = _Function(f"int {tag}multiplier({tzp}, double* mu)", ["t", "z", "p"])
+        f.out("mu[0]", _smooth(arc.multiplier))
+        functions.append(f)
+        N_c = [_smooth(e).xreplace(mapping) for e in sc.tangency]
+        f = _Function(f"int {tag}tangency({tzp}, double* N)", ["t", "z", "p", "N"])
+        f.zero_fill("N", QMAX)
+        for i, e in enumerate(N_c):
+            f.out(f"N[{i}]", e)
+        functions.append(f)
+        f = _Function(f"int {tag}tangency_grad({tzp}, double* Nt, double* Nx)",
+                      ["t", "z", "p", "Nt", "Nx"])
+        f.zero_fill("Nt", QMAX)
+        f.zero_fill("Nx", QMAX * n)
+        for i, e in enumerate(N_c):
+            f.out(f"Nt[{i}]", sp.diff(e, t_sym))
+            for j, xj in enumerate(x_c):
+                f.out(f"Nx[{i * n + j}]", sp.diff(e, xj))
+        functions.append(f)
+        f = _Function(f"int {tag}tangency_hess({tzp}, double* Nxx, double* Nxt)",
+                      ["t", "z", "p", "Nxx", "Nxt"])
+        f.zero_fill("Nxx", QMAX * n * n)
+        f.zero_fill("Nxt", QMAX * n)
+        for i, e in enumerate(N_c):
+            for j, xj in enumerate(x_c):
+                d = sp.diff(e, xj)
+                f.out(f"Nxt[{i * n + j}]", sp.diff(d, t_sym))
+                for k2, xk in enumerate(x_c):
+                    f.out(f"Nxx[{(i * n + j) * n + k2}]", sp.diff(d, xk))
+        functions.append(f)
+
+    dispatch_specs = [
+        ("rhs", "double* dz", "dz"), ("jac", "double* A", "A"), ("hamiltonian", "double* H", "H"),
+        ("hamiltonian_grad", "double* Ht, double* Hz", "Ht, Hz"),
+        ("cost_rate", "double* L", "L"), ("control", "double* u", "u"),
+        ("multiplier", "double* mu", "mu"), ("tangency", "double* N", "N"),
+        ("tangency_grad", "double* Nt, double* Nx", "Nt, Nx"),
+        ("tangency_hess", "double* Nxx, double* Nxt", "Nxx, Nxt"),
+    ]
+    dispatch, dispatch_sigs = [], []
+    for name, outs, out_args in dispatch_specs:
+        sig = f"int {P}boundary_{name}(int c, {tzp}, {outs})"
+        dispatch_sigs.append(sig)
+        cases = "".join(f"    case {c}: return {P}b{c}_{name}(t, z, p, {out_args});\n"
+                        for c in exact)
+        voids = "".join(f" (void){a.strip()};" for a in out_args.split(","))
+        dispatch.append(f"{sig} {{\n    (void)t; (void)z; (void)p;{voids}\n"
+                        f"    switch (c) {{\n{cases}    default: return 3;\n    }}\n}}\n")
+    stm_b_sig = f"int {P}boundary_stm_rhs(int c, double t, const double* y, const double* p, double* dy)"
+    dispatch_sigs.append(stm_b_sig)
+    dispatch.append(f"""{stm_b_sig} {{
+    double A[{NZ * NZ}];
+    const double* Phi = y + {NZ};
+    double* dPhi = dy + {NZ};
+    int rc = {P}boundary_rhs(c, t, y, p, dy);
+    if (rc) return rc;
+    rc = {P}boundary_jac(c, t, y, p, A);
+    if (rc) return rc;
+    for (int i = 0; i < {NZ}; ++i) {{
+        for (int j = 0; j < {NZ}; ++j) {{
+            double s = 0.0;
+            for (int k = 0; k < {NZ}; ++k) s += A[i * {NZ} + k] * Phi[k * {NZ} + j];
+            dPhi[i * {NZ} + j] = s;
+        }}
+    }}
+    return 0;
+}}
+""")
+
     body = "\n\n".join(fn.render(mapping if not fn.signature.startswith(f"int {P}residual")
                                  else bc_map) for fn in functions)
 
-    macros = dict(NZ=NZ, NP=NP, NSW=NSW, NC=NC, NM=NM, NU=NU, NNU=NNU, NR=NR,
+    macros = dict(NZ=NZ, NP=NP, NSW=NSW, NC=NC, NM=NM, NU=NU, NNU=NNU, NR=NR, QMAX=QMAX,
                   FREE_TF=int(free_tf))
     guard = f"AOC_{ident.upper()}_H"
     header_lines = [
@@ -356,6 +476,7 @@ def generate_c(pmp, name=None):
         f"int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int with_p)",
     ]
     header_lines += [s + ";" for s in stm_sigs]
+    header_lines += [s + ";" for s in dispatch_sigs]
     header_lines += ["", f"#endif /* {guard} */", ""]
     header = "\n".join(header_lines)
 
@@ -448,5 +569,6 @@ int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int
         "",
         body,
         stm,
+        "\n".join(dispatch),
     ])
     return P, header, source, macros

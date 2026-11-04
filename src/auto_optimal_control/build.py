@@ -80,6 +80,8 @@ def _render_wrapper(pmp, prefix, header_name, macros):
         "P": prefix,
         "param_names": repr(params),
         "constraint_names": repr(tuple(c.name for c in pmp.path_constraints)),
+        "constraint_orders": repr(tuple(c.order for c in pmp.path_constraints)),
+        "exact_arcs": repr(tuple(c.boundary is not None for c in pmp.path_constraints)),
         "NC1": str(max(macros["NC"], 1)),
         "NM1": str(max(macros["NM"], 1)),
         "free_tf": repr(bool(macros["FREE_TF"])),
@@ -177,9 +179,14 @@ class Kernels:
     The generated module's functions are available as attributes (``rhs``,
     ``rhs_arc``, ``jacobian``, ``dfdp``, ``control``, ``hamiltonian``,
     ``cost_rate``, ``switching``, ``switching_gradient``, ``constraint``,
-    ``modes``, ``initial_arc``, ``residual``, ``residual_jacobian``,
-    ``stm_jump``, ``propagate``, ``propagate_batch``) and so are its FNI types
-    (``Dynamics``, ``ArcDynamics``, ``Switching``, ``Constraint``). All of them take ``z = [x, lambda]`` and
+    ``modes``, ``constraint_rate``, ``initial_arc``, ``residual``,
+    ``residual_jacobian``, ``stm_jump``, ``propagate``, ``propagate_batch``,
+    and for exact boundary arcs ``propagate_boundary``, ``boundary_rhs``,
+    ``boundary_jacobian``, ``boundary_control``, ``boundary_multiplier``,
+    ``boundary_hamiltonian``, ``hamiltonian_gradient``, ``tangency``,
+    ``tangency_gradient``) and so are its FNI types (``Dynamics``,
+    ``ArcDynamics``, ``BoundaryDynamics``, ``Switching``, ``Constraint``,
+    ``ConstraintRate``). All of them take ``z = [x, lambda]`` and
     the parameter vector in the orders of ``system.z`` and ``system.params``.
     """
 

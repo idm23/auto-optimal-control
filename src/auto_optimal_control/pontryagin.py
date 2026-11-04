@@ -71,6 +71,33 @@ class StateConstraint:
     order: int
     derivatives: tuple
     penalty: sp.Expr
+    boundary: object = None        # BoundaryArc, or None if exact arcs are not supported
+    unsupported: str = ""          # why not, when boundary is None
+
+    @property
+    def tangency(self):
+        """``N = (g, ..., g^(order-1))``: zero at the entry of a boundary arc."""
+        return self.derivatives[:self.order]
+
+
+@dataclass(frozen=True)
+class BoundaryArc:
+    """The extremal while a path constraint ``g = 0`` is active (riding the limit).
+
+    ``g^(q) = 0`` along the arc fixes the control: ``control`` minimizes ``H``
+    subject to it, and ``multiplier`` is the multiplier ``mu`` of
+    ``H + mu g^(q)`` (indirect adjoining). ``dynamics`` is ``z' = F_b(t, z, p)``:
+    ``x' = f(u_b)`` and ``lambda' = -d(H + mu g^(q))/dx`` at ``(u_b, mu)``.
+    ``hamiltonian`` is ``H`` at ``u_b`` and ``running_cost`` is ``L`` there.
+    At the entry, the costates jump by ``-dN/dx^T pi``; at the exit they are
+    continuous, and ``H`` is continuous at both.
+    """
+
+    control: dict
+    multiplier: sp.Expr
+    dynamics: tuple
+    hamiltonian: sp.Expr
+    running_cost: sp.Expr
 
 
 @dataclass(frozen=True)
@@ -353,7 +380,34 @@ def constraint_derivatives(problem, expr):
                      f"of the path constraint {expr} <= 0: the controls cannot influence it")
 
 
-def _state_constraints(problem):
+def _boundary_arc(problem, H, costates, derivatives):
+    """The :class:`BoundaryArc` of a constraint with ``g^(q) = derivatives[-1]``,
+    or ``(None, reason)``."""
+    order = len(derivatives) - 1
+    if order > 2:
+        return None, f"order {order}: exact arcs are supported for orders 1 and 2"
+    if problem.control_sets:
+        return None, "control sets: bounds on the controls along the arc are not handled"
+    gq = derivatives[-1]
+    mu = sp.Symbol("mu_b")
+    lagrangian = H + mu * gq
+    eqs = [sp.diff(lagrangian, u) for u in problem.controls] + [gq]
+    try:
+        sols = sp.solve(eqs, [*problem.controls, mu], dict=True)
+    except NotImplementedError:
+        sols = []
+    if len(sols) != 1 or any(u not in sols[0] for u in (*problem.controls, mu)):
+        return None, "g^(q) = 0 and dH/du + mu dg^(q)/du = 0 have no unique solution for u, mu"
+    sol = {k: sp.simplify(v) for k, v in sols[0].items()}
+    law = {u: sol[u] for u in problem.controls}
+    xdot = tuple(sp.simplify(f.subs(law)) for f in problem.dynamics)
+    lamdot = tuple(sp.simplify(-sp.diff(lagrangian, x).subs(sol)) for x in problem.states)
+    return BoundaryArc(control=law, multiplier=sol[mu], dynamics=xdot + lamdot,
+                       hamiltonian=sp.simplify(H.subs(law)),
+                       running_cost=sp.simplify(problem.running_cost.subs(law))), ""
+
+
+def _state_constraints(problem, H=None, costates=()):
     out = []
     for c in problem.path_constraints:
         derivatives = constraint_derivatives(problem, c.expr)
@@ -363,8 +417,10 @@ def _state_constraints(problem):
                 f"path constraint {c.name!r} has order {order}. Optimal solutions that ride a "
                 "constraint of order 3 or more generally chatter (infinitely many touch points), "
                 "so only its penalty and termination are meaningful", stacklevel=3)
+        arc, why = (None, "") if H is None else _boundary_arc(problem, H, costates, derivatives)
         out.append(StateConstraint(name=c.name, expr=c.expr, order=order,
-                                   derivatives=derivatives, penalty=c.penalty))
+                                   derivatives=derivatives, penalty=c.penalty, boundary=arc,
+                                   unsupported=why))
     return tuple(out)
 
 
@@ -388,7 +444,7 @@ def derive(problem):
 
     # Path-constraint penalties depend on the state only, so they leave the
     # control law alone and add w max(0, g) dg/dx to -lambda'.
-    constraints = _state_constraints(problem)
+    constraints = _state_constraints(problem, H, costates)
     penalized = [c for c in constraints if c.penalty is not None]
     penalty = sp.Add(*[c.penalty / 2 * sp.Max(0, c.expr) ** 2 for c in penalized])
     costate_dynamics = tuple(

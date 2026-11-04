@@ -28,6 +28,11 @@ so :func:`parameter_continuation` can raise it from solve to solve. And
 ``terminate`` makes any propagation that violates a constraint fail with
 :class:`ShootingError`, which :meth:`SingleShooting.solve` reports to the
 root finder as a large residual.
+
+:class:`MultiArcShooting` solves for exact constrained extremals instead: given
+the sequence of boundary arcs and touch points, its unknowns add the junction
+times and the costate-jump multipliers, and its Jacobian chains the STM across
+the arcs. :meth:`MultiArcShooting.from_penalty` seeds it from a penalty solution.
 """
 
 from dataclasses import dataclass
@@ -158,7 +163,7 @@ class SingleShooting:
         x0[self.free_states] = v[:m]
         lam0 = v[m:m + n]
         nu = v[m + n:m + n + k.N_MULTIPLIERS]
-        tf = v[-1] if k.FREE_FINAL_TIME else self.fixed_tf
+        tf = v[m + n + k.N_MULTIPLIERS] if k.FREE_FINAL_TIME else self.fixed_tf
         return x0, lam0, nu, float(tf)
 
     # -- the system ---------------------------------------------------------
@@ -305,6 +310,343 @@ class SingleShooting:
                                        **kwargs)
 
 
+class MultiArcShooting(SingleShooting):
+    """Exact constrained extremals: shooting over a fixed sequence of arcs.
+
+    ``arcs`` lists the constrained arcs in time order. Free arcs, where no
+    limit is active, lie between them and at both ends. Each entry is one of:
+
+    - ``("boundary", c)``: the extremal rides path constraint ``c`` (``g = 0``),
+      for a constraint of order 1 or 2. Unknowns: the entry and exit times
+      and the jump multipliers ``pi`` (one per order). Conditions:
+      ``N = (g, ..., g^(q-1)) = 0`` at the entry, and ``H`` continuous at both
+      junctions. The costates jump by ``-dN/dx^T pi`` at the entry and are
+      continuous at the exit (indirect adjoining, Bryson, Denham & Dreyfus
+      1963; Maurer 1977).
+    - ``("touch", c)``: an isolated contact with an order-2 constraint.
+      Unknowns: the contact time and the jump ``nu`` (``lambda+ = lambda- -
+      nu dg/dx``). Conditions: ``g = g' = 0`` there. ``nu >= 0`` is
+      necessary for optimality; see :meth:`diagnostics`.
+
+    ``c`` is a constraint index or name. The unknowns are
+    :class:`SingleShooting`'s, followed by each arc's in order. The path
+    constraints are not watched on the free arcs (their penalties stay off),
+    so a wrong structure shows up as a violation on a free arc, reported by
+    :meth:`diagnostics` and in ``max_violation``. Bang-bang controls and
+    control sets are not supported with exact arcs yet.
+
+    :meth:`from_penalty` builds the structure's initial guess from an
+    exterior-penalty solution.
+    """
+
+    def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
+                 atol=1e-12):
+        super().__init__(kernels, params, x0=x0, method=method, rtol=rtol, atol=atol,
+                         n_interior=0)
+        k = kernels
+        if k.N_SWITCHING:
+            raise NotImplementedError("exact arcs with bang-bang controls are not supported yet")
+        self.arcs = []
+        for item in arcs:
+            kind, c = item
+            if isinstance(c, str):
+                c = list(k.CONSTRAINT_NAMES).index(c)
+            if kind not in ("boundary", "touch"):
+                raise ValueError(f"arc kind must be 'boundary' or 'touch', got {kind!r}")
+            if not k.EXACT_ARCS[c]:
+                why = k.system.path_constraints[c].unsupported
+                raise ValueError(f"path constraint {k.CONSTRAINT_NAMES[c]!r}: {why}")
+            q = k.CONSTRAINT_ORDERS[c]
+            if kind == "touch" and q != 2:
+                raise ValueError("touch points are supported for order-2 constraints")
+            self.arcs.append((kind, int(c), q))
+        self.n_base = self.n_unknowns
+        self._arc_slices = []
+        off = self.n_base
+        for kind, c, q in self.arcs:
+            size = 2 + q if kind == "boundary" else 2
+            self._arc_slices.append(slice(off, off + size))
+            off += size
+        self.n_unknowns = off
+        self.options = dict(method=method, rtol=rtol, atol=atol)
+
+    def __repr__(self):
+        arcs = ", ".join(f"{kind} {self.kernels.CONSTRAINT_NAMES[c]}" for kind, c, _ in self.arcs)
+        return (f"<MultiArcShooting {self.kernels.module.__name__}: [{arcs}], "
+                f"{self.n_unknowns} unknowns, params={self.params.tolist()}>")
+
+    # -- unknowns -----------------------------------------------------------
+
+    def pack_arcs(self, base, arc_values):
+        """``v`` from :class:`SingleShooting` unknowns ``base`` and, per arc,
+        ``(t_in, t_out, pi)`` for a boundary arc or ``(t_c, nu)`` for a touch."""
+        parts = [np.asarray(base, dtype=float).reshape(-1)[:self.n_base]]
+        for (kind, c, q), val in zip(self.arcs, arc_values, strict=True):
+            if kind == "boundary":
+                t_in, t_out, pi = val
+                pi = np.asarray(pi, dtype=float).reshape(-1)
+                if pi.shape != (q,):
+                    raise ValueError(f"pi must have {q} entries for an order-{q} constraint")
+                parts.append(np.concatenate([[t_in, t_out], pi]))
+            else:
+                parts.append(np.asarray(val, dtype=float).reshape(2))
+        return np.concatenate(parts)
+
+    def unpack_arcs(self, v):
+        """Per arc, ``(t_in, t_out, pi)`` or ``(t_c, nu)``."""
+        v = np.asarray(v, dtype=float).reshape(-1)
+        out = []
+        for (kind, _, _), sl in zip(self.arcs, self._arc_slices):
+            w = v[sl]
+            out.append((w[0], w[1], w[2:].copy()) if kind == "boundary" else (w[0], w[1]))
+        return out
+
+    # -- the system ---------------------------------------------------------
+
+    def _segment(self, c, ta, dta, z, D, tb, dtb, jac, cost=False):
+        """Propagate a free (``c is None``) or boundary arc; chain ``D = dz/dv``."""
+        k, p = self.kernels, self.params
+        if not tb > ta:
+            raise ShootingError(f"arc times out of order: {ta} then {tb}")
+        if c is None:
+            r = k.propagate(ta, z, tb, p, stm=jac, cost=cost, constraint_events=False,
+                            **self.options)
+            Fa = k.rhs_arc(ta, z, p, np.zeros(k.N_MODES, dtype=np.intc) if k.N_MODES else None)
+        else:
+            r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost, **self.options)
+            Fa = k.boundary_rhs(c, ta, z, p)
+        if r["status"] != 0:
+            raise ShootingError(f"propagation failed with status {r['status']}")
+        if jac:
+            Phi = r["stm"]
+            D = Phi @ D + np.outer(r["dz_dt1"], dtb) - np.outer(Phi @ Fa, dta)
+        return r, D
+
+    def _evaluate(self, v, jac, record=False):
+        k, p = self.kernels, self.params
+        n, N = k.N_STATES, self.n_unknowns
+        x0, lam0, nu, tf = self.unpack(v)
+        z0 = np.concatenate([x0, lam0])
+        m = self.n_free
+        D0 = np.zeros((2 * n, N))
+        D0[self.free_states, np.arange(m)] = 1.0
+        D0[n + np.arange(n), m + np.arange(n)] = 1.0
+
+        def unit(j):
+            e = np.zeros(N)
+            e[j] = 1.0
+            return e
+
+        rows, grads, segments = [], [], []
+        z, D, t, dt = z0, D0, self.t0, np.zeros(N)
+        for (kind, c, q), sl in zip(self.arcs, self._arc_slices):
+            w = v[sl]
+            t_in, d_in = w[0], unit(sl.start)
+            r, D = self._segment(None, t, dt, z, D, t_in, d_in, jac, cost=record)
+            segments.append((None, t, t_in, z, r))
+            z = r["z"]
+            Nv = k.tangency(c, t_in, z, p)
+            Nt, Nx, Nxx, Nxt = k.tangency_gradient(c, t_in, z, p)
+            for i in range(2 if kind == "touch" else q):
+                rows.append(Nv[i])
+                grads.append(Nt[i] * d_in + Nx[i] @ D[:n] if jac else None)
+            # The costate jump at the entry (or the touch).
+            used = slice(0, 1) if kind == "touch" else slice(0, q)
+            mult = w[1:2] if kind == "touch" else w[2:]
+            mult_cols = [sl.start + 1] if kind == "touch" else list(range(sl.start + 2, sl.stop))
+            zp = z.copy()
+            zp[n:] -= Nx[used].T @ mult
+            if jac:
+                Dp = D.copy()
+                for i, mu in enumerate(mult):
+                    Dp[n:] -= mu * (Nxx[i] @ D[:n] + np.outer(Nxt[i], d_in))
+                Dp[n:, mult_cols] -= Nx[used].T
+            if kind == "touch":
+                z, t, dt = zp, t_in, d_in
+                if jac:
+                    D = Dp
+                continue
+            # H continuous at the entry: H(u*, z-) = H(u_b, z+).
+            Hf_t, Hf_z = k.hamiltonian_gradient(t_in, z, p)
+            Hb_t, Hb_z = k.hamiltonian_gradient(t_in, zp, p, boundary=c)
+            rows.append(k.hamiltonian(t_in, z, p) - k.boundary_hamiltonian(c, t_in, zp, p))
+            grads.append((Hf_t - Hb_t) * d_in + Hf_z @ D - Hb_z @ Dp if jac else None)
+            t_out, d_out = w[1], unit(sl.start + 1)
+            r, D = self._segment(c, t_in, d_in, zp, Dp if jac else None, t_out, d_out, jac,
+                                 cost=record)
+            segments.append((c, t_in, t_out, zp, r))
+            z = r["z"]
+            # H continuous at the exit; the costates are continuous there.
+            Hb_t, Hb_z = k.hamiltonian_gradient(t_out, z, p, boundary=c)
+            Hf_t, Hf_z = k.hamiltonian_gradient(t_out, z, p)
+            rows.append(k.boundary_hamiltonian(c, t_out, z, p) - k.hamiltonian(t_out, z, p))
+            grads.append((Hb_t - Hf_t) * d_out + (Hb_z - Hf_z) @ D if jac else None)
+            t, dt = t_out, d_out
+        d_tf = unit(m + n + k.N_MULTIPLIERS) if k.FREE_FINAL_TIME else np.zeros(N)
+        r, D = self._segment(None, t, dt, z, D, tf, d_tf, jac, cost=record)
+        segments.append((None, t, tf, z, r))
+        zf = r["z"]
+
+        R = np.concatenate([k.residual(z0, zf, nu, tf, p)[self._rows], rows])
+        if not jac:
+            return R, None, segments
+        Jb = k.residual_jacobian(z0, zf, nu, tf, p)
+        Jbase = Jb["z0"][self._rows] @ D0 + Jb["zf"][self._rows] @ D
+        if k.N_MULTIPLIERS:
+            Jbase[:, m + n:m + n + k.N_MULTIPLIERS] += Jb["nu"][self._rows]
+        if k.FREE_FINAL_TIME:
+            Jbase += np.outer(Jb["tf"][self._rows], d_tf)
+        J = np.vstack([Jbase] + [g[None, :] for g in grads]) if grads else Jbase
+        return R, J, segments
+
+    def residual(self, v):
+        return self._evaluate(np.asarray(v, dtype=float), jac=False)[0]
+
+    def residual_jacobian(self, v):
+        R, J, _ = self._evaluate(np.asarray(v, dtype=float), jac=True)
+        return R, J
+
+    __call__ = residual_jacobian
+
+    def guess_multipliers(self, *args, **kwargs):
+        raise NotImplementedError("use MultiArcShooting.from_penalty for a starting point")
+
+    # -- results ------------------------------------------------------------
+
+    def cost(self, v):
+        """The running cost integrated over every arc."""
+        _, _, segs = self._evaluate(np.asarray(v, dtype=float), jac=False, record=True)
+        return float(sum(r["cost"] for *_, r in segs))
+
+    def trajectory(self, v, n_points=401):
+        """The extremal at ``v``, sampled on every arc.
+
+        Returns a dict with ``t``, ``z``, ``u``, ``g`` (every path constraint)
+        and ``arc`` (-1 on free arcs, else the active constraint), plus
+        ``junctions`` (the arc boundaries).
+        """
+        from fast_numerical_integration.integrators import solve_ivp
+
+        k, p = self.kernels, self.params
+        _, _, segs = self._evaluate(np.asarray(v, dtype=float), jac=False)
+        span = segs[-1][2] - self.t0
+        T, Z, U, A = [], [], [], []
+        for c, ta, tb, za, _ in segs:
+            npts = max(int(n_points * (tb - ta) / span), 2)
+            te = np.linspace(ta, tb, npts)
+            system = (k.ArcDynamics(p, np.zeros(k.N_MODES, dtype=np.intc) if k.N_MODES else None)
+                      if c is None else k.BoundaryDynamics(c, p))
+            sol = solve_ivp(system, (ta, tb), za, method=self.options["method"], t_eval=te,
+                            rtol=self.options["rtol"], atol=self.options["atol"])
+            for ti, zi in zip(sol.t, sol.y.T):
+                T.append(ti)
+                Z.append(zi)
+                U.append(k.control(ti, zi, p) if c is None else k.boundary_control(c, ti, zi, p))
+                A.append(-1 if c is None else c)
+        T, Z = np.array(T), np.array(Z)
+        G = np.array([k.constraint(ti, zi, p) for ti, zi in zip(T, Z)]).reshape(len(T), -1)
+        return {"t": T, "z": Z, "u": np.array(U).reshape(len(T), -1), "g": G,
+                "arc": np.array(A), "junctions": np.array([s[1] for s in segs[1:]])}
+
+    def constraint_violation(self, v, n_points=2001):
+        """Per path constraint, the largest ``max(0, g)`` on the free arcs."""
+        tr = self.trajectory(v, n_points)
+        free = tr["arc"] < 0
+        if not free.any():
+            return np.zeros(self.kernels.N_CONSTRAINTS)
+        return np.maximum(tr["g"][free].max(axis=0), 0.0)
+
+    def diagnostics(self, v, n_points=401):
+        """Checks of a solution beyond the residual.
+
+        Returns a dict with ``free_arc_violation`` (per constraint), ``touch_nu``
+        (should be >= 0), ``boundary_pi``, and per boundary arc the range of
+        its multiplier ``mu`` and of its controls along the arc.
+        """
+        k, p = self.kernels, self.params
+        tr = self.trajectory(v, n_points)
+        arcs = self.unpack_arcs(v)
+        out = {"free_arc_violation": self.constraint_violation(v, n_points),
+               "touch_nu": [a[1] for (kind, *_), a in zip(self.arcs, arcs) if kind == "touch"],
+               "boundary_pi": [a[2] for (kind, *_), a in zip(self.arcs, arcs)
+                               if kind == "boundary"],
+               "boundary_mu": [], "boundary_u": []}
+        for kind, c, _ in self.arcs:
+            if kind != "boundary":
+                continue
+            on = tr["arc"] == c
+            mu = [k.boundary_multiplier(c, ti, zi, p) for ti, zi in zip(tr["t"][on], tr["z"][on])]
+            out["boundary_mu"].append((min(mu), max(mu)))
+            out["boundary_u"].append((tr["u"][on].min(axis=0), tr["u"][on].max(axis=0)))
+        return out
+
+    # -- starting points ----------------------------------------------------
+
+    @classmethod
+    def from_penalty(cls, kernels, params, arcs, solution, penalty_params, **options):
+        """A :class:`MultiArcShooting` and an initial guess, from a penalty solution.
+
+        ``solution`` solves :class:`SingleShooting` at ``penalty_params`` (the
+        same problem with a large penalty weight). Its crossings of ``g = 0``
+        give the junction times: a boundary arc runs from the first to the
+        last crossing of its violated interval (the penalty solution may dip
+        back below the limit in between), and a touch sits at its middle. The costates come from ``solution``. The entry jump ``pi`` is
+        fitted to the costates: integrating the boundary arc back from the
+        penalty state at the exit gives ``lambda`` just after the entry, and
+        the jump from the penalty ``lambda`` just before it is fitted to
+        ``-dN/dx^T pi``.
+
+        Returns ``(shooting, v0)``.
+        """
+        shoot = cls(kernels, params, arcs, **options)
+        k = kernels
+        z0 = solution.z0
+        r = k.propagate(solution.t0, z0, solution.tf, penalty_params, **{
+            key: val for key, val in options.items() if key in ("method", "rtol", "atol")})
+        times, index = r["constraint_times"], r["constraint_index"]
+        n = k.N_STATES
+
+        def state_at(t):
+            return k.propagate(solution.t0, z0, t, penalty_params)["z"]
+
+        # Per constraint, the violated intervals [entry, exit] of the penalty
+        # solution, grouped into as many arcs as the structure has for it: a
+        # penalized boundary arc can dip back below the limit, so separate
+        # arcs at the longest feasible gaps.
+        spans = {}
+        for c in {c for _, c, _ in shoot.arcs}:
+            mine = times[index == c]
+            n_arcs = sum(1 for _, cc, _ in shoot.arcs if cc == c)
+            if len(mine) < 2 * n_arcs or len(mine) % 2:
+                raise ValueError(f"the penalty solution crosses {k.CONSTRAINT_NAMES[c]!r} "
+                                 f"{len(mine)} times; the structure needs {n_arcs} violated "
+                                 "intervals")
+            entries, exits = mine[0::2], mine[1::2]
+            gaps = entries[1:] - exits[:-1]
+            cuts = np.sort(np.argsort(gaps)[::-1][:n_arcs - 1])
+            bounds = np.concatenate([[-1], cuts, [len(entries) - 1]])
+            spans[c] = [(entries[bounds[i] + 1], exits[bounds[i + 1]]) for i in range(n_arcs)]
+        used = {c: 0 for c in spans}
+
+        values = []
+        for kind, c, q in shoot.arcs:
+            a, b = spans[c][used[c]]
+            used[c] += 1
+            if kind == "touch":
+                tc = 0.5 * (a + b)
+                _, Nx, _, _ = k.tangency_gradient(c, tc, state_at(tc), params)
+                jump = state_at(a)[n:] - state_at(b)[n:]
+                nu = np.linalg.lstsq(Nx[:1].T, jump, rcond=None)[0][0]
+                values.append((tc, nu))
+                continue
+            za = state_at(a)
+            back = k.propagate_boundary(c, b, state_at(b), a, params)["z"]
+            _, Nx, _, _ = k.tangency_gradient(c, a, za, params)
+            pi = np.linalg.lstsq(Nx.T, za[n:] - back[n:], rcond=None)[0]
+            values.append((a, b, pi))
+        return shoot, shoot.pack_arcs(solution.v, values)
+
+
 def parameter_continuation(kernels, params, name, values, v0, *, shooting_options=None,
                            solve_options=None, **continuation_options):
     """:func:`continuation` in one runtime parameter, such as a penalty weight.
@@ -327,23 +669,27 @@ def parameter_continuation(kernels, params, name, values, v0, *, shooting_option
     return continuation(solve_at, params[i], values, v0, **continuation_options)
 
 
-def continuation(solve_at, start, values, v0, *, min_step=1e-7, shrink=0.5):
+def continuation(solve_at, start, values, v0, *, min_step=1e-7, shrink=0.5, max_solves=2000):
     """Natural-parameter continuation from a solution ``v0`` at ``start``.
 
     ``solve_at(value, guess)`` returns a :class:`ShootingSolution` (or any
     object with ``v`` and ``success``) and is called for each target in
     ``values``, warm-started from the last solution. When it fails, a target
     partway (``shrink``) from the last solved value is inserted. Raises
-    ``RuntimeError`` when that step falls below ``min_step`` (relative).
-    Returns the list of ``(value, solution)``; the last entry is at
+    ``RuntimeError`` when that step falls below ``min_step`` (relative), or
+    after ``max_solves`` calls (a path that creeps forward in ever smaller
+    steps is stalled too). Returns the list of ``(value, solution)``; the last entry is at
     ``values[-1]``.
     """
     path = []
     v, current = np.asarray(v0, dtype=float), start
     targets = list(values)
-    i = 0
+    i = solves = 0
     while i < len(targets):
         target = targets[i]
+        if solves >= max_solves:
+            raise RuntimeError(f"continuation stalled at {current} after {solves} solves")
+        solves += 1
         sol = solve_at(target, v)
         if sol.success:
             path.append((target, sol))

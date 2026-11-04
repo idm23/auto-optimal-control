@@ -143,6 +143,26 @@ def bryson_denham():
         path_constraints=[PathConstraint(x - ell, "x_max", penalty=rho)])
 
 
+def velocity_limited_move():
+    """Minimum-energy rest-to-rest move ``x: 0 -> 1`` in ``t = 1`` with ``v <= V``.
+
+    ``x'' = u``, ``min int u^2/2``. Unconstrained, ``v`` peaks at 1.5, so for
+    ``1 < V < 3/2`` the order-1 limit ``v - V <= 0`` is ridden on
+    ``[t1, 1 - t1]`` with ``t1 = 3 (V - 1) / (2 V)``. Before it,
+    ``u = 2 V (t1 - t) / t1^2`` (decelerating smoothly onto the limit), and the
+    cost is ``4 V^2 / (3 t1)``.
+
+    params: ``V, rho``.
+    """
+    t, x, v, u = sp.symbols("t x v u", real=True)
+    V, rho = sp.symbols("V rho", positive=True)
+    return OptimalControlProblem(
+        name="velocity_limited_move", time=t, states=[x, v], controls=[u], params=[V, rho],
+        dynamics=[v, u], running_cost=u ** 2 / 2, initial_state=[0, 0],
+        final_state={x: 1, v: 0}, final_time=1,
+        path_constraints=[PathConstraint(v - V, "v_max", penalty=rho)])
+
+
 def all_examples():
     """Every example, by name (the bounded minimum-energy variant included)."""
     return {
@@ -153,4 +173,5 @@ def all_examples():
         "soft_terminal": soft_terminal_lq(),
         "low_thrust": planar_low_thrust_fuel(),
         "bryson_denham": bryson_denham(),
+        "velocity_limited_move": velocity_limited_move(),
     }

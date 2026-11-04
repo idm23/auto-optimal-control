@@ -19,7 +19,10 @@ Classical:
 - **brachistochrone**: minimum-time descent; closed-form cycloid.
 - **bryson_denham**: minimum energy with the order-2 state limit ``x <= l``
   (Bryson, Denham & Dreyfus 1963), solved by exterior-penalty continuation in
-  both regimes: a touch point and a boundary arc.
+  both regimes (a touch point and a boundary arc), then exactly by multi-arc
+  shooting seeded from the penalty solution.
+- **velocity_limit**: a rest-to-rest move with the order-1 limit ``v <= V``,
+  exactly by multi-arc shooting.
 """
 
 import time
@@ -33,8 +36,8 @@ from auto_optimal_control import examples
 from auto_optimal_control.build import build_kernels
 from auto_optimal_control.pontryagin import derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, UnitVector
-from auto_optimal_control.shooting import (ShootingError, SingleShooting, continuation,
-                                           parameter_continuation)
+from auto_optimal_control.shooting import (MultiArcShooting, ShootingError, SingleShooting,
+                                           continuation, parameter_continuation)
 
 
 @dataclass
@@ -461,12 +464,42 @@ def run_bryson_denham(cache_dir=None, seed=0):
                            bryson_denham_exact(ell), "closed form (Bryson, Denham & Dreyfus 1963)",
                            rtol, time.perf_counter() - start,
                            {"max_violation": sol.max_violation, "solves": len(path)}))
+        # Exact: the penalty solution seeds multi-arc shooting with the arc structure.
+        start = time.perf_counter()
+        arcs = [("touch" if ell >= 1 / 6 else "boundary", "x_max")]
+        shoot, v = MultiArcShooting.from_penalty(k, [ell, 0.0], arcs, sol, [ell, rho])
+        ex = shoot.solve(v)
+        rows.append(Result("bryson_denham", f"J (l={ell}, {regime}, exact arcs)", shoot.cost(ex.v),
+                           bryson_denham_exact(ell), "closed form (Bryson, Denham & Dreyfus 1963)",
+                           1e-10, time.perf_counter() - start,
+                           {"residual": ex.residual_norm, "max_violation": ex.max_violation}))
+    return rows
+
+
+def run_velocity_limit(cache_dir=None, seed=0):
+    """Order-1 limit v <= V on a rest-to-rest move: penalty continuation to
+    rho = 100, then exact multi-arc shooting."""
+    k = _kernels(examples.velocity_limited_move(), cache_dir)
+    rows = []
+    for V in (1.1, 1.2, 1.4):
+        start = time.perf_counter()
+        v = SingleShooting(k, [V, 1.0]).solve([12.0, 6.0, 0, 0]).v
+        rho, sol = parameter_continuation(k, [V, 1.0], "rho", np.logspace(0, 2, 9), v)[-1]
+        shoot, v = MultiArcShooting.from_penalty(k, [V, 0.0], [("boundary", "v_max")], sol,
+                                                 [V, rho])
+        ex = shoot.solve(v)
+        t1 = 3 * (V - 1) / (2 * V)
+        rows.append(Result("velocity_limit", f"J (V={V}, exact arcs)", shoot.cost(ex.v),
+                           4 * V ** 2 / (3 * t1), "closed form (order-1 boundary arc)", 1e-10,
+                           time.perf_counter() - start,
+                           {"residual": ex.residual_norm, "t_in": shoot.unpack_arcs(ex.v)[0][0]}))
     return rows
 
 
 ALL = {
     "brachistochrone": run_brachistochrone,
     "bryson_denham": run_bryson_denham,
+    "velocity_limit": run_velocity_limit,
     "orbit_raising": run_orbit_raising,
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,
