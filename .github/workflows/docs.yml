@@ -1,0 +1,71 @@
+name: Docs
+
+# Builds the documentation site with Sphinx, executing the lecture notebooks,
+# and deploys it to GitHub Pages on pushes to main. Pull requests build the
+# site (so a notebook that stops running fails the check) without deploying.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: build docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install the package and the docs tools
+        run: uv sync --locked --group docs
+
+      # Executed notebooks are cached by their code, so unchanged lectures
+      # are not re-run.
+      - uses: actions/cache@v4
+        with:
+          path: docs/_build/.jupyter_cache
+          key: jupyter-cache-${{ hashFiles('docs/notebooks/*.ipynb', 'src/**', 'uv.lock') }}
+          restore-keys: jupyter-cache-
+
+      - name: Build the site
+        run: uv run sphinx-build -b html --keep-going docs docs/_build/html
+
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          path: docs/_build/html
+
+  deploy:
+    name: deploy to GitHub Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
