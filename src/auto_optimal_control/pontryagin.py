@@ -91,6 +91,12 @@ class BoundaryArc:
     ``hamiltonian`` is ``H`` at ``u_b`` and ``running_cost`` is ``L`` there.
     At the entry, the costates jump by ``-dN/dx^T pi``; at the exit they are
     continuous, and ``H`` is continuous at both.
+
+    The same equations hold for bounded controls, smooth (``H`` quadratic) or
+    bang-bang (``H`` linear, so ``dH/du`` is the switching function): ``u_b``
+    is then the control that rides the limit, which must lie within its
+    bounds along the arc. ``bounds`` maps each bounded control to its
+    ``(lower, upper)``; shooting reports how far ``u_b`` leaves them.
     """
 
     control: dict
@@ -98,6 +104,7 @@ class BoundaryArc:
     dynamics: tuple
     hamiltonian: sp.Expr
     running_cost: sp.Expr
+    bounds: dict = None
 
 
 @dataclass(frozen=True)
@@ -386,8 +393,11 @@ def _boundary_arc(problem, H, costates, derivatives):
     order = len(derivatives) - 1
     if order > 2:
         return None, f"order {order}: exact arcs are supported for orders 1 and 2"
-    if problem.control_sets:
-        return None, "control sets: bounds on the controls along the arc are not handled"
+    if any(isinstance(cs, UnitVector) for cs in problem.control_sets):
+        return None, "unit-vector control sets are not supported with exact arcs"
+    if any(problem.time in e.free_symbols for e in derivatives[:order]):
+        # At the entry H then jumps by pi . dN/dt, which shooting does not model.
+        return None, "g, ..., g^(q-1) depend on time: exact arcs need a time-invariant limit"
     gq = derivatives[-1]
     mu = sp.Symbol("mu_b")
     lagrangian = H + mu * gq
@@ -402,9 +412,11 @@ def _boundary_arc(problem, H, costates, derivatives):
     law = {u: sol[u] for u in problem.controls}
     xdot = tuple(sp.simplify(f.subs(law)) for f in problem.dynamics)
     lamdot = tuple(sp.simplify(-sp.diff(lagrangian, x).subs(sol)) for x in problem.states)
+    bounds = {cs.control: (cs.lower, cs.upper) for cs in problem.control_sets}
     return BoundaryArc(control=law, multiplier=sol[mu], dynamics=xdot + lamdot,
                        hamiltonian=sp.simplify(H.subs(law)),
-                       running_cost=sp.simplify(problem.running_cost.subs(law))), ""
+                       running_cost=sp.simplify(problem.running_cost.subs(law)),
+                       bounds=bounds), ""
 
 
 def _state_constraints(problem, H=None, costates=()):

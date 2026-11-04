@@ -182,3 +182,34 @@ def test_gil_is_released(compiled):
         th.join()
     for z in results[1:]:
         np.testing.assert_array_equal(z, results[0])
+
+
+def test_saturation_kinks_restart_the_step(compiled):
+    """u = clip(-lam_v, -1, 1) with lam_v = 1.5 - 2t: saturated at -1, a ramp from
+    t = 0.25 to 1.25, saturated at 1. The integration restarts at both kinks
+    (they do not count as switches) and matches the exact piecewise
+    polynomial to the integration tolerance."""
+    k = compiled["min_energy_bounded"][2]
+    p = [2.0, 0.0, 0.0, 1.0]                       # T, a, b, u_max
+    z0 = [0.0, 0.0, 2.0, 1.5]
+    assert k.N_KINKS == 2
+    r = k.propagate(0.0, z0, 2.0, p, cost=True, max_switches=0, **KW)
+    assert r["status"] == 0 and len(r["switch_times"]) == 0
+
+    # Exact: integrate u piece by piece.
+    def pieces():
+        yield 0.0, 0.25, np.poly1d([-1.0])
+        yield 0.25, 1.25, np.poly1d([2.0, -1.5])
+        yield 1.25, 2.0, np.poly1d([1.0])
+
+    x = v = J = 0.0
+    for a, b, u in pieces():
+        V = u.integ()
+        X = (V - V(a) + v).integ()
+        x, v = x + X(b) - X(a), v + V(b) - V(a)
+        J += (u * u / 2).integ()(b) - (u * u / 2).integ()(a)
+    np.testing.assert_allclose(r["z"][:2], [x, v], rtol=0, atol=1e-11)
+    assert r["cost"] == pytest.approx(J, abs=1e-11)
+    tr = k.trajectory(0.0, z0, 2.0, p, t_eval=[2.0], **KW)
+    np.testing.assert_allclose(tr["z"][0, :2], [x, v], atol=1e-11)
+    assert len(tr["switch_times"]) == 0

@@ -21,12 +21,33 @@ import numpy as np
 
 from problems import (MultiArcShooting, SingleShooting, _kernels, bryson_denham_exact, examples,
                       parameter_continuation)
-from visuals.common import (BLUE, GRID, INK, INK2, MUTED, ORANGE, RAMP, header, load, recording,
+from visuals.common import (BLUE, GRID, INK, INK2, MUTED, ORANGE, RAMP, Problem, header, load, recording,
                             save, style, write)
 
-__all__ = ["record", "animate", "save", "load"]
+__all__ = ["record", "animate", "save", "load", "PROBLEM"]
 CASES = (("touch", 0.2, 8, 1e-10, 3), ("arc", 0.1, 7, 1e-8, 3))   # name, l, log10 rho, tol, seed exp
 
+
+PROBLEM = Problem(
+    name="The Bryson-Denham problem",
+    story=("A unit mass leaves x = 0 at speed 1 and must come back to x = 0 at speed −1 at "
+           "t = 1, without passing a wall at x = l,\nwith the least control effort. The limit "
+           "has order 2: for 1/6 ≤ l < 1/4 the wall is touched at one instant, below that it "
+           "is\nridden for a while (Bryson, Denham & Dreyfus 1963)."),
+    formulation=[
+        ("minimize", r"$J = \int_0^1 \frac{u^2}{2}\,dt$"),
+        ("dynamics", r"$\dot x = v, \quad \dot v = u$"),
+        ("path limit", r"$x(t) \leq l$   ($l = 0.2$: one touch;  $l = 0.1$: a boundary arc)"),
+        ("boundary", r"$x(0) = 0, \ v(0) = 1; \quad x(1) = 0, \ v(1) = -1$"),
+    ],
+    solved_by=[
+        "Exterior penalty ρ/2 max(0, x − l)², with ρ raised by continuation.",
+        "Multi-arc shooting with the structure (a touch, or a boundary arc), seeded from the "
+        "penalty solution: the closed form.",
+    ],
+    summary="min ∫u²/2 dt,  ẍ = u,  x ≤ l,  x(0) = 0,  v: 1 → −1 at t = 1",
+    source="Closed form: J = 2.24 (l = 0.2, touch),  J = 4/(9l) (l = 0.1, boundary arc)",
+)
 
 def record(cache_dir=None, verbose=True):
     k = _kernels(examples.bryson_denham(), cache_dir)
@@ -126,7 +147,7 @@ def animate(data, path, fps=30, dpi=100, stills_dir=None):
 
     fig = plt.figure(figsize=(12.8, 7.2), dpi=dpi)
     gs = fig.add_gridspec(3, 2, width_ratios=[1.25, 1], left=0.06, right=0.97, top=0.80,
-                          bottom=0.08, hspace=0.45, wspace=0.18)
+                          bottom=0.105, hspace=0.45, wspace=0.18)
     ax_x = fig.add_subplot(gs[:, 0])
     ax_u = fig.add_subplot(gs[0, 1])
     ax_l = fig.add_subplot(gs[1, 1], sharex=ax_u)
@@ -266,4 +287,4 @@ def animate(data, path, fps=30, dpi=100, stills_dir=None):
     plan = _plan(data, fps)
     mid = next(j for j, f in enumerate(plan) if f[0] == "motion" and f[1] >= 0.45 * len(t))
     return write(fig, draw, plan, path, fps, stills_dir, prefix="bryson_denham_",
-                 still_frames={"motion": mid})
+                 still_frames={"motion": mid}, problem=PROBLEM)

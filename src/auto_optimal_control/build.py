@@ -84,6 +84,7 @@ def _render_wrapper(pmp, prefix, header_name, macros):
         "exact_arcs": repr(tuple(c.boundary is not None for c in pmp.path_constraints)),
         "NC1": str(max(macros["NC"], 1)),
         "NM1": str(max(macros["NM"], 1)),
+        "NK1": str(max(macros["NK"], 1)),
         "free_tf": repr(bool(macros["FREE_TF"])),
         "NP1": str(max(macros["NP"], 1)),
         "NSW1": str(max(macros["NSW"], 1)),
@@ -254,7 +255,7 @@ class Kernels:
 
     def trajectory(self, t0, z0, t1, params=None, *, t_eval=None, n_points=201, arc=None,
                    method="DOP853", rtol=1e-10, atol=1e-12, max_switches=10000,
-                   terminate=False, n_interior=4):
+                   terminate=False, n_interior=4, constraint_events=True):
         """The extremal from ``z0``, sampled: states, costates, controls, ``H`` and ``g``.
 
         Integrates like :func:`propagate`, as one FNI hybrid integration
@@ -263,7 +264,7 @@ class Kernels:
         dense output at ``t_eval`` (default: ``n_points`` evenly spaced
         times). With ``terminate`` (as in :func:`propagate`) the integration
         stops at a violation and only the times reached are sampled.
-        ``n_interior`` is as in :func:`propagate`.
+        ``n_interior`` and ``constraint_events`` are as in :func:`propagate`.
 
         Returns a dict with ``t``, ``z`` (len, NZ), ``u`` (len, NU), ``H``
         (len,), ``g`` (len, NC), ``switch_times``, ``switch_index``,
@@ -274,20 +275,36 @@ class Kernels:
         nsw, nm = mod.N_SWITCHING, mod.N_MODES
         p = None if params is None else np.asarray(params, dtype=float)
         z = np.asarray(z0, dtype=float)
-        arc = mod.initial_arc(t0, z, p) if arc is None else np.asarray(arc, dtype=np.intc)
+        arc = mod.initial_arc(t0, z, p) if arc is None else np.array(arc, dtype=np.intc)
+        nc = mod.N_CONSTRAINTS if constraint_events else 0
+        if not constraint_events:
+            arc[nsw:] = 0
         stop = np.zeros(mod.N_CONSTRAINTS, dtype=bool)
-        if mod.N_CONSTRAINTS:
+        if nc:
             stop[:] = mod._stop_mask(terminate)[:mod.N_CONSTRAINTS]
         dynamics = mod.ArcDynamics(p, arc if nm else None)
         violated = []
 
-        rates = [mod.ConstraintRate(c, p, arc) for c in range(mod.N_CONSTRAINTS)]
+        rates = [mod.ConstraintRate(c, p, arc) for c in range(nc)]
+        kinks = [mod.Kink(i, p, arc, True, 0.0) for i in range(mod.N_KINKS)]
+        unchanged = []                   # resets that left the arc as it was
 
         def flip(k, t, y):
-            # As the compiled reset map: a constraint's flag follows the sign
-            # of dg/dt at the crossing, and a touch flips it.
+            # As the compiled reset map: a flag follows the sign of its mode
+            # function's rate at the crossing, and a tangential zero flips it.
+            # A saturation kink only restarts the step.
+            if k >= nsw + nc:
+                return y
             a = dynamics.arc
             flag = 1 - a[k]
+            if k < nsw:
+                # As for constraints: the side S moves to (upper where it falls).
+                St, Sz, _ = mod.switching_gradient(t, y[:mod.N_Z], p)
+                rate = St[k] + Sz[k] @ mod.rhs_arc(t, y[:mod.N_Z], p, a)
+                flag = 1 if rate < 0 else 0 if rate > 0 else flag
+                if flag == a[k]:
+                    unchanged.append((t, k))
+                    return y
             if k >= nsw:
                 rate = mod.constraint_rate(t, y[:mod.N_Z], p, a)[k - nsw]
                 flag = 1 if rate > 0 else 0 if rate < 0 else flag
@@ -296,7 +313,7 @@ class Kernels:
                     return None
             a[k] = flag
             dynamics.arc = a
-            for r in rates:
+            for r in rates + kinks:
                 r.arc = a
             return y
 
@@ -306,13 +323,14 @@ class Kernels:
             status = mod.STATUS_VIOLATED
         else:
             detection = ({"event_detection": "interior", "n_interior": int(n_interior)}
-                         if mod.N_CONSTRAINTS and n_interior else {})
+                         if nc and n_interior else {})
             events = ([mod.Switching(k, p, True, 0.0) for k in range(nsw)]
-                      + [mod.Constraint(c, p, True, 0.0) for c in range(mod.N_CONSTRAINTS)]
-                      + rates)
+                      + [mod.Constraint(c, p, True, 0.0) for c in range(nc)]
+                      + kinks + rates)
             # Constraint events report g, the mode function is -g: same zeros.
             # The rate events (peaks and troughs of g) only split steps.
-            sol = solve_hybrid(dynamics, (t0, t1), z, events or None, flip if nm else None,
+            # Kinks come before them so the guards' indices stay contiguous.
+            sol = solve_hybrid(dynamics, (t0, t1), z, events or None, flip if events else None,
                                method=method, dense_output=True, rtol=rtol, atol=atol,
                                max_resets=max_switches, **detection)
             t_end = sol.t[-1]
@@ -335,6 +353,9 @@ class Kernels:
         times = np.zeros(0) if sol is None else np.asarray(sol.t_resets, dtype=float)
         index = (np.zeros(0, dtype=np.intp) if sol is None
                  else np.asarray(sol.reset_events, dtype=np.intp))
+        keep = (index < nsw + nc) & ~np.array(   # drop the kinks and the no-op resets
+            [(ti, ki) in unchanged for ti, ki in zip(times, index)], dtype=bool).reshape(-1)
+        times, index = times[keep], index[keep]
         if violated:                     # a stopping reset is not recorded by FNI
             times = np.append(times, violated[0][0])
             index = np.append(index, violated[0][1])

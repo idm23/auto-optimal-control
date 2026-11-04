@@ -30,7 +30,7 @@ def test_cart_pole_recording_and_animation(kernel_cache, tmp_path):
     out = cart_pole.animate(again, tmp_path / "cart_pole.gif", fps=4, dpi=40,
                             stills_dir=tmp_path)
     assert out.stat().st_size > 0
-    for stage in ("direct", "polish", "search", "motion"):
+    for stage in ("problem", "direct", "polish", "search", "motion"):
         assert (tmp_path / f"cart_pole_{stage}.png").exists()
 
 
@@ -50,7 +50,7 @@ def test_earth_mars_recording_and_animation(kernel_cache, tmp_path):
     out = earth_mars.animate(data, tmp_path / "earth_mars.gif", fps=3, dpi=40,
                              stills_dir=tmp_path)
     assert out.stat().st_size > 0
-    for stage in ("shoot", "cont", "flight"):
+    for stage in ("problem", "shoot", "cont", "flight"):
         assert (tmp_path / f"earth_mars_{stage}.png").exists()
 
 
@@ -67,5 +67,49 @@ def test_bryson_denham_recording_and_animation(kernel_cache, tmp_path):
     assert data["touch_exact_R"][-1] < 1e-10 and data["arc_exact_R"][-1] < 1e-10
     out = bryson_denham.animate(data, tmp_path / "bd.gif", fps=3, dpi=40, stills_dir=tmp_path)
     assert out.stat().st_size > 0
-    for stage in ("touch_pen", "touch_exact", "arc_pen", "arc_exact", "motion"):
+    for stage in ("problem", "touch_pen", "touch_exact", "arc_pen", "arc_exact", "motion"):
         assert (tmp_path / f"bryson_denham_{stage}.png").exists()
+
+
+@pytest.mark.slow
+def test_velocity_limit_recording_and_animation(kernel_cache, tmp_path):
+    pytest.importorskip("matplotlib")
+    from visuals import velocity_limit
+
+    data = velocity_limit.record(cache_dir=kernel_cache, verbose=False)
+    assert data["cost"] == pytest.approx(data["J_exact"], rel=1e-10)
+    assert data["exact_R"][-1] < 1e-10
+    assert np.abs(data["exact_u"][-1]).max() <= 8.0 + 1e-9          # the force limit holds
+    np.testing.assert_allclose(data["exact_junctions"][-1], [data["t1"], 1 - data["t1"]],
+                               atol=1e-7)
+    out = velocity_limit.animate(data, tmp_path / "vl.gif", fps=3, dpi=40, stills_dir=tmp_path)
+    assert out.stat().st_size > 0
+    for stage in ("problem", "pen", "exact", "motion"):
+        assert (tmp_path / f"velocity_limit_{stage}.png").exists()
+
+
+@pytest.mark.slow
+def test_speed_limit_recording_and_animation(kernel_cache, tmp_path):
+    pytest.importorskip("matplotlib")
+    from visuals import speed_limit
+
+    data = speed_limit.record(cache_dir=kernel_cache, verbose=False)
+    assert data["tf"] == pytest.approx(4.0, abs=1e-12)
+    np.testing.assert_allclose(data["junctions"], [1.0, 3.0], atol=1e-12)
+    assert data["eps"][0] == 1.0 and data["eps"][-1] == pytest.approx(1e-4)
+    assert np.all(np.diff(data["eps_tf"]) < 0)                      # t_f falls toward 4
+    assert data["bang_R"][-1] < 1e-12
+    out = speed_limit.animate(data, tmp_path / "sl.gif", fps=3, dpi=40, stills_dir=tmp_path)
+    assert out.stat().st_size > 0
+    for stage in ("problem", "pen", "eps", "bang", "motion"):
+        assert (tmp_path / f"speed_limit_{stage}.png").exists()
+
+
+def test_every_suite_states_its_problem():
+    pytest.importorskip("matplotlib")
+    from animate import SUITES
+
+    for name, suite in SUITES.items():
+        problem = suite.PROBLEM
+        assert problem.name and problem.story and problem.summary, name
+        assert problem.formulation and problem.solved_by, name

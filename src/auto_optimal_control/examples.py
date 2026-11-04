@@ -143,7 +143,7 @@ def bryson_denham():
         path_constraints=[PathConstraint(x - ell, "x_max", penalty=rho)])
 
 
-def velocity_limited_move():
+def velocity_limited_move(bounded=False):
     """Minimum-energy rest-to-rest move ``x: 0 -> 1`` in ``t = 1`` with ``v <= V``.
 
     ``x'' = u``, ``min int u^2/2``. Unconstrained, ``v`` peaks at 1.5, so for
@@ -152,19 +152,93 @@ def velocity_limited_move():
     ``u = 2 V (t1 - t) / t1^2`` (decelerating smoothly onto the limit), and the
     cost is ``4 V^2 / (3 t1)``.
 
-    params: ``V, rho``.
+    With ``bounded=True`` the force is also limited, ``|u| <= u_max``. Below
+    ``u_max = 2 V / t1`` the move starts at full force, then eases onto the
+    limit: see :func:`velocity_limited_move_bounded_exact`.
+
+    params: ``V, rho`` (plus ``u_max`` if bounded).
     """
     t, x, v, u = sp.symbols("t x v u", real=True)
     V, rho = sp.symbols("V rho", positive=True)
+    params, sets = [V, rho], []
+    if bounded:
+        umax = sp.Symbol("u_max", positive=True)
+        params.append(umax)
+        sets.append(Box(u, -umax, umax))
     return OptimalControlProblem(
-        name="velocity_limited_move", time=t, states=[x, v], controls=[u], params=[V, rho],
-        dynamics=[v, u], running_cost=u ** 2 / 2, initial_state=[0, 0],
-        final_state={x: 1, v: 0}, final_time=1,
+        name="velocity_limited_move" + ("_bounded" if bounded else ""), time=t, states=[x, v],
+        controls=[u], params=params, dynamics=[v, u], running_cost=u ** 2 / 2,
+        initial_state=[0, 0], final_state={x: 1, v: 0}, final_time=1, control_sets=sets,
         path_constraints=[PathConstraint(v - V, "v_max", penalty=rho)])
 
 
+def velocity_limited_move_bounded_exact(V, umax):
+    """The closed form of :func:`velocity_limited_move` with ``|u| <= u_max``.
+
+    The move is symmetric. Up to the limit, ``u = min(u_max, c (t1 - t))``:
+    full force for ``s``, then a linear ramp of length ``tau = u_max / c`` down
+    to ``u = 0`` at ``t1 = s + tau``, where ``v`` reaches ``V`` (the costate
+    ``lambda_v`` vanishes there by continuity of ``H``). Then
+    ``v(t1) = u_max (s + tau / 2) = V`` and
+    ``x(t1) = u_max (s^2 / 2 + s tau + tau^2 / 3)``, and the cruise covers the
+    rest: ``2 x(t1) + V (1 - 2 t1) = 1``. Solving that for ``tau`` gives
+    ``J = u_max^2 (s + tau / 3)``.
+
+    Returns ``(J, t1, s)``. Valid for ``V (1 - V / u_max) > 1`` (otherwise
+    even full force cannot cover the distance under the limit) and while
+    ``s > 0`` (``u_max < 2 V / t1`` of the unbounded move).
+    """
+    from scipy.optimize import brentq
+
+    def parts(tau):
+        s = V / umax - tau / 2
+        return s, umax * (s ** 2 / 2 + s * tau + tau ** 2 / 3)
+
+    def gap(tau):
+        s, x1 = parts(tau)
+        return 2 * x1 + V * (1 - 2 * (s + tau)) - 1
+
+    if not V * (1 - V / umax) > 1:
+        raise ValueError("infeasible: the distance cannot be covered under both limits")
+    tau = brentq(gap, 1e-12, 2 * V / umax)
+    s, _ = parts(tau)
+    if not s > 0:
+        raise ValueError("u_max is not active: use the unbounded closed form")
+    return umax ** 2 * (s + tau / 3), s + tau, s
+
+
+def speed_limited_min_time(smoothed=False):
+    """Minimum-time rest-to-rest run over a distance ``D`` with ``|u| <= u_max`` and ``v <= V``.
+
+    ``x'' = u``: a train between two stations, with a speed limit. The
+    control is bang-bang on ``S = lambda_v``: full power to the limit (at
+    ``t1 = V / u_max``), coast at ``v = V`` with ``u = 0`` (a boundary arc of
+    the order-1 limit ``v - V <= 0``), then full braking. While
+    ``D > V^2 / u_max``, ``t_f = D / V + V / u_max``.
+
+    With ``smoothed=True`` the running cost is ``1 + eps u^2 / 2`` instead of
+    ``1``: the control is then clipped-linear, and ``eps -> 0`` recovers the
+    bang-bang run. That variant also has a penalty weight ``rho`` on the
+    limit, for exterior-penalty continuation.
+
+    params: ``V, D, u_max`` (plus ``eps, rho`` if smoothed).
+    """
+    t, x, v, u = sp.symbols("t x v u", real=True)
+    V, D, umax = sp.symbols("V D u_max", positive=True)
+    params, cost, penalty = [V, D, umax], sp.S.One, None
+    if smoothed:
+        eps, rho = sp.symbols("eps rho", positive=True)
+        params += [eps, rho]
+        cost, penalty = 1 + eps * u ** 2 / 2, rho
+    return OptimalControlProblem(
+        name="speed_limited_min_time" + ("_smoothed" if smoothed else ""), time=t,
+        states=[x, v], controls=[u], params=params, dynamics=[v, u], running_cost=cost,
+        initial_state=[0, 0], final_state={x: D, v: 0}, control_sets=[Box(u, -umax, umax)],
+        path_constraints=[PathConstraint(v - V, "v_max", penalty=penalty)])
+
+
 def all_examples():
-    """Every example, by name (the bounded minimum-energy variant included)."""
+    """Every example, by name (the bounded and smoothed variants included)."""
     return {
         "zermelo": zermelo(),
         "min_time": double_integrator_min_time(),
@@ -174,4 +248,7 @@ def all_examples():
         "low_thrust": planar_low_thrust_fuel(),
         "bryson_denham": bryson_denham(),
         "velocity_limited_move": velocity_limited_move(),
+        "velocity_limited_move_bounded": velocity_limited_move(bounded=True),
+        "speed_limited_min_time": speed_limited_min_time(),
+        "speed_limited_min_time_smoothed": speed_limited_min_time(smoothed=True),
     }

@@ -25,6 +25,7 @@ cdef extern from "{{header}}" nogil:
     int P_switching_grad "{{P}}switching_grad"(double t, const double* z, const double* p, double* St, double* Sz, double* Sp)
     int P_constraint "{{P}}constraint"(double t, const double* z, const double* p, double* g)
     int P_modes "{{P}}modes"(double t, const double* z, const double* p, double* M)
+    int P_kinks_arc "{{P}}kinks_arc"(double t, const double* z, const double* p, const int* arc, double* K)
     int P_constraint_rate_arc "{{P}}constraint_rate_arc"(double t, const double* z, const double* p, const int* arc, double* gd)
     int P_hamiltonian_grad "{{P}}hamiltonian_grad"(double t, const double* z, const double* p, double* Ht, double* Hz)
     int P_b_rhs "{{P}}boundary_rhs"(int c, double t, const double* z, const double* p, double* dz)
@@ -39,6 +40,7 @@ cdef extern from "{{header}}" nogil:
     int P_b_tangency_grad "{{P}}boundary_tangency_grad"(int c, double t, const double* z, const double* p, double* Nt, double* Nx)
     int P_b_tangency_hess "{{P}}boundary_tangency_hess"(int c, double t, const double* z, const double* p, double* Nxx, double* Nxt)
     int P_control "{{P}}control"(double t, const double* z, const double* p, double* u)
+    int P_control_bounds "{{P}}control_bounds"(double t, const double* z, const double* p, double* lo, double* hi)
     int P_hamiltonian "{{P}}hamiltonian"(double t, const double* z, const double* p, double* H)
     int P_cost_rate "{{P}}cost_rate"(double t, const double* z, const double* p, double* L)
     int P_cost_rate_arc "{{P}}cost_rate_arc"(double t, const double* z, const double* p, const int* arc, double* L)
@@ -51,6 +53,8 @@ cdef enum:
     NSW = {{NSW}}
     NC = {{NC}}
     NM = {{NM}}
+    NK = {{NK}}
+    NK1 = {{NK1}}
     NU = {{NU}}
     NNU = {{NNU}}
     NR = {{NR}}
@@ -59,8 +63,10 @@ cdef enum:
     NC1 = {{NC1}}
     NM1 = {{NM1}}
     QMAX = {{QMAX}}
-    NE = {{NM}} + {{NC}}    # FNI events: the NM mode guards, then one peak guard per constraint
-    NE1 = {{NM1}} + {{NC1}}
+    # FNI events: the NM mode guards, one peak guard per constraint, then the NK
+    # saturation guards
+    NE = {{NM}} + {{NC}} + {{NK}}
+    NE1 = {{NM1}} + {{NC1}} + {{NK1}}
     NNU1 = {{NNU1}}
 
 N_STATES = NZ // 2
@@ -69,6 +75,7 @@ N_PARAMS = NP
 N_SWITCHING = NSW
 N_CONSTRAINTS = NC
 N_MODES = NM
+N_KINKS = NK
 CONSTRAINT_NAMES = {{constraint_names}}
 CONSTRAINT_ORDERS = {{constraint_orders}}
 EXACT_ARCS = {{exact_arcs}}     # per constraint: boundary-arc kernels generated
@@ -156,7 +163,7 @@ cdef struct _ctx:
 
 cdef struct _ev_ctx:
     const double* p
-    const int* arc      # constraint rates only: the arc the flow is on
+    const int* arc      # constraint rates and kinks only: the arc the flow is on
     int k
 
 
@@ -201,6 +208,14 @@ cdef int _rate_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g)
     cdef double Gd[NC1]
     cdef int rc = P_constraint_rate_arc(t, y, c.p, c.arc, Gd)
     g[0] = Gd[c.k]
+    return rc
+
+
+cdef int _kink_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
+    cdef _ev_ctx* c = <_ev_ctx*> ctx
+    cdef double K[NK1]
+    cdef int rc = P_kinks_arc(t, y, c.p, c.arc, K)
+    g[0] = K[c.k]
     return rc
 
 
@@ -332,6 +347,44 @@ cdef class ConstraintRate(EventFunction):
             self.arc_buf[i] = a[i]
 
 
+cdef class Kink(EventFunction):
+    """Event on saturation guard ``k``: zero where a clipped control meets its bound.
+
+    ``F`` is continuous there but its derivative jumps. Restarting at its
+    zeros (an identity reset) keeps the steps after one from straddling it,
+    so the step-size control does not fight the kink. The state at the
+    restart comes from the dense output of the step that found the root, so
+    it carries that step's error, at the integration tolerance (as at a
+    switch). Set ``arc`` whenever the flow's arc changes.
+    """
+
+    cdef _ev_ctx ctx
+    cdef int arc_buf[NM1]
+
+    def __init__(self, int k, params=None, arc=None, terminal=False, double direction=0.0):
+        super().__init__(terminal, direction)
+        if not 0 <= k < NK:
+            raise ValueError(f"saturation guard index {k} out of range ({NK} guards)")
+        if NP:
+            self._init_params(_params(params)[:NP], PARAM_NAMES)
+        self.ctx.p = self._params_ptr()
+        self.ctx.k = k
+        self.ctx.arc = self.arc_buf
+        self.arc = np.zeros(NM, dtype=np.intc) if arc is None else arc
+        self.c_fn = _kink_fn
+        self.c_ctx = &self.ctx
+
+    @property
+    def arc(self):
+        return np.array([self.arc_buf[i] for i in range(NM)], dtype=np.intc)
+
+    @arc.setter
+    def arc(self, value):
+        a = _arc(value)
+        for i in range(NM):
+            self.arc_buf[i] = a[i]
+
+
 # -----------------------------------------------------------------------------
 # Pointwise evaluation
 # -----------------------------------------------------------------------------
@@ -384,6 +437,17 @@ def control(double t, z, params=None):
     cdef double[::1] ov = out
     _check(P_control(t, &zv[0], &pv[0], &ov[0]), "control")
     return out[:NU]
+
+
+def control_bounds(double t, z, params=None):
+    """``(lower, upper)`` (NU each) of the controls; infinite where unbounded."""
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    lo, hi = np.zeros(max(NU, 1)), np.zeros(max(NU, 1))
+    cdef double[::1] lv = lo
+    cdef double[::1] hv = hi
+    _check(P_control_bounds(t, &zv[0], &pv[0], &lv[0], &hv[0]), "control_bounds")
+    return lo[:NU], hi[:NU]
 
 
 def hamiltonian(double t, z, params=None):
@@ -443,6 +507,18 @@ def constraint_rate(double t, z, params=None, arc=None):
     cdef double[::1] ov = out
     _check(P_constraint_rate_arc(t, &zv[0], &pv[0], &av[0], &ov[0]), "constraint_rate")
     return out[:NC]
+
+
+def kinks(double t, z, params=None, arc=None):
+    """The saturation guards (NK,) on ``arc`` (default: the arc at ``(t, z)``)."""
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef int[::1] av = _arc(initial_arc(t, zv[:NZ], np.asarray(pv)[:NP] if NP else None)
+                            if arc is None else arc)
+    out = np.zeros(NK1)
+    cdef double[::1] ov = out
+    _check(P_kinks_arc(t, &zv[0], &pv[0], &av[0], &ov[0]), "kinks")
+    return out[:NK]
 
 
 def modes(double t, z, params=None):
@@ -521,25 +597,45 @@ STATUS_VIOLATED = STATUS_CONSTRAINT_VIOLATED
 
 cdef struct _switch_ctx:
     _ctx* c
+    const int* kind     # per FNI event: its index among the NE (modes, rates, kinks)
     int stm
     double* sw_t
     int* sw_k
     Py_ssize_t* n_sw
+    Py_ssize_t max_sw   # with kinks, FNI's reset limit is off and this one counts switches
     int jump_failed
     int violated
+    int too_many
 
 
 cdef int _flag_after(int k, double t, const double* y, _ctx* c) noexcept nogil:
     """Arc flag ``k`` just after its mode function crosses zero at ``t``.
 
-    A path constraint's flag is set from the sign of ``dg/dt`` there (1 when
-    entering the violated side), so it always matches the side the flow
-    moves to. A tangential touch (``dg/dt = 0``) flips it."""
+    The flag follows the side the flow moves to, from the sign of the mode
+    function's rate there: a path constraint's flag is 1 when ``dg/dt > 0``
+    (entering the violated side), a bang-bang flag 1 (upper bound) when
+    ``dS/dt < 0``. So a "crossing" that rounding reports where the function
+    starts at zero leaves the flag alone. A tangential zero (rate 0) flips it."""
     cdef double Gd[NC1]
+    cdef double St[NSW1]
+    cdef double Sz[NSW1 * NZ]
+    cdef double Sp[NSW1 * NP1]
+    cdef double F[NZ]
+    cdef double Sdot
+    cdef int i
     if k >= NSW and P_constraint_rate_arc(t, y, c.p, c.arc, Gd) == 0:
         if Gd[k - NSW] > 0:
             return 1
         if Gd[k - NSW] < 0:
+            return 0
+    if k < NSW and P_switching_grad(t, y, c.p, St, Sz, Sp) == 0 \
+            and P_rhs_arc(t, y, c.p, c.arc, F) == 0:
+        Sdot = St[k]
+        for i in range(NZ):
+            Sdot += Sz[k * NZ + i] * F[i]
+        if Sdot < 0:
+            return 1
+        if Sdot > 0:
             return 0
     return 1 - c.arc[k]
 
@@ -551,8 +647,15 @@ cdef int _switch_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n,
     A path constraint marked to stop ends the integration when it becomes
     violated."""
     cdef _switch_ctx* r = <_switch_ctx*> ctx
-    cdef int k = <int> event
+    cdef int k = r.kind[event]
+    if k >= NM:
+        return FNI_RESET_CONTINUE       # a saturation kink: restart the step there
+    if r.n_sw[0] >= r.max_sw:
+        r.too_many = 1
+        return FNI_RESET_STOP
     cdef int flag = _flag_after(k, t, y, r.c)
+    if k < NSW and flag == r.c.arc[k]:
+        return FNI_RESET_CONTINUE       # already on that side: not a switch
     r.sw_t[r.n_sw[0]] = t
     r.sw_k[r.n_sw[0]] = k
     r.n_sw[0] += 1
@@ -581,11 +684,12 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     starts and ends inside one step is still found."""
     cdef fni_event events[NE1]
     cdef _ev_ctx evc[NE1]
+    cdef int kind[NE1]
     cdef fni_hybrid_options hopt
     cdef _switch_ctx rctx
     cdef fni_stats st
     cdef int k, rc
-    cdef Py_ssize_t i
+    cdef Py_ssize_t i, ne = 0
 
     n_sw[0] = 0
     for k in range(NC if ctx.constraint_events else 0):
@@ -598,25 +702,39 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
             status[0] = STATUS_CONSTRAINT_VIOLATED
             return FNI_OK
     for k in range(NE):
-        evc[k].p = ctx.p
-        evc[k].arc = ctx.arc
-        evc[k].k = k if k < NM else k - NM
-        events[k].fn = _event_fn if k < NM else _rate_fn
-        events[k].ctx = &evc[k]
-        events[k].direction = 0.0
-        events[k].max_events = 1.0 if k < NM else INFINITY
-    hopt.max_resets = max_sw
+        if not ctx.constraint_events and NSW <= k < NM + NC:
+            continue                    # the path constraints' guards
+        evc[ne].p = ctx.p
+        evc[ne].arc = ctx.arc
+        kind[ne] = k
+        if k < NM:
+            evc[ne].k = k
+            events[ne].fn = _event_fn
+        elif k < NM + NC:
+            evc[ne].k = k - NM
+            events[ne].fn = _rate_fn
+        else:
+            evc[ne].k = k - NM - NC
+            events[ne].fn = _kink_fn
+        events[ne].ctx = &evc[ne]
+        events[ne].direction = 0.0
+        # Mode and kink guards stop the step (a reset); the peaks of g only split it.
+        events[ne].max_events = INFINITY if NM <= k < NM + NC else 1.0
+        ne += 1
+    hopt.max_resets = -1 if NK else max_sw
     hopt.min_dwell = 0.0
     hopt.reselect_step = False
     rctx.c = ctx
+    rctx.kind = kind
     rctx.stm = stm
     rctx.sw_t = sw_t
     rctx.sw_k = sw_k
     rctx.n_sw = n_sw
+    rctx.max_sw = max_sw
     rctx.jump_failed = 0
     rctx.violated = 0
-    rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events,
-                              NE if ctx.constraint_events else NSW,
+    rctx.too_many = 0
+    rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events, ne,
                               _switch_reset, &rctx, &hopt, y_out, NULL, NULL, NULL, NULL,
                               NULL, 0, &st, NULL)
     nfev[0] = st.nfev
@@ -627,7 +745,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
         status[0] = STATUS_CONSTRAINT_VIOLATED
     elif rctx.jump_failed:
         status[0] = STATUS_JUMP_FAILED
-    elif st.status == FNI_STATUS_RESET_LIMIT:
+    elif rctx.too_many or st.status == FNI_STATUS_RESET_LIMIT:
         status[0] = STATUS_TOO_MANY_SWITCHES
     else:
         status[0] = st.status
