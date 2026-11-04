@@ -237,6 +237,45 @@ disagree about the dynamics, and Newton stalls. Two mechanisms prevent it:
 The reset map sets each constraint's flag from the sign of `dg/dt` at the
 crossing, so the flag always matches the side the flow moves to.
 
+### Exact boundary arcs and touch points
+
+The penalty solution only approaches the constrained optimum.
+`MultiArcShooting` solves for it exactly, given the sequence of constrained
+arcs:
+
+```python
+from auto_optimal_control.shooting import MultiArcShooting
+
+# The penalty solution at rho supplies the structure's junction times and multipliers.
+shoot, v0 = MultiArcShooting.from_penalty(k, [ell, 0.0], [("boundary", "x_max")],
+                                          penalty_solution, [ell, rho])
+sol = shoot.solve(v0)
+shoot.unpack_arcs(sol.v)        # [(t_entry, t_exit, pi)]
+shoot.cost(sol.v), shoot.diagnostics(sol.v), shoot.trajectory(sol.v)
+```
+
+- **Boundary arc** `("boundary", c)`, for order 1 or 2. Along it the control
+  keeps `g^(q) = 0`. `derive` finds it, together with the multiplier `mu` of
+  `H + mu g^(q)`, from `g^(q) = 0` and `dH/du + mu dg^(q)/du = 0`. The costates
+  jump by `-dN/dx^T pi` at the entry, where `N = (g, ..., g^(q-1)) = 0`, and
+  are continuous at the exit. `H` is continuous at both junctions (indirect
+  adjoining; Bryson, Denham & Dreyfus 1963; Maurer 1977). Unknowns: entry,
+  exit and `pi`.
+- **Touch point** `("touch", c)`, for order 2: `g = g' = 0` at the contact,
+  with `lambda+ = lambda- - nu dg/dx`. Unknowns: the time and `nu`.
+- **Exact Jacobian.** The STM is chained across arcs, with the derivatives of
+  each jump and of each junction time.
+- **Checks.** `diagnostics` reports violations on the free arcs (a wrong
+  structure shows up there), `nu` (it must be ≥ 0), `pi`, and the range of `mu`
+  and of the controls on each boundary arc.
+- **Seeding from a penalty solution.** `from_penalty` takes junction times
+  from a penalty solution's crossings. A penalized boundary arc may dip back
+  below the limit, so each arc spans its first to last crossing. It fits
+  `pi` by integrating the boundary arc back from the exit.
+
+`velocity_limited_move` (order 1) and `bryson_denham` (order 2, both regimes)
+are solved to round-off against their closed forms.
+
 ## What `derive` produces
 
 `derive(problem)` returns a `PontryaginSystem`:
@@ -252,6 +291,7 @@ crossing, so the flag always matches the side the flow moves to.
 | `running_cost` | `L` at `u*`, to accumulate the cost |
 | `path_constraints` | `StateConstraint(name, expr, order, derivatives, penalty)` per path constraint |
 | `penalty` | `sum w/2 max(0, g)^2`, included in `hamiltonian`, `dynamics` and `running_cost` |
+| `path_constraints[c].boundary` | `BoundaryArc(control, multiplier, dynamics, hamiltonian, running_cost)` for exact arcs (orders 1 and 2), or `None` with the reason in `unsupported` |
 | `boundary` | the boundary conditions: `residuals`, `unknowns` and the boundary symbols |
 
 The boundary residuals are the fixed initial states (or `lam_i(t_0) = 0` when
@@ -262,8 +302,8 @@ when the final time is free. There are as many residuals as unknowns.
 `auto_optimal_control.examples` has the problems the tests use: Zermelo's
 navigation problem, minimum-time and minimum-energy double integrators
 (unbounded and saturated), a terminal-cost LQ problem and a fuel-optimal
-planar low-thrust transfer, and the Bryson–Denham problem (an order-2
-state limit).
+planar low-thrust transfer, the Bryson–Denham problem (an order-2 state
+limit) and a velocity-limited move (an order-1 limit).
 
 ## Tests
 
@@ -300,13 +340,19 @@ state limit).
   STM matches finite differences across them. Bryson–Denham penalty
   continuation reaches both closed forms. Termination is checked in
   `propagate`, batches, `trajectory` and shooting.
+- **`test_exact_arcs.py`:** boundary-arc derivation; the exact-arc kernels
+  against finite differences; `MultiArcShooting` on order-1 and order-2
+  boundary arcs and a touch point, against closed forms (costates, junction
+  times, jumps, cost), seeded from penalty solutions. Also its Jacobian
+  against finite differences, a wrong structure detected as a free-arc
+  violation, and validation.
 - **`test_shooting.py`:** `SingleShooting`'s unknown layout, its Jacobian
   against finite differences (including a free initial state), solves
   against closed forms, multistart and continuation.
 
 ## Benchmarks against the literature
 
-`benchmarks/` solves six canonical problems from scratch and compares each
+`benchmarks/` solves seven canonical problems from scratch and compares each
 indirect solution with a published value. It starts from random costate
 guesses, uses continuation where needed, and for the cart-pole lifts
 costates from a direct solution. Run them with
@@ -318,6 +364,8 @@ checks them too. They are solved with `auto_optimal_control.shooting`.
 | Brachistochrone (3 cases) | `t_f` | matches to 1e-13 | closed-form cycloid | — |
 | Bryson–Denham, touch point (`l = 0.2`, ρ = 1e8) | `∫u²/2` | 2.2399263 | 2.24 | closed form (Bryson, Denham & Dreyfus 1963) |
 | Bryson–Denham, boundary arc (`l = 0.1`, ρ = 1e7) | `∫u²/2` | 4.4430848 | 4.4444444 | closed form, `4/(9l)` |
+| Bryson–Denham, both regimes, exact arcs | `∫u²/2` | matches to 1e-14 | closed form | — |
+| Velocity-limited move (order 1, 3 cases), exact arcs | `∫u²/2` | matches to 1e-14 | closed form, `4V²/(3t₁)` | — |
 | Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
 | Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
@@ -356,9 +404,16 @@ Notes:
   Bang-bang switches are located exactly.
 - **Tangential switches** (`dS/dt = 0` at the switch) have no jump and stop
   propagation with status `-3`.
-- **Path constraints are penalties, not exact arcs.** The solution approaches
-  the constrained one as the weight grows. Exact boundary arcs and touch
-  points (costate jumps, junction conditions) for order 1 and 2 are planned.
+- **Exact arcs need the structure.** `MultiArcShooting` solves a given
+  sequence of boundary arcs and touch points. Find it from a penalty
+  solution. Not yet supported with exact arcs: bang-bang controls, control
+  sets (bounds on the boundary control), order 3 or more, and two constraints
+  active at once.
+- **Single shooting and large penalties.** Penalty continuation gets
+  ill-conditioned as the weight grows (about `exp(sqrt(rho) T)`): around
+  ρ = 400 for the velocity limit, 3e7 for Bryson–Denham's boundary arc. Exact
+  arcs do not need large weights, only a penalty solution good enough to
+  read the structure from.
 
 ## Developing against a local fast-numerical-integration
 
@@ -393,7 +448,8 @@ to a local FNI checkout (here a sibling directory):
    many-revolution transfers (Earth–Dionysus, GTO–GEO), and minimum-time
    attitude slews.
 5. ~~Path constraints: order, exterior penalty with located crossings,
-   termination~~. Next: exact boundary arcs for order 1 and 2.
+   termination; exact boundary arcs and touch points for order 1 and 2~~.
+   Next: exact arcs with bang-bang controls and control bounds.
 6. Ways to choose initial costates, as separate optional layers on top of the
    forward map: ~~single shooting and continuation~~; next, gradient-free
    search (PSO, differential evolution) and learned samplers of the costate

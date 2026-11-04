@@ -9,7 +9,8 @@ import numpy as np
 from libc.math cimport INFINITY
 
 from fast_numerical_integration.integrators cimport (
-    EventFunction, OdeSystem, fni_event, fni_hybrid_options, fni_integrate_hybrid, fni_options,
+    EventFunction, OdeSystem, fni_event, fni_hybrid_options, fni_integrate, fni_integrate_hybrid,
+    fni_options,
     fni_options_init, fni_rhs_fn, FNI_EVENTS_INTERIOR, fni_stats, FNI_DOP853, FNI_OK, FNI_RESET_CONTINUE, FNI_RESET_STOP, FNI_RK23,
     FNI_RK45, FNI_STATUS_EVENT, FNI_STATUS_RESET_LIMIT)
 
@@ -25,6 +26,18 @@ cdef extern from "{{header}}" nogil:
     int P_constraint "{{P}}constraint"(double t, const double* z, const double* p, double* g)
     int P_modes "{{P}}modes"(double t, const double* z, const double* p, double* M)
     int P_constraint_rate_arc "{{P}}constraint_rate_arc"(double t, const double* z, const double* p, const int* arc, double* gd)
+    int P_hamiltonian_grad "{{P}}hamiltonian_grad"(double t, const double* z, const double* p, double* Ht, double* Hz)
+    int P_b_rhs "{{P}}boundary_rhs"(int c, double t, const double* z, const double* p, double* dz)
+    int P_b_jac "{{P}}boundary_jac"(int c, double t, const double* z, const double* p, double* A)
+    int P_b_stm_rhs "{{P}}boundary_stm_rhs"(int c, double t, const double* y, const double* p, double* dy)
+    int P_b_hamiltonian "{{P}}boundary_hamiltonian"(int c, double t, const double* z, const double* p, double* H)
+    int P_b_hamiltonian_grad "{{P}}boundary_hamiltonian_grad"(int c, double t, const double* z, const double* p, double* Ht, double* Hz)
+    int P_b_cost_rate "{{P}}boundary_cost_rate"(int c, double t, const double* z, const double* p, double* L)
+    int P_b_control "{{P}}boundary_control"(int c, double t, const double* z, const double* p, double* u)
+    int P_b_multiplier "{{P}}boundary_multiplier"(int c, double t, const double* z, const double* p, double* mu)
+    int P_b_tangency "{{P}}boundary_tangency"(int c, double t, const double* z, const double* p, double* N)
+    int P_b_tangency_grad "{{P}}boundary_tangency_grad"(int c, double t, const double* z, const double* p, double* Nt, double* Nx)
+    int P_b_tangency_hess "{{P}}boundary_tangency_hess"(int c, double t, const double* z, const double* p, double* Nxx, double* Nxt)
     int P_control "{{P}}control"(double t, const double* z, const double* p, double* u)
     int P_hamiltonian "{{P}}hamiltonian"(double t, const double* z, const double* p, double* H)
     int P_cost_rate "{{P}}cost_rate"(double t, const double* z, const double* p, double* L)
@@ -45,6 +58,7 @@ cdef enum:
     NSW1 = {{NSW1}}
     NC1 = {{NC1}}
     NM1 = {{NM1}}
+    QMAX = {{QMAX}}
     NE = {{NM}} + {{NC}}    # FNI events: the NM mode guards, then one peak guard per constraint
     NE1 = {{NM1}} + {{NC1}}
     NNU1 = {{NNU1}}
@@ -56,6 +70,8 @@ N_SWITCHING = NSW
 N_CONSTRAINTS = NC
 N_MODES = NM
 CONSTRAINT_NAMES = {{constraint_names}}
+CONSTRAINT_ORDERS = {{constraint_orders}}
+EXACT_ARCS = {{exact_arcs}}     # per constraint: boundary-arc kernels generated
 N_CONTROLS = NU
 N_MULTIPLIERS = NNU
 N_RESIDUALS = NR
@@ -135,6 +151,7 @@ cdef struct _ctx:
     int stop_on[NC1]    # stop when path constraint c becomes violated
     int with_p
     int with_cost       # last entry of the state is J = int L dt
+    int constraint_events   # 0: path constraints are not watched (exact multi-arc shooting)
 
 
 cdef struct _ev_ctx:
@@ -571,7 +588,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     cdef Py_ssize_t i
 
     n_sw[0] = 0
-    for k in range(NC):
+    for k in range(NC if ctx.constraint_events else 0):
         if ctx.stop_on[k] and ctx.arc[NSW + k]:
             # Already violated at t0: stop before the first step.
             for i in range(ny):
@@ -598,7 +615,8 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     rctx.n_sw = n_sw
     rctx.jump_failed = 0
     rctx.violated = 0
-    rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events, NE,
+    rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events,
+                              NE if ctx.constraint_events else NSW,
                               _switch_reset, &rctx, &hopt, y_out, NULL, NULL, NULL, NULL,
                               NULL, 0, &st, NULL)
     nfev[0] = st.nfev
@@ -677,7 +695,7 @@ def _initial_y(z, stm, Py_ssize_t ny):
 def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensitivity=False,
               cost=False, arc=None, method="DOP853", double rtol=1e-10, double atol=1e-12,
               first_step=None, double max_step=np.inf, Py_ssize_t max_switches=10000,
-              terminate=False, Py_ssize_t n_interior=4):
+              terminate=False, Py_ssize_t n_interior=4, constraint_events=True):
     """Integrate the extremal from ``z0 = [x0, lambda0]`` from ``t0`` to ``t1``.
 
     The integration runs arc by arc and stops at every switch, so each
@@ -712,6 +730,10 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
         peak and a trough of ``g`` in the same step are told apart. ``0``
         tests only the ends of each step. The peaks and troughs of ``g`` are
         guards too, so between test points ``g`` crosses zero at most once.
+    constraint_events : bool
+        ``False`` ignores the path constraints: no crossings are located and
+        their penalties stay off. Exact multi-arc shooting uses this on the
+        arcs where the limit is inactive.
 
     Returns
     -------
@@ -741,6 +763,9 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     z = _buffer(z0, NZ, "z0")
     p_arr = _params(params)
     arc0 = initial_arc(t0, z[:NZ], p_arr[:NP] if NP else None) if arc is None else _arc(arc)[:NM]
+    if not constraint_events:
+        arc0 = np.array(arc0, dtype=np.intc)
+        arc0[NSW:] = 0
     arc_buf = _arc(arc0)
     stop = _stop_mask(terminate)
 
@@ -757,6 +782,7 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     ctx.p = &pv[0]
     ctx.with_p = 1 if param_sensitivity else 0
     ctx.with_cost = 1 if cost else 0
+    ctx.constraint_events = 1 if constraint_events else 0
     for k in range(NM):
         ctx.arc[k] = arc_buf[k]
     for k in range(NC1):
@@ -803,6 +829,7 @@ cdef int _propagate_rows(int meth, int do_stm, int with_p, int with_cost, Py_ssi
     ctx.p = p
     ctx.with_p = with_p
     ctx.with_cost = with_cost
+    ctx.constraint_events = 1
     for k in range(NC1):
         ctx.stop_on[k] = stop_on[k]
     for r in range(start, stop):
@@ -936,4 +963,205 @@ def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=Fal
         "arc": arc_end[:, :NM].copy(),
         "nfev": nfev,
         "status": status,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Exact boundary arcs: riding a path constraint g = 0
+# -----------------------------------------------------------------------------
+
+def _exact(c):
+    if isinstance(c, str):
+        c = CONSTRAINT_NAMES.index(c)
+    c = int(c)
+    if not 0 <= c < NC:
+        raise ValueError(f"path constraint index {c} out of range ({NC} constraints)")
+    if not EXACT_ARCS[c]:
+        raise ValueError(f"path constraint {CONSTRAINT_NAMES[c]!r} has no exact boundary arc "
+                         "(see PontryaginSystem.path_constraints[c].unsupported)")
+    return c
+
+
+cdef struct _b_ctx:
+    const double* p
+    int c
+
+
+cdef int _b_rhs_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ctx) noexcept nogil:
+    cdef _b_ctx* b = <_b_ctx*> ctx
+    cdef int rc = P_b_rhs(b.c, t, y, b.p, dydt)
+    if rc == 0 and n == NZ + 1:
+        rc = P_b_cost_rate(b.c, t, y, b.p, &dydt[NZ])
+    return rc
+
+
+cdef int _b_stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ctx) noexcept nogil:
+    cdef _b_ctx* b = <_b_ctx*> ctx
+    cdef int rc = P_b_stm_rhs(b.c, t, y, b.p, dydt)
+    if rc == 0 and n == NZ + NZ * NZ + 1:
+        rc = P_b_cost_rate(b.c, t, y, b.p, &dydt[n - 1])
+    return rc
+
+
+cdef class BoundaryDynamics(OdeSystem):
+    """``z' = F_b(t, z, p)`` while path constraint ``c`` is active (``g = 0``).
+
+    The control is the boundary control that keeps ``g^(q) = 0``. The costates
+    follow ``-d(H + mu g^(q))/dx``.
+    """
+
+    cdef _b_ctx ctx
+
+    def __init__(self, c, params=None):
+        self.n_states = NZ
+        if NP:
+            self._init_params(_params(params)[:NP], PARAM_NAMES)
+        self.ctx.p = self._params_ptr()
+        self.ctx.c = _exact(c)
+        self.c_fn = _b_rhs_fn
+        self.c_ctx = &self.ctx
+
+
+def boundary_rhs(c, double t, z, params=None):
+    """``F_b(t, z, p)`` (NZ,) on a boundary arc of constraint ``c``."""
+    cdef int k = _exact(c)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(NZ)
+    cdef double[::1] ov = out
+    _check(P_b_rhs(k, t, &zv[0], &pv[0], &ov[0]), "boundary_rhs")
+    return out
+
+
+def boundary_jacobian(c, double t, z, params=None):
+    """``dF_b/dz`` (NZ, NZ)."""
+    cdef int k = _exact(c)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(NZ * NZ)
+    cdef double[::1] ov = out
+    _check(P_b_jac(k, t, &zv[0], &pv[0], &ov[0]), "boundary_jacobian")
+    return out.reshape(NZ, NZ)
+
+
+def boundary_control(c, double t, z, params=None):
+    """The control (NU,) that keeps constraint ``c`` at ``g = 0``."""
+    cdef int k = _exact(c)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(max(NU, 1))
+    cdef double[::1] ov = out
+    _check(P_b_control(k, t, &zv[0], &pv[0], &ov[0]), "boundary_control")
+    return out[:NU]
+
+
+def boundary_multiplier(c, double t, z, params=None):
+    """``mu`` of ``H + mu g^(q)`` on a boundary arc of constraint ``c``."""
+    cdef int k = _exact(c)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef double mu = 0.0
+    _check(P_b_multiplier(k, t, &zv[0], &pv[0], &mu), "boundary_multiplier")
+    return mu
+
+
+def hamiltonian_gradient(double t, z, params=None, boundary=None):
+    """``(dH/dt, dH/dz)`` at ``u*``, or along a boundary arc of constraint ``boundary``."""
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef double Ht = 0.0
+    out = np.zeros(NZ)
+    cdef double[::1] ov = out
+    cdef int k
+    if boundary is None:
+        _check(P_hamiltonian_grad(t, &zv[0], &pv[0], &Ht, &ov[0]), "hamiltonian_gradient")
+    else:
+        k = _exact(boundary)
+        _check(P_b_hamiltonian_grad(k, t, &zv[0], &pv[0], &Ht, &ov[0]), "hamiltonian_gradient")
+    return Ht, out
+
+
+def boundary_hamiltonian(c, double t, z, params=None):
+    """``H`` at the boundary control of constraint ``c``."""
+    cdef int k = _exact(c)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef double H = 0.0
+    _check(P_b_hamiltonian(k, t, &zv[0], &pv[0], &H), "boundary_hamiltonian")
+    return H
+
+
+def tangency(c, double t, z, params=None):
+    """``N = (g, ..., g^(q-1))`` (q,) for constraint ``c`` of order ``q``."""
+    cdef int k = _exact(c)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(QMAX)
+    cdef double[::1] ov = out
+    _check(P_b_tangency(k, t, &zv[0], &pv[0], &ov[0]), "tangency")
+    return out[:CONSTRAINT_ORDERS[k]]
+
+
+def tangency_gradient(c, double t, z, params=None):
+    """``(dN/dt (q,), dN/dx (q, n), d2N/dx2 (q, n, n), d2N/dxdt (q, n))``."""
+    cdef int k = _exact(c)
+    cdef int q = CONSTRAINT_ORDERS[k]
+    cdef int n = NZ // 2
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    nt = np.zeros(QMAX)
+    nx = np.zeros(QMAX * n)
+    nxx = np.zeros(QMAX * n * n)
+    nxt = np.zeros(QMAX * n)
+    cdef double[::1] a = nt
+    cdef double[::1] b = nx
+    cdef double[::1] cc = nxx
+    cdef double[::1] d = nxt
+    _check(P_b_tangency_grad(k, t, &zv[0], &pv[0], &a[0], &b[0]), "tangency_gradient")
+    _check(P_b_tangency_hess(k, t, &zv[0], &pv[0], &cc[0], &d[0]), "tangency_gradient")
+    return (nt[:q], nx.reshape(QMAX, n)[:q], nxx.reshape(QMAX, n, n)[:q],
+            nxt.reshape(QMAX, n)[:q])
+
+
+def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, cost=False,
+                       method="DOP853", double rtol=1e-10, double atol=1e-12, first_step=None,
+                       double max_step=np.inf):
+    """Integrate along a boundary arc of constraint ``c`` from ``t0`` to ``t1``.
+
+    No events are watched: the arc's control holds ``g^(q) = 0``, so ``g``
+    stays at zero if ``N = 0`` at ``t0``. Returns a dict with ``t``, ``z``,
+    ``stm`` (NZ, NZ) or None, ``cost`` or None, ``dz_dt1``, ``nfev`` and
+    ``status``.
+    """
+    cdef _b_ctx ctx
+    cdef fni_options opt
+    cdef fni_stats st
+    cdef int rc, meth
+    cdef Py_ssize_t ny = NZ + (NZ * NZ if stm else 0) + (1 if cost else 0)
+    ctx.c = _exact(c)
+    if method not in _METHODS:
+        raise ValueError(f"method must be one of {list(_METHODS)}")
+    meth = _METHODS[method]
+    _setup_options(&opt, rtol, atol, first_step, max_step, 0)
+    p_arr = _params(params)
+    y = _initial_y(_buffer(z0, NZ, "z0")[:NZ], stm, ny)
+    y_out = np.zeros(ny)
+    cdef double[::1] pv = p_arr
+    cdef double[::1] yv = y
+    cdef double[::1] yo = y_out
+    cdef fni_rhs_fn fn = _b_stm_fn if stm else _b_rhs_fn
+    ctx.p = &pv[0]
+    with nogil:
+        rc = fni_integrate(meth, fn, &ctx, ny, t0, &yv[0], t1,
+                           &opt, NULL, 0, &yo[0], NULL, NULL, NULL, 0, &st)
+    if rc != FNI_OK:
+        raise RuntimeError(f"integration failed with code {rc}")
+    return {
+        "t": st.t_final,
+        "z": y_out[:NZ].copy(),
+        "stm": y_out[NZ:NZ + NZ * NZ].reshape(NZ, NZ).copy() if stm else None,
+        "cost": float(y_out[ny - 1]) if cost else None,
+        "dz_dt1": boundary_rhs(ctx.c, st.t_final, y_out[:NZ], p_arr[:NP] if NP else None),
+        "nfev": st.nfev,
+        "status": st.status,
     }
