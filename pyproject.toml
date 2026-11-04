@@ -23,7 +23,7 @@ classifiers = [
 # system C compiler).
 dependencies = [
     "cython>=3.0",
-    "fast-numerical-integration>=0.4",
+    "fast-numerical-integration>=0.4.1",
     "numpy>=2.0",
     "setuptools>=77",
     "sympy>=1.12",

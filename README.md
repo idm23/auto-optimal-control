@@ -26,11 +26,23 @@ system with exact Jacobians and a solver.
 ## Installation
 
 ```bash
-uv add auto-optimal-control        # once released; for now, from a clone:
+pip install "auto-optimal-control[shooting]"    # or: uv add "auto-optimal-control[shooting]"
+```
+
+The `shooting` extra adds SciPy, which `SingleShooting` and
+`MultiArcShooting` use for their root finders. Leave it out if you only need
+the derivation and the compiled kernels. The kernels are compiled when you
+first build them, so you need a C compiler (`gcc` or `clang`). The
+[fast-numerical-integration](https://github.com/idm23/fast-numerical-integration)
+dependency installs as a pre-built wheel on Linux x86_64 and macOS arm64.
+
+To work on the package itself:
+
+```bash
 git clone https://github.com/idm23/auto-optimal-control
 cd auto-optimal-control
 uv sync
-uv run pytest
+uv run pytest                 # add --runslow for the literature benchmarks
 ```
 
 ## Example: minimum-time double integrator
@@ -444,9 +456,9 @@ Recording runs the solves (seconds to about a minute) and saves
 `<out>.npz`, so `--reuse` re-renders without solving. Each animation opens
 with a card stating the problem (story, formulation, how it is solved) and
 keeps a one-line summary at the bottom. The rendered videos are in
-[`docs/visuals/`](docs/visuals).
+[`docs/visuals/`](https://github.com/idm23/auto-optimal-control/tree/main/docs/visuals).
 
-- **Cart-pole** ([`cart_pole.mp4`](docs/visuals/cart_pole.mp4)):
+- **Cart-pole** ([`cart_pole.mp4`](https://github.com/idm23/auto-optimal-control/blob/main/docs/visuals/cart_pole.mp4)):
   1. Kelly's direct-method iterates, from a dynamically infeasible
      straight-line guess.
   2. Every Newton evaluation of the indirect polish. Each is a real swing-up
@@ -454,28 +466,28 @@ keeps a one-line summary at the bottom. The rendered videos are in
   3. Random costate search, where every converged start finds the cheaper
      extremal.
   4. Both extremals swinging up side by side.
-- **Earth–Mars** ([`earth_mars.mp4`](docs/visuals/earth_mars.mp4)):
+- **Earth–Mars** ([`earth_mars.mp4`](https://github.com/idm23/auto-optimal-control/blob/main/docs/visuals/earth_mars.mp4)):
   1. Energy-optimal shooting from random costates, showing every Newton
      evaluation of the winning start as a real flight from Earth.
   2. The energy-to-fuel continuation, with the throttle sharpening into
      bang-bang and the arrival mass rising.
   3. The exact fuel-optimal flight: Earth, Mars and the spacecraft moving,
      with the switching function deciding thrust and coast.
-- **Bryson–Denham** ([`bryson_denham.mp4`](docs/visuals/bryson_denham.mp4)),
+- **Bryson–Denham** ([`bryson_denham.mp4`](https://github.com/idm23/auto-optimal-control/blob/main/docs/visuals/bryson_denham.mp4)),
   for the touch regime and then the boundary-arc regime:
   1. Penalty continuation in ρ pushing the mass back to the wall, with the
      cost climbing to the closed form from below.
   2. The exact multi-arc solve seeded from it, with the costate jump at the
      contact.
   3. Both solutions moving against their walls.
-- **Elevator: speed and force limits** ([`velocity_limit.mp4`](docs/visuals/velocity_limit.mp4)),
+- **Elevator: speed and force limits** ([`velocity_limit.mp4`](https://github.com/idm23/auto-optimal-control/blob/main/docs/visuals/velocity_limit.mp4)),
   exact arcs with a clipped control:
   1. Penalty continuation on the speed limit, with the force clipped
      exactly at `|u| ≤ 8` throughout.
   2. The exact multi-arc solve: full force, a ramp onto the limit, the
      limit, the mirror image.
   3. The move, beside the same move without the force limit.
-- **Train between stations** ([`speed_limit.mp4`](docs/visuals/speed_limit.mp4)),
+- **Train between stations** ([`speed_limit.mp4`](https://github.com/idm23/auto-optimal-control/blob/main/docs/visuals/speed_limit.mp4)),
   minimum time, exact arcs with a bang-bang control:
   1. The smoothed problem (`1 + ε u²/2`) under penalty continuation.
   2. Smoothing continuation with exact arcs, `ε` from 1 to 1e-4: the ramps
@@ -486,8 +498,8 @@ keeps a one-line summary at the bottom. The rendered videos are in
 
 | | | |
 |---|---|---|
-| ![cart-pole](docs/visuals/cart_pole_polish.png) | ![earth-mars](docs/visuals/earth_mars_flight.png) | ![bryson-denham](docs/visuals/bryson_denham_arc_exact.png) |
-| ![velocity-limit](docs/visuals/velocity_limit_exact.png) | ![speed-limit](docs/visuals/speed_limit_eps.png) | ![speed-limit problem](docs/visuals/speed_limit_problem.png) |
+| ![cart-pole](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/cart_pole_polish.png) | ![earth-mars](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/earth_mars_flight.png) | ![bryson-denham](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/bryson_denham_arc_exact.png) |
+| ![velocity-limit](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/velocity_limit_exact.png) | ![speed-limit](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/speed_limit_eps.png) | ![speed-limit problem](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/speed_limit_problem.png) |
 
 ## Limitations
 
@@ -539,6 +551,19 @@ to a local FNI checkout (here a sibling directory):
   change. Release the FNI change to PyPI, bump the requirement here and run
   `uv lock --upgrade-package fast-numerical-integration` instead.
 
+## Releasing
+
+Releases are published from GitHub Actions (`.github/workflows/release.yml`)
+with PyPI trusted publishing, so no tokens are stored.
+
+1. Bump `version` in `pyproject.toml` and merge the change to `main`.
+2. Optional rehearsal: run the *Release* workflow manually with
+   `target: testpypi`.
+3. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`. The workflow
+   checks that the tag matches the version, builds the sdist and wheel,
+   installs the wheel into a clean environment, runs the test suite against
+   it, and uploads to PyPI.
+
 ## Roadmap
 
 1. ~~Symbolic problem definition and Pontryagin derivation~~
@@ -559,4 +584,4 @@ to a local FNI checkout (here a sibling directory):
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+MIT; see [LICENSE](https://github.com/idm23/auto-optimal-control/blob/main/LICENSE).
