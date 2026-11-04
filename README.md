@@ -272,9 +272,32 @@ shoot.cost(sol.v), shoot.diagnostics(sol.v), shoot.trajectory(sol.v)
   from a penalty solution's crossings. A penalized boundary arc may dip back
   below the limit, so each arc spans its first to last crossing. It fits
   `pi` by integrating the boundary arc back from the exit.
+- **Bounded controls.** `Box` controls keep their law on the free arcs:
+  clipped where `H` is quadratic in them, bang-bang where it is linear, with
+  every switch located as in single shooting. On a boundary arc the control
+  is the one that rides the limit, and it must stay inside its bounds there:
+  `diagnostics` reports `boundary_bound_violation`, and it counts toward
+  `max_violation`. With bang-bang controls `solve` defaults to `"lm"`. The
+  control jumps at the junctions, so `H` continuity reads `|S| = 0` there,
+  which stalls the Broyden updates of `"hybr"`.
+- **Seeding a bang-bang problem.** Its penalty solution is no use: the
+  penalized optimum rides the limit on a singular arc. Smooth it instead.
+  Add `eps u^2/2` to the running cost, solve that with exact arcs (from a
+  penalty solution as above), and lower `eps` by `continuation`. The two
+  problems have the same unknowns, so the last smoothed `v` seeds the
+  bang-bang solve:
 
-`velocity_limited_move` (order 1) and `bryson_denham` (order 2, both regimes)
-are solved to round-off against their closed forms.
+  ```python
+  def smoothed(eps, guess):
+      return MultiArcShooting(k_smooth, [V, D, u_max, eps, 0.0], arcs).solve(guess)
+
+  path = continuation(smoothed, 1.0, np.logspace(0, -4, 17), v_smooth)
+  sol = MultiArcShooting(k_bang, [V, D, u_max], arcs).solve(path[-1][1].v)
+  ```
+
+`velocity_limited_move` (order 1, with and without a force limit),
+`bryson_denham` (order 2, both regimes) and `speed_limited_min_time`
+(bang-bang) are solved against their closed forms.
 
 ## What `derive` produces
 
@@ -291,7 +314,7 @@ are solved to round-off against their closed forms.
 | `running_cost` | `L` at `u*`, to accumulate the cost |
 | `path_constraints` | `StateConstraint(name, expr, order, derivatives, penalty)` per path constraint |
 | `penalty` | `sum w/2 max(0, g)^2`, included in `hamiltonian`, `dynamics` and `running_cost` |
-| `path_constraints[c].boundary` | `BoundaryArc(control, multiplier, dynamics, hamiltonian, running_cost)` for exact arcs (orders 1 and 2), or `None` with the reason in `unsupported` |
+| `path_constraints[c].boundary` | `BoundaryArc(control, multiplier, dynamics, hamiltonian, running_cost, bounds)` for exact arcs (orders 1 and 2), or `None` with the reason in `unsupported` |
 | `boundary` | the boundary conditions: `residuals`, `unknowns` and the boundary symbols |
 
 The boundary residuals are the fixed initial states (or `lam_i(t_0) = 0` when
@@ -346,16 +369,19 @@ limit) and a velocity-limited move (an order-1 limit).
 - **`test_exact_arcs.py`:** boundary-arc derivation; the exact-arc kernels
   against finite differences; `MultiArcShooting` on order-1 and order-2
   boundary arcs and a touch point, against closed forms (costates, junction
-  times, jumps, cost), seeded from penalty solutions. Also its Jacobian
-  against finite differences, a wrong structure detected as a free-arc
-  violation, and validation.
+  times, jumps, cost), seeded from penalty solutions. The same with a clipped
+  control (saturated, then a ramp onto the limit) and with a bang-bang one
+  (full power, cruise, brake), seeded by smoothing continuation. Also its
+  Jacobian against finite differences (across switches too), a wrong
+  structure detected as a free-arc violation, the saturation guards, and
+  validation.
 - **`test_shooting.py`:** `SingleShooting`'s unknown layout, its Jacobian
   against finite differences (including a free initial state), solves
   against closed forms, multistart and continuation.
 
 ## Benchmarks against the literature
 
-`benchmarks/` solves seven canonical problems from scratch and compares each
+`benchmarks/` solves nine canonical problems from scratch and compares each
 indirect solution with a published value. It starts from random costate
 guesses, uses continuation where needed, and for the cart-pole lifts
 costates from a direct solution. Run them with
@@ -369,6 +395,8 @@ checks them too. They are solved with `auto_optimal_control.shooting`.
 | Bryson–Denham, boundary arc (`l = 0.1`, ρ = 1e7) | `∫u²/2` | 4.4430848 | 4.4444444 | closed form, `4/(9l)` |
 | Bryson–Denham, both regimes, exact arcs | `∫u²/2` | matches to 1e-14 | closed form | — |
 | Velocity-limited move (order 1, 3 cases), exact arcs | `∫u²/2` | matches to 1e-14 | closed form, `4V²/(3t₁)` | — |
+| Velocity-limited move with a force limit (2 cases), exact arcs | `∫u²/2` | matches to 1e-12 | closed form (saturated, a ramp, the limit) | — |
+| Minimum time with a speed limit (2 cases), bang-bang exact arcs | `t_f` | matches to 1e-15 | closed form, `D/V + V/u_max` | — |
 | Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
 | Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
@@ -407,11 +435,15 @@ dependency group, plus ffmpeg for MP4 or Pillow (included) for GIF:
 uv run --group viz python benchmarks/animate.py cart_pole --stills   # outputs/cart_pole.mp4
 uv run --group viz python benchmarks/animate.py earth_mars --stills
 uv run --group viz python benchmarks/animate.py bryson_denham --stills
+uv run --group viz python benchmarks/animate.py velocity_limit --stills
+uv run --group viz python benchmarks/animate.py speed_limit --stills
 uv run --group viz python benchmarks/animate.py cart_pole --reuse --out outputs/cart_pole.gif
 ```
 
-Recording runs the solves (about a minute each) and saves `<out>.npz`, so
-`--reuse` re-renders without solving. The rendered videos are in
+Recording runs the solves (seconds to about a minute) and saves
+`<out>.npz`, so `--reuse` re-renders without solving. Each animation opens
+with a card stating the problem (story, formulation, how it is solved) and
+keeps a one-line summary at the bottom. The rendered videos are in
 [`docs/visuals/`](docs/visuals).
 
 - **Cart-pole** ([`cart_pole.mp4`](docs/visuals/cart_pole.mp4)):
@@ -436,26 +468,48 @@ Recording runs the solves (about a minute each) and saves `<out>.npz`, so
   2. The exact multi-arc solve seeded from it, with the costate jump at the
      contact.
   3. Both solutions moving against their walls.
+- **Elevator: speed and force limits** ([`velocity_limit.mp4`](docs/visuals/velocity_limit.mp4)),
+  exact arcs with a clipped control:
+  1. Penalty continuation on the speed limit, with the force clipped
+     exactly at `|u| ≤ 8` throughout.
+  2. The exact multi-arc solve: full force, a ramp onto the limit, the
+     limit, the mirror image.
+  3. The move, beside the same move without the force limit.
+- **Train between stations** ([`speed_limit.mp4`](docs/visuals/speed_limit.mp4)),
+  minimum time, exact arcs with a bang-bang control:
+  1. The smoothed problem (`1 + ε u²/2`) under penalty continuation.
+  2. Smoothing continuation with exact arcs, `ε` from 1 to 1e-4: the ramps
+     sharpen into jumps and `t_f − 4` shrinks with `ε`.
+  3. The bang-bang exact solve: full power, cruise on the limit, brakes,
+     `t_f = 4` to round-off.
+  4. The run, beside the run without a speed limit.
 
 | | | |
 |---|---|---|
 | ![cart-pole](docs/visuals/cart_pole_polish.png) | ![earth-mars](docs/visuals/earth_mars_flight.png) | ![bryson-denham](docs/visuals/bryson_denham_arc_exact.png) |
+| ![velocity-limit](docs/visuals/velocity_limit_exact.png) | ![speed-limit](docs/visuals/speed_limit_eps.png) | ![speed-limit problem](docs/visuals/speed_limit_problem.png) |
 
 ## Limitations
 
 - **Singular arcs** are not handled: where a switching function stays at
   zero over an interval, the control takes its lower bound.
-- **Saturation corners are not located.** The corners of a clipped
-  (quadratic, bounded) control are kinks in the dynamics, not jumps, and the
-  integrator steps across them with errors around 1e-9 at tight tolerances.
-  Bang-bang switches are located exactly.
+- **Saturation corners and switches carry the tolerance.** The corners of
+  a clipped (quadratic, bounded) control are kinks in the dynamics. Like
+  bang-bang switches, they are located and the integration restarts there.
+  The state at a restart comes from the dense output of the step that found
+  it, so it carries that step's error, at the integration tolerance.
 - **Tangential switches** (`dS/dt = 0` at the switch) have no jump and stop
   propagation with status `-3`.
 - **Exact arcs need the structure.** `MultiArcShooting` solves a given
   sequence of boundary arcs and touch points. Find it from a penalty
-  solution. Not yet supported with exact arcs: bang-bang controls, control
-  sets (bounds on the boundary control), order 3 or more, and two constraints
-  active at once.
+  solution, or for bang-bang controls from a smoothed problem. Not supported
+  with exact arcs: unit-vector control sets, limits that depend explicitly on
+  time (`H` then jumps at the entry), order 3 or more, singular arcs, and two
+  constraints active at once.
+- **Order-1 entries with a smooth control converge linearly.** There `H`
+  continuity has a double root (the control is continuous, so `H` differs
+  only to second order), so Newton converges linearly and junction times
+  come out to about 1e-8 while the cost is exact to 1e-12 or better.
 - **Single shooting and large penalties.** Penalty continuation gets
   ill-conditioned as the weight grows (about `exp(sqrt(rho) T)`): around
   ρ = 400 for the velocity limit, 3e7 for Bryson–Denham's boundary arc. Exact
@@ -495,8 +549,9 @@ to a local FNI checkout (here a sibling directory):
    many-revolution transfers (Earth–Dionysus, GTO–GEO), and minimum-time
    attitude slews.
 5. ~~Path constraints: order, exterior penalty with located crossings,
-   termination; exact boundary arcs and touch points for order 1 and 2~~.
-   Next: exact arcs with bang-bang controls and control bounds.
+   termination; exact boundary arcs and touch points for order 1 and 2, with
+   bounded and bang-bang controls~~. Next: singular arcs, and a
+   control-continuity entry condition for order-1 limits.
 6. Ways to choose initial costates, as separate optional layers on top of the
    forward map: ~~single shooting and continuation~~; next, gradient-free
    search (PSO, differential evolution) and learned samplers of the costate

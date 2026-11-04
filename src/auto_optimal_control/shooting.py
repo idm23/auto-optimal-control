@@ -332,11 +332,25 @@ class MultiArcShooting(SingleShooting):
     :class:`SingleShooting`'s, followed by each arc's in order. The path
     constraints are not watched on the free arcs (their penalties stay off),
     so a wrong structure shows up as a violation on a free arc, reported by
-    :meth:`diagnostics` and in ``max_violation``. Bang-bang controls and
-    control sets are not supported with exact arcs yet.
+    :meth:`diagnostics` and in ``max_violation``.
+
+    Bounded controls (:class:`~auto_optimal_control.problem.Box`) are
+    supported. On the free arcs they follow their usual law: clipped where
+    ``H`` is quadratic in them, bang-bang where it is linear, with the
+    switches located (and the STM jumped) as in :class:`SingleShooting`. On a
+    boundary arc the control is the one that rides the limit, so it must stay
+    within its bounds there; how far it leaves them also counts toward
+    ``max_violation`` (see :meth:`diagnostics`). Unit-vector control sets are
+    not supported.
 
     :meth:`from_penalty` builds the structure's initial guess from an
-    exterior-penalty solution.
+    exterior-penalty solution. A bang-bang problem has no useful penalty
+    solution: there the penalized optimum rides the limit on a singular arc,
+    which shooting cannot follow. Smooth it instead (add ``eps u^2 / 2`` to
+    the running cost, a quadratic control in a box), solve that with exact
+    arcs and lower ``eps`` by :func:`continuation`. The unknowns of the two
+    problems match, so the smoothed ``v`` is a starting point for the
+    bang-bang one.
     """
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
@@ -344,8 +358,6 @@ class MultiArcShooting(SingleShooting):
         super().__init__(kernels, params, x0=x0, method=method, rtol=rtol, atol=atol,
                          n_interior=0)
         k = kernels
-        if k.N_SWITCHING:
-            raise NotImplementedError("exact arcs with bang-bang controls are not supported yet")
         self.arcs = []
         for item in arcs:
             kind, c = item
@@ -411,7 +423,7 @@ class MultiArcShooting(SingleShooting):
         if c is None:
             r = k.propagate(ta, z, tb, p, stm=jac, cost=cost, constraint_events=False,
                             **self.options)
-            Fa = k.rhs_arc(ta, z, p, np.zeros(k.N_MODES, dtype=np.intc) if k.N_MODES else None)
+            Fa = k.rhs_arc(ta, z, p, r["arc0"] if k.N_MODES else None)
         else:
             r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost, **self.options)
             Fa = k.boundary_rhs(c, ta, z, p)
@@ -511,6 +523,16 @@ class MultiArcShooting(SingleShooting):
     def guess_multipliers(self, *args, **kwargs):
         raise NotImplementedError("use MultiArcShooting.from_penalty for a starting point")
 
+    def solve(self, guess, method=None, tol=1e-10, options=None):
+        """As :meth:`SingleShooting.solve`. ``method`` defaults to ``"hybr"``,
+        or ``"lm"`` with bang-bang controls: there the control jumps at a
+        junction, ``H`` continuity reads ``|S| = 0`` (a kink at the root) and
+        the Broyden updates of ``"hybr"`` stall on it, while ``"lm"`` takes the
+        exact Jacobian at every step."""
+        if method is None:
+            method = "lm" if self.kernels.N_SWITCHING else "hybr"
+        return super().solve(guess, method=method, tol=tol, options=options)
+
     # -- results ------------------------------------------------------------
 
     def cost(self, v):
@@ -534,14 +556,21 @@ class MultiArcShooting(SingleShooting):
         for c, ta, tb, za, _ in segs:
             npts = max(int(n_points * (tb - ta) / span), 2)
             te = np.linspace(ta, tb, npts)
-            system = (k.ArcDynamics(p, np.zeros(k.N_MODES, dtype=np.intc) if k.N_MODES else None)
-                      if c is None else k.BoundaryDynamics(c, p))
-            sol = solve_ivp(system, (ta, tb), za, method=self.options["method"], t_eval=te,
-                            rtol=self.options["rtol"], atol=self.options["atol"])
-            for ti, zi in zip(sol.t, sol.y.T):
+            if c is None:
+                # Bang-bang switches are located as in propagate.
+                sol = k.trajectory(ta, za, tb, p, t_eval=te, constraint_events=False,
+                                   **self.options)
+                ts, zs, us = sol["t"], sol["z"], sol["u"]
+            else:
+                sol = solve_ivp(k.BoundaryDynamics(c, p), (ta, tb), za,
+                                method=self.options["method"], t_eval=te,
+                                rtol=self.options["rtol"], atol=self.options["atol"])
+                ts, zs = sol.t, sol.y.T
+                us = [k.boundary_control(c, ti, zi, p) for ti, zi in zip(ts, zs)]
+            for ti, zi, ui in zip(ts, zs, us):
                 T.append(ti)
                 Z.append(zi)
-                U.append(k.control(ti, zi, p) if c is None else k.boundary_control(c, ti, zi, p))
+                U.append(ui)
                 A.append(-1 if c is None else c)
         T, Z = np.array(T), np.array(Z)
         G = np.array([k.constraint(ti, zi, p) for ti, zi in zip(T, Z)]).reshape(len(T), -1)
@@ -549,24 +578,48 @@ class MultiArcShooting(SingleShooting):
                 "arc": np.array(A), "junctions": np.array([s[1] for s in segs[1:]])}
 
     def constraint_violation(self, v, n_points=2001):
-        """Per path constraint, the largest ``max(0, g)`` on the free arcs."""
+        """Per path constraint, the largest ``max(0, g)`` on the free arcs, or
+        the largest bound violation of its boundary control on its arcs."""
         tr = self.trajectory(v, n_points)
+        return self._violations(tr)[0]
+
+    def _violations(self, tr):
+        k, p = self.kernels, self.params
         free = tr["arc"] < 0
-        if not free.any():
-            return np.zeros(self.kernels.N_CONSTRAINTS)
-        return np.maximum(tr["g"][free].max(axis=0), 0.0)
+        out = np.zeros(k.N_CONSTRAINTS)
+        if free.any():
+            out = np.maximum(tr["g"][free].max(axis=0), 0.0)
+        bound = []
+        for kind, c, _ in self.arcs:
+            if kind != "boundary":
+                continue
+            on = np.flatnonzero(tr["arc"] == c)
+            worst = 0.0
+            for i in on:
+                lo, hi = k.control_bounds(tr["t"][i], tr["z"][i], p)
+                u = tr["u"][i]
+                worst = max(worst, float(np.max(np.maximum(lo - u, u - hi), initial=0.0)))
+            bound.append(worst)
+            out[c] = max(out[c], worst)
+        return out, bound
 
     def diagnostics(self, v, n_points=401):
         """Checks of a solution beyond the residual.
 
         Returns a dict with ``free_arc_violation`` (per constraint), ``touch_nu``
         (should be >= 0), ``boundary_pi``, and per boundary arc the range of
-        its multiplier ``mu`` and of its controls along the arc.
+        its multiplier ``mu`` (should be >= 0) and of its controls along the
+        arc, and ``boundary_bound_violation``: how far those controls leave
+        their bounds (0 when they stay inside).
         """
         k, p = self.kernels, self.params
         tr = self.trajectory(v, n_points)
         arcs = self.unpack_arcs(v)
-        out = {"free_arc_violation": self.constraint_violation(v, n_points),
+        free = tr["arc"] < 0
+        _, bound = self._violations(tr)
+        out = {"free_arc_violation": (np.maximum(tr["g"][free].max(axis=0), 0.0) if free.any()
+                                      else np.zeros(k.N_CONSTRAINTS)),
+               "boundary_bound_violation": bound,
                "touch_nu": [a[1] for (kind, *_), a in zip(self.arcs, arcs) if kind == "touch"],
                "boundary_pi": [a[2] for (kind, *_), a in zip(self.arcs, arcs)
                                if kind == "boundary"],

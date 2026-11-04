@@ -22,7 +22,10 @@ Classical:
   both regimes (a touch point and a boundary arc), then exactly by multi-arc
   shooting seeded from the penalty solution.
 - **velocity_limit**: a rest-to-rest move with the order-1 limit ``v <= V``,
-  exactly by multi-arc shooting.
+  exactly by multi-arc shooting, also with the force clipped to ``|u| <= u_max``.
+- **speed_limit**: minimum time over a distance with ``|u| <= u_max`` and
+  ``v <= V``: bang-bang with a boundary arc, exactly by multi-arc shooting
+  seeded through a smoothing continuation (``1 + eps u^2/2``, ``eps -> 0``).
 """
 
 import time
@@ -493,6 +496,76 @@ def run_velocity_limit(cache_dir=None, seed=0):
                            4 * V ** 2 / (3 * t1), "closed form (order-1 boundary arc)", 1e-10,
                            time.perf_counter() - start,
                            {"residual": ex.residual_norm, "t_in": shoot.unpack_arcs(ex.v)[0][0]}))
+    # The force clipped as well: full force, a ramp onto the limit, the limit.
+    k = _kernels(examples.velocity_limited_move(bounded=True), cache_dir)
+    for V, umax in ((1.2, 8.0), (1.25, 7.0)):
+        start = time.perf_counter()
+        v = SingleShooting(k, [V, 1.0, umax]).solve([12.0, 6.0, 0, 0]).v
+        rho, sol = parameter_continuation(k, [V, 1.0, umax], "rho", np.logspace(0, 2, 9), v)[-1]
+        shoot, v = MultiArcShooting.from_penalty(k, [V, 0.0, umax], [("boundary", "v_max")], sol,
+                                                 [V, rho, umax])
+        ex = shoot.solve(v)
+        J, _, s_full = examples.velocity_limited_move_bounded_exact(V, umax)
+        rows.append(Result("velocity_limit", f"J (V={V}, |u|<={umax}, exact arcs)",
+                           shoot.cost(ex.v), J, "closed form (saturated, then a boundary arc)",
+                           1e-10, time.perf_counter() - start,
+                           {"residual": ex.residual_norm, "full_force": s_full,
+                            "bound_violation": shoot.diagnostics(ex.v)["boundary_bound_violation"]}))
+    return rows
+
+
+def speed_limit_record(V, D, umax, cache_dir=None, eps_min=1e-4, record=None):
+    """Smoothed min time, penalty -> exact arcs -> eps down -> bang-bang exact arcs.
+
+    Returns ``(bang-bang shooting, its solution, eps path, smoothed kernels)``.
+    ``record`` wraps the shooting classes (the animation records evaluations).
+    """
+    wrap = record or (lambda cls: cls)
+    ks = _kernels(examples.speed_limited_min_time(smoothed=True), cache_dir)
+    kb = _kernels(examples.speed_limited_min_time(), cache_dir)
+    base = [V, D, umax]
+    single = SingleShooting(ks, base + [1.0, 1.0])
+    # Costates on the scale of the unconstrained run (full power for half of
+    # t_guess, peaking at v_peak): lam_x ~ -1/v_peak, lam_v(0) ~ lam_x t_guess/2.
+    t_guess = 2 * np.sqrt(D / umax)
+    v_peak = umax * t_guess / 2
+
+    def sample(r):
+        lx = -r.uniform(0.3, 3) / v_peak
+        return single.pack([lx, lx * r.uniform(0.2, 1.5) * t_guess / 2],
+                           tf=r.uniform(0.8, 1.5) * t_guess)
+
+    sol, _ = single.multistart(sample, n_tries=200, seed=0)
+    path = parameter_continuation(ks, base + [1.0, 1.0], "rho", np.logspace(0, 1.5, 7), sol.v,
+                                  solve_options=dict(tol=1e-9))
+    rho, pen = path[-1]
+    arcs = [("boundary", "v_max")]
+    shoot, v = wrap(MultiArcShooting).from_penalty(ks, base + [1.0, 0.0], arcs, pen,
+                                                   base + [1.0, rho])
+    first = shoot.solve(v)
+
+    def solve_at(eps, guess):
+        return wrap(MultiArcShooting)(ks, base + [eps, 0.0], arcs).solve(guess)
+
+    n = int(round(4 * np.log10(1 / eps_min))) + 1
+    eps_path = [(1.0, first)] + continuation(solve_at, 1.0, np.logspace(0, np.log10(eps_min), n)[1:],
+                                             first.v)
+    bang = wrap(MultiArcShooting)(kb, base, arcs)
+    return bang, bang.solve(eps_path[-1][1].v), {"penalty": path, "seed": (shoot, v),
+                                                  "eps": eps_path}, ks
+
+
+def run_speed_limit(cache_dir=None, seed=0):
+    """Minimum time with |u| <= u_max and v <= V: t_f = D/V + V/u_max."""
+    rows = []
+    for V, D, umax in ((1.0, 3.0, 1.0), (2.0, 10.0, 0.5)):
+        start = time.perf_counter()
+        bang, sol, _, _ = speed_limit_record(V, D, umax, cache_dir)
+        t_in, t_out, _ = bang.unpack_arcs(sol.v)[0]
+        rows.append(Result("speed_limit", f"t_f (V={V}, D={D}, u_max={umax}, bang-bang exact arcs)",
+                           sol.tf, D / V + V / umax, "closed form (full power, cruise, brake)",
+                           1e-10, time.perf_counter() - start,
+                           {"residual": sol.residual_norm, "t_in": t_in, "t_out": t_out}))
     return rows
 
 
@@ -500,6 +573,7 @@ ALL = {
     "brachistochrone": run_brachistochrone,
     "bryson_denham": run_bryson_denham,
     "velocity_limit": run_velocity_limit,
+    "speed_limit": run_speed_limit,
     "orbit_raising": run_orbit_raising,
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,

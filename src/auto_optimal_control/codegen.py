@@ -23,11 +23,16 @@ Functions, for a prefix ``P`` (``aoc_<name>_``)::
     int P_constraint(t, z, p, g)             path constraints g (NC); g <= 0 is feasible
     int P_modes(t, z, p, M)                  the NM mode functions: S, then -g. Flag k of
                                              the arc is 1 exactly where M[k] < 0
+    int P_kinks_arc(t, z, p, arc, K)         saturation guards (NK): zero where a clipped
+                                             control meets its bound, so F has a kink there.
+                                             Integration restarts at each
     int P_constraint_rate_arc(t, z, p, arc, gd)  dg/dt along the flow on a fixed arc (NC).
                                              Its zeros are the peaks and troughs of g:
                                              between them g is monotone and crosses zero
                                              at most once
     int P_control(t, z, p, u)                optimal control u* (NU)
+    int P_control_bounds(t, z, p, lo, hi)    each control's bounds (NU each; +-HUGE_VAL
+                                             where unbounded)
     int P_hamiltonian(t, z, p, H)            H at u* (one value)
     int P_cost_rate(t, z, p, L)              running cost at u* (one value)
     int P_cost_rate_arc(t, z, p, arc, L)     running cost on a fixed arc
@@ -162,12 +167,7 @@ def _arc_dynamics(pmp, flags):
     ``flag_{NSW + c} * w / 2 * g**2``.
     """
     nsw = len(pmp.switching_functions)
-    bang = {sw.control: flag * sw.upper + (1 - flag) * sw.lower
-            for sw, flag in zip(pmp.switching_functions, flags[:nsw])}
-    # Other laws may contain a bang-bang law; replace it there too.
-    on_arc = {pmp.control_law[u]: value for u, value in bang.items()}
-    law = {u: bang[u] if u in bang else _smooth(e.xreplace(on_arc))
-           for u, e in pmp.control_law.items()}
+    law = {u: _smooth(e) for u, e in zip(pmp.control_law, _arc_laws(pmp, flags))}
     H = pmp.hamiltonian_full - pmp.penalty      # the penalty is added per arc below
     xdot = [f.subs(law) for f in pmp.problem.dynamics]
     lamdot = [-sp.diff(H, x).subs(law) for x in pmp.states]
@@ -179,6 +179,32 @@ def _arc_dynamics(pmp, flags):
         lamdot = [e - flag * c.penalty * c.expr * sp.diff(c.expr, x)
                   for e, x in zip(lamdot, pmp.states)]
     return [_smooth(e) for e in xdot + lamdot], _smooth(cost)
+
+
+def _kinks(laws):
+    """Where a clipped law switches branch: ``a - b`` for each ``Min(a, b)`` or ``Max(a, b)``."""
+    out = []
+    for law in laws:
+        for node in sorted(sp.sympify(law).atoms(sp.Min, sp.Max), key=sp.default_sort_key):
+            args = node.args
+            for i in range(len(args)):
+                for j in range(i + 1, len(args)):
+                    guard = _smooth(args[i] - args[j])
+                    if guard.free_symbols and not any(sp.simplify(guard - o) == 0 or
+                                                      sp.simplify(guard + o) == 0 for o in out):
+                        out.append(guard)
+    return out
+
+
+def _arc_laws(pmp, flags):
+    """The control laws on an arc, bang-bang controls fixed by their flags (Min/Max kept).
+
+    Other laws may contain a bang-bang law; it is replaced there too."""
+    nsw = len(pmp.switching_functions)
+    bang = {sw.control: flag * sw.upper + (1 - flag) * sw.lower
+            for sw, flag in zip(pmp.switching_functions, flags[:nsw])}
+    on_arc = {pmp.control_law[u]: value for u, value in bang.items()}
+    return [bang[u] if u in bang else e.xreplace(on_arc) for u, e in pmp.control_law.items()]
 
 
 def generate_c(pmp, name=None):
@@ -212,6 +238,8 @@ def generate_c(pmp, name=None):
 
     F = [_smooth(e) for e in pmp.dynamics]
     F_arc, L_arc = _arc_dynamics(pmp, flags)
+    K_arc = _kinks(_arc_laws(pmp, flags))
+    NK = len(K_arc)
     z_c = [mapping[s] for s in pmp.z]
     p_c = [mapping[s] for s in pmp.params]
     S = [_smooth(sw.expr) for sw in pmp.switching_functions]
@@ -272,6 +300,13 @@ def generate_c(pmp, name=None):
         f.out(f"g[{c}]", e)
     functions.append(f)
 
+    f = _Function(f"int {P}kinks_arc({tzp}, const int* arc, double* K)",
+                  ["t", "z", "p", "arc", "K"])
+    f.pre = flag_lines
+    for i, e in enumerate(K_arc):
+        f.out(f"K[{i}]", e)
+    functions.append(f)
+
     xdot_arc = F_arc[:n]
     Gdot = [_smooth(sp.diff(c.expr, pmp.time)
                     + sum(sp.diff(c.expr, x) * xd for x, xd in zip(pmp.states, xdot_arc)))
@@ -291,6 +326,16 @@ def generate_c(pmp, name=None):
     f = _Function(f"int {P}control({tzp}, double* u)", ["t", "z", "p", "u"])
     for k, u in enumerate(pmp.controls):
         f.out(f"u[{k}]", _smooth(pmp.control_law[u]))
+    functions.append(f)
+
+    bounds = {cs.control: (cs.lower, cs.upper) for cs in pmp.problem.control_sets
+              if hasattr(cs, "lower")}
+    f = _Function(f"int {P}control_bounds({tzp}, double* lo, double* hi)",
+                  ["t", "z", "p", "lo", "hi"])
+    for k, u in enumerate(pmp.controls):
+        lo, hi = bounds.get(u, (-sp.oo, sp.oo))
+        f.out(f"lo[{k}]", sp.sympify(lo))
+        f.out(f"hi[{k}]", sp.sympify(hi))
     functions.append(f)
 
     f = _Function(f"int {P}hamiltonian({tzp}, double* H)", ["t", "z", "p"])
@@ -460,7 +505,7 @@ def generate_c(pmp, name=None):
     body = "\n\n".join(fn.render(mapping if not fn.signature.startswith(f"int {P}residual")
                                  else bc_map) for fn in functions)
 
-    macros = dict(NZ=NZ, NP=NP, NSW=NSW, NC=NC, NM=NM, NU=NU, NNU=NNU, NR=NR, QMAX=QMAX,
+    macros = dict(NZ=NZ, NP=NP, NSW=NSW, NC=NC, NM=NM, NK=NK, NU=NU, NNU=NNU, NR=NR, QMAX=QMAX,
                   FREE_TF=int(free_tf))
     guard = f"AOC_{ident.upper()}_H"
     header_lines = [

@@ -14,9 +14,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from visuals import bryson_denham, cart_pole, earth_mars  # noqa: E402
+from visuals import (bryson_denham, cart_pole, earth_mars, speed_limit,  # noqa: E402
+                     velocity_limit)
 
-SUITES = {"cart_pole": cart_pole, "earth_mars": earth_mars, "bryson_denham": bryson_denham}
+SUITES = {"cart_pole": cart_pole, "earth_mars": earth_mars, "bryson_denham": bryson_denham,
+          "velocity_limit": velocity_limit, "speed_limit": speed_limit}
 
 
 def main(argv=None):

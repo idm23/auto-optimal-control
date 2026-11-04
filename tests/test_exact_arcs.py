@@ -6,18 +6,25 @@
   jump ``nu = 9.6``, cost 2.24.
 - Velocity-limited move (order 1), ``V = 1.2``: the limit ``v = V`` is ridden
   on ``[1/4, 3/4]``, cost ``4 V^2 / (3 t1) = 7.68``.
+- The same move with the force clipped to ``|u| <= 8``: full force first,
+  then a ramp onto the limit (``velocity_limited_move_bounded_exact``).
+- Minimum time over ``D = 3`` with ``|u| <= 1`` and ``v <= 1``: bang-bang,
+  full power to ``t = 1``, coast to ``t = 3``, brake to ``t_f = 4``.
 
-Each starts from an exterior-penalty solution via ``MultiArcShooting.from_penalty``.
+The smooth ones start from an exterior-penalty solution via
+``MultiArcShooting.from_penalty``. The bang-bang one starts from its smoothed
+variant (``1 + eps u^2/2``), solved with exact arcs and ``eps`` lowered.
 """
 
 import numpy as np
 import pytest
 import sympy as sp
 
+from auto_optimal_control.examples import velocity_limited_move_bounded_exact
 from auto_optimal_control.pontryagin import derive
-from auto_optimal_control.problem import OptimalControlProblem, PathConstraint
+from auto_optimal_control.problem import OptimalControlProblem, PathConstraint, UnitVector
 from auto_optimal_control.shooting import (MultiArcShooting, ShootingError, SingleShooting,
-                                           parameter_continuation)
+                                           continuation, parameter_continuation)
 
 
 def penalty_solution(k, first, rho_max, guess=(0, 2.0, 0, 0)):
@@ -62,6 +69,44 @@ def vel_boundary(vel):
     return exact(vel, 1.2, [("boundary", "v_max")], 1e2, guess=(12.0, 6.0, 0, 0))
 
 
+@pytest.fixture(scope="module")
+def vel_bounded(compiled):
+    k = compiled["velocity_limited_move_bounded"][2]
+    v0 = SingleShooting(k, [1.2, 1.0, 8.0]).solve([12.0, 6.0, 0, 0]).v
+    rho, pen = parameter_continuation(k, [1.2, 1.0, 8.0], "rho", np.logspace(0, 2, 9), v0)[-1]
+    shoot, v = MultiArcShooting.from_penalty(k, [1.2, 0.0, 8.0], [("boundary", "v_max")], pen,
+                                             [1.2, rho, 8.0])
+    return shoot, v, shoot.solve(v)
+
+
+TRAIN = [1.0, 3.0, 1.0]          # V, D, u_max: t_f = D/V + V/u_max = 4
+
+
+@pytest.fixture(scope="module")
+def train_smoothed(compiled):
+    """The smoothed run with exact arcs, from eps = 1 down to 1e-4."""
+    k = compiled["speed_limited_min_time_smoothed"][2]
+    single = SingleShooting(k, TRAIN + [1.0, 1.0])
+    v0 = single.solve(single.pack([-0.85, -1.5], tf=3.8)).v
+    rho, pen = parameter_continuation(k, TRAIN + [1.0, 1.0], "rho", np.logspace(0, 1.5, 7), v0,
+                                      solve_options=dict(tol=1e-9))[-1]
+    arcs = [("boundary", "v_max")]
+    shoot, v = MultiArcShooting.from_penalty(k, TRAIN + [1.0, 0.0], arcs, pen, TRAIN + [1.0, rho])
+    v = shoot.solve(v).v
+
+    def solve_at(eps, guess):
+        return MultiArcShooting(k, TRAIN + [eps, 0.0], arcs).solve(guess)
+
+    return continuation(solve_at, 1.0, np.logspace(0, -4, 17), v)
+
+
+@pytest.fixture(scope="module")
+def train(compiled, train_smoothed):
+    shoot = MultiArcShooting(compiled["speed_limited_min_time"][2], TRAIN, [("boundary", "v_max")])
+    v = train_smoothed[-1][1].v
+    return shoot, v, shoot.solve(v)
+
+
 # --- derivation and kernels --------------------------------------------------------------------
 
 def test_boundary_arc_derivation(compiled):
@@ -75,6 +120,28 @@ def test_boundary_arc_derivation(compiled):
     assert sc.order == 1 and len(sc.tangency) == 1
 
 
+def test_bounded_controls_get_exact_arcs(compiled):
+    arc = compiled["velocity_limited_move_bounded"][0].path_constraints[0].boundary
+    u = compiled["velocity_limited_move_bounded"][0].controls[0]
+    umax = compiled["velocity_limited_move_bounded"][0].params[2]
+    assert arc.control == {u: 0} and arc.bounds == {u: (-umax, umax)}
+    pmp = compiled["speed_limited_min_time"][0]
+    assert len(pmp.switching_functions) == 1         # bang-bang, and still an exact arc
+    assert pmp.path_constraints[0].boundary.control == {u: 0}
+
+
+def test_saturation_guards(compiled):
+    """A clipped control gets one guard per bound, zero where it saturates."""
+    k = compiled["velocity_limited_move_bounded"][2]
+    assert k.N_KINKS == 2 and compiled["velocity_limited_move"][2].N_KINKS == 0
+    z, p = np.array([0.0, 0.0, -3.0, -8.0]), [1.2, 0.0, 8.0]     # u_free = -lam_v = 8
+    np.testing.assert_allclose(sorted(np.abs(k.kinks(0.0, z, p))), [0.0, 16.0], atol=1e-14)
+    lo, hi = k.control_bounds(0.0, z, p)
+    assert lo[0] == -8.0 and hi[0] == 8.0
+    lo, hi = compiled["velocity_limited_move"][2].control_bounds(0.0, z, [1.2, 0.0])
+    assert lo[0] == -np.inf and hi[0] == np.inf
+
+
 def test_unsupported_constraints_say_why():
     t, p, v, a, j = sp.symbols("t p v a j", real=True)
     prob = OptimalControlProblem(
@@ -84,6 +151,18 @@ def test_unsupported_constraints_say_why():
     with pytest.warns(UserWarning):
         sc = derive(prob).path_constraints[0]
     assert sc.boundary is None and "order 3" in sc.unsupported
+    ux, uy = sp.symbols("u_x u_y", real=True)
+    x, y = sp.symbols("x y", real=True)
+    prob = OptimalControlProblem(
+        name="steer", time=t, states=[x, y], controls=[ux, uy], dynamics=[ux, uy],
+        running_cost=1, initial_state=[0, 0], final_state={x: 1, y: 1},
+        control_sets=[UnitVector([ux, uy])], path_constraints=[PathConstraint(y - 0.5, "y_max")])
+    assert "unit-vector" in derive(prob).path_constraints[0].unsupported
+    prob = OptimalControlProblem(
+        name="rising", time=t, states=[p, v], controls=[a], dynamics=[v, a],
+        running_cost=a ** 2 / 2, initial_state=[0, 0], final_state={p: 1, v: 0}, final_time=1,
+        path_constraints=[PathConstraint(v - 1 - t / 4, "v_max")])
+    assert "time-invariant" in derive(prob).path_constraints[0].unsupported
 
 
 @pytest.mark.parametrize("name, point", [
@@ -165,13 +244,64 @@ def test_order_one_boundary_arc_is_exact(vel_boundary):
     assert tr["g"][~on].max() < 1e-10
 
 
-@pytest.mark.parametrize("case", ["bd_boundary", "bd_touch", "vel_boundary"])
+def test_bounded_order_one_arc_is_exact(vel_bounded):
+    """Full force for s, a ramp to u = 0 at t1, the limit, then the mirror image."""
+    shoot, _, sol = vel_bounded
+    J, t1, s = velocity_limited_move_bounded_exact(1.2, 8.0)
+    assert sol.success
+    (t_in, t_out, _), = shoot.unpack_arcs(sol.v)
+    assert t_in == pytest.approx(t1, abs=1e-8) and t_out == pytest.approx(1 - t1, abs=1e-8)
+    assert shoot.cost(sol.v) == pytest.approx(J, rel=1e-11)
+    tr = shoot.trajectory(sol.v, n_points=2001)
+    early = tr["t"] < s - 1e-3
+    np.testing.assert_allclose(tr["u"][early, 0], 8.0, atol=1e-12)    # saturated
+    assert np.abs(tr["u"][:, 0]).max() <= 8.0 + 1e-12
+    d = shoot.diagnostics(sol.v)
+    assert d["boundary_bound_violation"] == [0.0] and sol.max_violation < 1e-12
+
+
+def test_bang_bang_boundary_arc_is_exact(train, train_smoothed):
+    shoot, _, sol = train
+    assert sol.success and sol.nfev < 30
+    assert sol.tf == pytest.approx(4.0, abs=1e-12)
+    (t_in, t_out, pi), = shoot.unpack_arcs(sol.v)
+    assert t_in == pytest.approx(1.0, abs=1e-12) and t_out == pytest.approx(3.0, abs=1e-12)
+    assert pi[0] == pytest.approx(2.0, abs=1e-10)
+    assert shoot.cost(sol.v) == pytest.approx(4.0, abs=1e-12)        # min time: J = t_f
+    tr = shoot.trajectory(sol.v, n_points=801)
+    u, t = tr["u"][:, 0], tr["t"]
+    np.testing.assert_array_equal(u[t < 1 - 1e-9], 1.0)
+    np.testing.assert_array_equal(u[(t > 1 + 1e-9) & (t < 3 - 1e-9)], 0.0)
+    np.testing.assert_array_equal(u[t > 3 + 1e-9], -1.0)
+    d = shoot.diagnostics(sol.v)
+    assert d["boundary_mu"][0][0] > -1e-12                            # mu = -lam_v >= 0
+    # The smoothed runs approach it: t_f = 4 + O(eps).
+    eps, smooth = train_smoothed[-1]
+    assert eps == pytest.approx(1e-4) and smooth.tf - 4.0 == pytest.approx(0, abs=1e-8)
+
+
+def test_bang_bang_jacobian_matches_finite_differences(train):
+    """Away from the solution (where switches sit on the junctions), with a
+    switch inside each free arc."""
+    shoot, v, _ = train
+    for dw in ([0.05, -0.1, 0.03, 0.02, -0.03, 0.1, -0.1, 0.2],
+               [0.0, 0.3, 0.0, 0.1, 0.1, 0, 0.1, -0.3]):
+        w = v + np.array(dw)
+        _, J = shoot.residual_jacobian(w)
+        fd = fd_jacobian(shoot.residual, w)
+        np.testing.assert_allclose(J, fd, atol=1e-6 * np.abs(fd).max())
+
+
+@pytest.mark.parametrize("case", ["bd_boundary", "bd_touch", "vel_boundary", "vel_bounded"])
 def test_jacobian_matches_finite_differences(request, case):
     shoot, v, sol = request.getfixturevalue(case)
     for w in (v, sol.v):                     # at the penalty guess and at the solution
         R, J = shoot.residual_jacobian(w)
-        np.testing.assert_allclose(R, shoot.residual(w), atol=1e-12)   # STM vs plain steps
-        fd = fd_jacobian(shoot.residual, w)
+        np.testing.assert_allclose(R, shoot.residual(w), atol=1e-11)   # STM vs plain steps
+        # Restarts at the saturation kinks move with w, which adds noise near
+        # the integration tolerance to R: a wider step keeps it out of the
+        # difference quotient.
+        fd = fd_jacobian(shoot.residual, w, h=1e-5 if case == "vel_bounded" else 1e-7)
         np.testing.assert_allclose(J, fd, atol=1e-5 * max(1.0, np.abs(fd).max()))
 
 
@@ -191,8 +321,6 @@ def test_validation(bd, compiled):
         MultiArcShooting(compiled["velocity_limited_move"][2], [1.2, 0.0], [("touch", 0)])
     with pytest.raises(ValueError, match="arc kind"):
         MultiArcShooting(bd, [0.1, 0.0], [("ride", 0)])
-    with pytest.raises(NotImplementedError, match="bang-bang"):
-        MultiArcShooting(compiled["min_time"][2], [1.0, 1.0, 1.0], [])
     shoot = MultiArcShooting(bd, [0.1, 0.0], [("boundary", "x_max")])
     with pytest.raises(ShootingError, match="out of order"):
         shoot.residual(shoot.pack_arcs([20, 6, 0, 0], [(0.7, 0.3, [0, 0])]))

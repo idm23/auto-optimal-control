@@ -15,12 +15,36 @@ import numpy as np
 
 from problems import (MARS, TU, ShootingError, SingleShooting, _kernels, continuation,
                       earth_mars_problem)
-from visuals.common import (BLUE, GRID, INK, INK2, MUTED, ORANGE, RAMP, header, load, recording,
+from visuals.common import (BLUE, GRID, INK, INK2, MUTED, ORANGE, RAMP, Problem, header, load, recording,
                             save, style, write)
 
-__all__ = ["record", "animate", "save", "load"]
+__all__ = ["record", "animate", "save", "load", "PROBLEM"]
 DAY = 86400.0 / TU
 
+
+PROBLEM = Problem(
+    name="Earth-to-Mars low-thrust rendezvous",
+    story=("A 1000 kg spacecraft with a 0.5 N ion engine (specific impulse 2000 s) starts at "
+           "Earth's position and velocity and must\nmatch Mars's 348.8 days later, using the "
+           "least propellant. A benchmark of Taheri et al. (arXiv:2409.01490)."),
+    formulation=[
+        ("maximize", r"$m(t_f)$,  i.e.  minimize $\int_0^{t_f} \frac{T_{max}}{c}\,\delta\,dt$"),
+        ("dynamics", r"$\ddot{\mathbf{r}} = -\frac{\mu}{r^3}\,\mathbf{r} + \frac{T_{max}\,"
+                     r"\delta}{m}\,\hat{\mathbf{a}}, \quad \dot m = -\frac{T_{max}\,\delta}{c}$"),
+        ("controls", r"throttle $\delta \in [0, 1]$,  thrust direction $|\hat{\mathbf{a}}| = 1$"),
+        ("boundary", r"$(\mathbf{r}, \mathbf{v})(0)$ = Earth,  $(\mathbf{r}, \mathbf{v})(t_f)$ "
+                     r"= Mars,  $t_f = 348.795$ days"),
+    ],
+    solved_by=[
+        "Energy-optimal first: random costates in [0, 1]⁷ until shooting converges (a smooth "
+        "throttle).",
+        "Energy-to-fuel continuation: L = (T/c)(δ − ε δ(1 − δ)), ε lowered from 1 to 1e-4.",
+        "Fuel-optimal bang-bang shooting, every throttle switch located exactly.",
+    ],
+    summary="max m(t_f),  Earth → Mars rendezvous in 348.8 days,  0.5 N,  Isp 2000 s,  "
+            "throttle δ ∈ [0, 1]",
+    source="Reference: m(t_f) = 603.935 kg, arXiv:2409.01490 Table 2",
+)
 
 def _kepler(r0, v0, ts, mu):
     """Two-body positions at times ts (sorted either way) from (r0, v0) at ts[0]."""
@@ -176,7 +200,7 @@ def animate(data, path, fps=30, dpi=100, stills_dir=None):
     T_days = days(data["tf"])
     fig = plt.figure(figsize=(12.8, 7.2), dpi=dpi)
     gs = fig.add_gridspec(3, 2, width_ratios=[1.15, 1], left=0.05, right=0.97, top=0.80,
-                          bottom=0.08, hspace=0.45, wspace=0.16)
+                          bottom=0.105, hspace=0.45, wspace=0.16)
     sky = fig.add_subplot(gs[:, 0])
     ax_d = fig.add_subplot(gs[0, 1])
     ax_m = fig.add_subplot(gs[1, 1], sharex=ax_d)
@@ -328,4 +352,4 @@ def animate(data, path, fps=30, dpi=100, stills_dir=None):
     plan = _plan(data, fps)
     mid = next(j for j, f in enumerate(plan) if f[0] == "flight" and f[1] >= 0.62 * len(data["fuel_t"]))
     return write(fig, draw, plan, path, fps, stills_dir, prefix="earth_mars_",
-                 still_frames={"flight": mid})
+                 still_frames={"flight": mid}, problem=PROBLEM)

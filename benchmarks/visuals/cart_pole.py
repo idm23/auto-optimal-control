@@ -23,9 +23,39 @@ import numpy as np
 
 from problems import (CART_POLE_PARAMS, ShootingError, SingleShooting, _kernels,
                       cart_pole_problem, costates_from_direct)
+from visuals.common import BLUE, GRID, INK, INK2, MUTED, ORANGE, SURF, Problem, write
 
 PUBLISHED_J = 58.80819
 N_SAMPLES = 121          # time samples per recorded trajectory
+
+PROBLEM = Problem(
+    name="Cart-pole swing-up",
+    story=("Swing a pole from hanging straight down to balanced upright while moving the cart "
+           "1 m to the right, in exactly 2 s,\nwith the least force effort. The benchmark of "
+           "Kelly's direct-collocation tutorial (SIAM Review, 2017)."),
+    formulation=[
+        ("minimize", r"$J = \int_0^{2} u^2\,dt$"),
+        ("dynamics", r"$\ddot x = \frac{l m_2 \sin\theta\,\dot\theta^2 + u + m_2 g \cos\theta"
+                     r"\sin\theta}{m_1 + m_2 \sin^2\theta}, \quad \ddot\theta = -\frac{l m_2"
+                     r"\cos\theta\sin\theta\,\dot\theta^2 + u\cos\theta + (m_1 + m_2) g"
+                     r"\sin\theta}{l\,(m_1 + m_2 \sin^2\theta)}$"),
+        ("force limit", r"$|u| \leq 20$ N"),
+        ("boundary", r"$x: 0 \to 1$ m,  $\theta: 0 \to \pi$,  at rest at $t = 0$ and "
+                     r"$t = 2$ s"),
+        ("constants", r"$m_1 = 1$ kg (cart),  $m_2 = 0.3$ kg (pole),  $l = 0.5$ m,  "
+                      r"$g = 9.81$ m/s$^2$"),
+    ],
+    solved_by=[
+        "Direct: Kelly's Hermite-Simpson collocation from his straight-line guess (SLSQP).",
+        "Indirect polish: costates lifted from the direct solution, then Newton on the "
+        "shooting residual.",
+        "Random costate search: shooting from random costates finds other extremals, one "
+        "cheaper than the published one.",
+    ],
+    summary="min ∫u² dt,  cart-pole swing-up in T = 2 s,  |u| ≤ 20 N,  cart moves 1 m",
+    source="Reference: M. Kelly, An introduction to trajectory optimization, SIAM Review 59 "
+           "(2017), section 6",
+)
 
 
 # =============================================================================
@@ -200,8 +230,6 @@ def load(path):
 # Rendering
 # =============================================================================
 
-INK, INK2, MUTED, GRID, SURF = "#0b0b0b", "#52514e", "#a3a29c", "#e4e3df", "#fcfcfb"
-BLUE, ORANGE = "#2a78d6", "#eb6834"          # this package / the published solution
 POLE = 0.5                                     # pole length l (params[2])
 
 
@@ -258,10 +286,7 @@ def animate(data, path, fps=30, dpi=100, stills_dir=None):
 
     With ``stills_dir``, also save the last frame of each stage as a PNG.
     """
-    from pathlib import Path
-
     import matplotlib.pyplot as plt
-    from matplotlib import animation
     from matplotlib.collections import LineCollection
 
     plt.rcParams.update({"font.size": 10, "axes.edgecolor": INK2, "axes.labelcolor": INK2,
@@ -412,6 +437,9 @@ def animate(data, path, fps=30, dpi=100, stills_dir=None):
 
     def draw(frame):
         stage, i = frame
+        if stage == "__reset__":
+            state["stage"] = None
+            return ()
         if stage != state["stage"]:
             setup(stage)
         if stage == "direct":
@@ -472,23 +500,7 @@ def animate(data, path, fps=30, dpi=100, stills_dir=None):
         return ()
 
     plan = _frame_plan(data, fps)
-    path = Path(path)
-    if stills_dir is not None:
-        stills_dir = Path(stills_dir)
-        stills_dir.mkdir(parents=True, exist_ok=True)
-        ends = {}
-        for j, (stage, _) in enumerate(plan):
-            ends[stage] = j
-        # The motion's still is mid-swing, not at the target where both coincide.
-        ends["motion"] = next(j for j, f in enumerate(plan)
-                              if f[0] == "motion" and f[1] >= len(data["best_t"]) // 2)
-        for stage, j in ends.items():
-            draw(plan[j])
-            fig.savefig(stills_dir / f"cart_pole_{stage}.png")
-        state["stage"] = None
-    writer = (animation.PillowWriter(fps=fps) if path.suffix == ".gif"
-              else animation.FFMpegWriter(fps=fps, bitrate=4000))
-    anim = animation.FuncAnimation(fig, draw, frames=plan, blit=False, cache_frame_data=False)
-    anim.save(path, writer=writer)
-    plt.close(fig)
-    return path
+    # The motion's still is mid-swing, not at the target where both coincide.
+    mid = next(j for j, f in enumerate(plan) if f[0] == "motion" and f[1] >= len(data["best_t"]) // 2)
+    return write(fig, draw, plan, path, fps, stills_dir, prefix="cart_pole_",
+                 still_frames={"motion": mid}, problem=PROBLEM)
