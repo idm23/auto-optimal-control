@@ -1,0 +1,127 @@
+name: Release
+
+# Builds the sdist and the (pure-Python) wheel, installs the wheel into a clean
+# environment and runs the test suite against it before anything is
+# published. Publishing uses PyPI trusted publishing (OIDC), so no API tokens
+# are stored. The slow literature benchmarks run in tests.yml on every pull
+# request and push to main, so they are not repeated here.
+#
+#   pull request touching packaging -> build + test only
+#   manual run with target=testpypi -> build, test, upload to TestPyPI
+#   push of a tag vX.Y.Z            -> build, test, upload to PyPI
+#                                      (the tag must match the pyproject version)
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Publish target (PyPI releases happen only from tags)"
+        type: choice
+        options: [none, testpypi]
+        default: none
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check-version:
+    name: tag matches version
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare tag with pyproject version
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match pyproject version ${version}"
+            exit 1
+          fi
+
+  build:
+    name: build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: Build
+        run: uv build --out-dir dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/*
+
+  test-wheel:
+    name: test installed wheel (Python ${{ matrix.python-version }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the wheel with its dependencies from PyPI
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "$(ls dist/*.whl)[shooting]" pytest
+      - name: Run the tests against the installed package
+        run: |
+          # Remove the sources so only the installed wheel can be imported.
+          rm -rf src
+          "$RUNNER_TEMP/venv/bin/python" -m pytest -ra
+
+  publish-testpypi:
+    name: publish to TestPyPI
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    needs: [build, test-wheel]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/auto-optimal-control
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check-version, build, test-wheel]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/auto-optimal-control
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
