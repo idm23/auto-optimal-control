@@ -32,3 +32,40 @@ def test_cart_pole_recording_and_animation(kernel_cache, tmp_path):
     assert out.stat().st_size > 0
     for stage in ("direct", "polish", "search", "motion"):
         assert (tmp_path / f"cart_pole_{stage}.png").exists()
+
+
+@pytest.mark.slow
+def test_earth_mars_recording_and_animation(kernel_cache, tmp_path):
+    pytest.importorskip("matplotlib")
+    from visuals import earth_mars
+
+    data = earth_mars.record(cache_dir=kernel_cache, verbose=False)
+    assert data["shoot_R"][-1] < 1e-9
+    assert data["cont_eps"][0] == 1.0 and data["cont_eps"][-1] == pytest.approx(1e-4)
+    assert np.all(np.diff(data["cont_m"][:, -1]) > -1e-6)       # mass rises along the path
+    assert data["fuel_m"][-1] == pytest.approx(603.935, rel=2e-5)
+    np.testing.assert_allclose(data["switch_t"] * earth_mars.TU / 86400,
+                               [46.6, 68.0, 142.7, 290.3], atol=0.1)
+    np.testing.assert_allclose(data["fuel_r"][-1], data["mars"][-1], atol=1e-8)
+    out = earth_mars.animate(data, tmp_path / "earth_mars.gif", fps=3, dpi=40,
+                             stills_dir=tmp_path)
+    assert out.stat().st_size > 0
+    for stage in ("shoot", "cont", "flight"):
+        assert (tmp_path / f"earth_mars_{stage}.png").exists()
+
+
+@pytest.mark.slow
+def test_bryson_denham_recording_and_animation(kernel_cache, tmp_path):
+    pytest.importorskip("matplotlib")
+    from visuals import bryson_denham
+
+    data = bryson_denham.record(cache_dir=kernel_cache, verbose=False)
+    assert data["touch_cost"] == pytest.approx(2.24, rel=1e-12)
+    assert data["arc_cost"] == pytest.approx(4 / 0.9, rel=1e-12)
+    np.testing.assert_allclose(data["arc_junctions"], [0.3, 0.7], atol=1e-6)
+    assert np.all(np.diff(data["touch_pen_J"]) > -1e-9)     # the penalty cost climbs
+    assert data["touch_exact_R"][-1] < 1e-10 and data["arc_exact_R"][-1] < 1e-10
+    out = bryson_denham.animate(data, tmp_path / "bd.gif", fps=3, dpi=40, stills_dir=tmp_path)
+    assert out.stat().st_size > 0
+    for stage in ("touch_pen", "touch_exact", "arc_pen", "arc_exact", "motion"):
+        assert (tmp_path / f"bryson_denham_{stage}.png").exists()

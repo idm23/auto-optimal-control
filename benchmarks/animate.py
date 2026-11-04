@@ -14,9 +14,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from visuals import cart_pole  # noqa: E402
+from visuals import bryson_denham, cart_pole, earth_mars  # noqa: E402
 
-SUITES = {"cart_pole": cart_pole}
+SUITES = {"cart_pole": cart_pole, "earth_mars": earth_mars, "bryson_denham": bryson_denham}
 
 
 def main(argv=None):
@@ -39,7 +39,8 @@ def main(argv=None):
     if args.reuse:
         data = suite.load(rec)
     else:
-        data = suite.record(cache_dir=args.cache_dir, n_random=args.n_random)
+        extra = {"n_random": args.n_random} if args.name == "cart_pole" else {}
+        data = suite.record(cache_dir=args.cache_dir, **extra)
         suite.save(data, rec)
     suite.animate(data, out, fps=args.fps, stills_dir=out.parent if args.stills else None)
     print(f"wrote {out}")
