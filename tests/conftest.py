@@ -14,6 +14,10 @@ from auto_optimal_control.numeric import NumericSystem
 from auto_optimal_control.pontryagin import derive
 
 
+# Examples whose singular arcs are derived (exact singular-arc shooting).
+SINGULAR = {"singular_regulator", "goddard"}
+
+
 def pytest_addoption(parser):
     parser.addoption("--runslow", action="store_true", default=False,
                      help="run tests marked slow (the literature benchmarks)")
@@ -36,7 +40,8 @@ def kernel_cache(tmp_path_factory):
 @pytest.fixture(scope="session")
 def compiled(kernel_cache):
     """name -> (PontryaginSystem, NumericSystem, Kernels)."""
-    systems = {name: derive(problem) for name, problem in examples.all_examples().items()}
+    systems = {name: derive(problem, singular=name in SINGULAR)
+               for name, problem in examples.all_examples().items()}
     # Each build is a compiler subprocess, so threads build in parallel.
     with ThreadPoolExecutor(len(systems)) as pool:
         kernels = {name: pool.submit(build_kernels, pmp, name, cache_dir=kernel_cache)

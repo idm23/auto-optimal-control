@@ -314,6 +314,60 @@ shoot.cost(sol.v), shoot.diagnostics(sol.v), shoot.trajectory(sol.v)
 `bryson_denham` (order 2, both regimes) and `speed_limited_min_time`
 (bang-bang) are solved against their closed forms.
 
+### Singular arcs
+
+Where a bang-bang control's switching function `S` vanishes on an interval,
+the control is singular: `S = 0` says nothing about it, so `S` is
+differentiated along the state–costate flow until the control appears.
+`derive(problem, singular=True)` does this for each bang-bang control. `S'`
+never involves the control; for an order-1 arc `S'' = a + b u` does, and
+`S'' = 0` gives the singular control `u_s = -a/b`. Its arc kernels are
+generated next to the boundary arcs': the dynamics at `u_s`, their Jacobian,
+the Legendre–Clebsch coefficient `-dS''/du` (≥ 0 on a minimizing arc), and
+the junction conditions `(S, S')` with their gradients.
+
+`MultiArcShooting` takes singular arcs and switches in its structure:
+
+```python
+from auto_optimal_control.examples import GODDARD_PARAMS, goddard
+
+k = build_kernels(derive(goddard(), singular=True))
+shoot = MultiArcShooting(k, GODDARD_PARAMS, [("singular", "u", "upper", "lower")])
+v = shoot.pack_arcs(shoot.pack([-2.5, -0.18, 0.005], [-0.03], 0.2), [(0.03, 0.1)])
+sol = shoot.solve(v)            # h(t_f) = 1.01283692, t_f = 0.19885626
+```
+
+- **Singular arc** `("singular", u, before, after)`: unknowns are the entry
+  and exit times, and the conditions are `S = S' = 0` at the entry. Along
+  the arc `u_s` keeps `S'' = 0`, so `S` and `S'` stay at zero, and `H` is
+  continuous at both junctions because `S = 0` there. The exit time is set
+  by the conditions downstream.
+- **Held bounds.** `before` and `after` name the bound (`"lower"` or
+  `"upper"`) the control holds on the free arcs either side. A control with
+  a singular arc holds its bound on every free arc, and its switches are
+  `("switch", u)` entries (unknown: the time; condition: `S = 0`). Its
+  switching function is not watched: at a singular junction it touches zero
+  with `S' = 0`, where locating the root is ill-conditioned. `propagate`
+  and `trajectory` take the held controls as `frozen`.
+- **Checks.** `diagnostics` reports the range of `u_s` and of the
+  Legendre–Clebsch coefficient on each singular arc, how far `u_s` leaves
+  its bounds (this also counts toward `max_violation`), and whether `S` has
+  the sign of the bound held on the free arcs (`held_sign_violation` ≤ 0).
+- **Starting points.** Holding the control at its bounds makes the exact
+  structure much better conditioned than the smoothed problem: Goddard
+  converges from rough guesses (the benchmark draws them at random). A
+  smoothed problem (`eps u^2/2` added to the running cost) can supply the
+  junction times instead, through `from_smoothed`. Smoothed single shooting
+  does not reach small `eps`, though: near the singular arc the extremal grows
+  like `exp(sqrt(2/eps) t)`.
+- **Order 1 only.** At order 2 and above a bang arc cannot join the
+  singular arc directly; the control chatters (Fuller's phenomenon). `derive`
+  says so in `singular_unsupported`. Unit-vector control sets, and other
+  controls with bounds, are not supported on singular arcs.
+
+`singular_regulator` (`min ∫x²`, `|u| ≤ 1`) is solved against its closed
+form, and Goddard's rocket against the literature (below).
+
 ## What `derive` produces
 
 `derive(problem)` returns a `PontryaginSystem`:
@@ -330,6 +384,7 @@ shoot.cost(sol.v), shoot.diagnostics(sol.v), shoot.trajectory(sol.v)
 | `path_constraints` | `StateConstraint(name, expr, order, derivatives, penalty)` per path constraint |
 | `penalty` | `sum w/2 max(0, g)^2`, included in `hamiltonian`, `dynamics` and `running_cost` |
 | `path_constraints[c].boundary` | `BoundaryArc(control, multiplier, dynamics, hamiltonian, running_cost, bounds)` for exact arcs (orders 1 and 2), or `None` with the reason in `unsupported` |
+| `singular_arcs` | with `singular=True`: per switching function, `SingularArc(control, derivatives, law, dynamics, hamiltonian, running_cost, legendre_clebsch, lower, upper)` for order-1 arcs, or `None` with the reason in `singular_unsupported` |
 | `boundary` | the boundary conditions: `residuals`, `unknowns` and the boundary symbols |
 
 The boundary residuals are the fixed initial states (or `lam_i(t_0) = 0` when
@@ -341,7 +396,8 @@ when the final time is free. There are as many residuals as unknowns.
 navigation problem, minimum-time and minimum-energy double integrators
 (unbounded and saturated), a terminal-cost LQ problem and a fuel-optimal
 planar low-thrust transfer, the Bryson–Denham problem (an order-2 state
-limit) and a velocity-limited move (an order-1 limit).
+limit), a velocity-limited move (an order-1 limit), a minimum-time run with
+a speed limit, a singular regulator and Goddard's rocket (singular arcs).
 
 ## Tests
 
@@ -396,7 +452,7 @@ limit) and a velocity-limited move (an order-1 limit).
 
 ## Benchmarks against the literature
 
-`benchmarks/` solves nine canonical problems from scratch and compares each
+`benchmarks/` solves ten canonical problems from scratch and compares each
 indirect solution with a published value. It starts from random costate
 guesses, uses continuation where needed, and for the cart-pole lifts
 costates from a direct solution. Run them with
@@ -417,6 +473,7 @@ checks them too. They are solved with `auto_optimal_control.shooting`.
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
 | Cart-pole swing-up (published extremal) | `∫u²` | 58.807667 | 58.80819 | Kelly (2017) SIAM Review; value from the ASSET reproduction |
 | Cart-pole swing-up (random search) | `∫u²` | **57.944780** | — | this work; checked by an independent simulation |
+| Goddard rocket, singular arc (random guesses) | `h(t_f)`, `t_f` | 1.012836918, 0.198856262 | 1.01283692, 0.19885626 | Graichen & Petit (2008), collocation |
 
 Notes:
 - **The reference values come from direct (collocation) methods or smoothed
@@ -431,6 +488,9 @@ Notes:
   below. The gap shrinks as ρ grows, about 3e-5 and 3e-4 at the final
   weights. Single shooting limits how far ρ can go on the boundary arc: its
   conditioning grows with ρ.
+- **Goddard:** full thrust to `t = 0.023510`, singular thrust (rising from
+  2.14 to 3.09) to `t = 0.072671`, then a coast. The exact structure
+  converges from the third random guess.
 - **Cart-pole:** Kelly's direct method from his straight-line guess converges
   to an extremal where the cart overshoots to `x = 1.18`, with `J = 58.808`.
   Polishing it indirectly reproduces the published value. Random costate
@@ -506,8 +566,11 @@ keeps a one-line summary at the bottom. The rendered videos are in
 
 ## Limitations
 
-- **Singular arcs** are not handled: where a switching function stays at
-  zero over an interval, the control takes its lower bound.
+- **Singular arcs need the structure, and order 1.** Outside
+  `MultiArcShooting`, where a switching function stays at zero over an
+  interval, the control takes its lower bound. Exact singular arcs need
+  their place in the structure, an order-1 arc, and one singular control at
+  a time.
 - **Saturation corners and switches carry the tolerance.** The corners of
   a clipped (quadratic, bounded) control are kinks in the dynamics. Like
   bang-bang switches, they are located and the integration restarts there.
@@ -519,8 +582,8 @@ keeps a one-line summary at the bottom. The rendered videos are in
   sequence of boundary arcs and touch points. Find it from a penalty
   solution, or for bang-bang controls from a smoothed problem. Not supported
   with exact arcs: unit-vector control sets, limits that depend explicitly on
-  time (`H` then jumps at the entry), order 3 or more, singular arcs, and two
-  constraints active at once.
+  time (`H` then jumps at the entry), order 3 or more, two constraints active
+  at once, and a boundary arc that joins a singular arc directly.
 - **Order-1 entries with a smooth control converge linearly.** There `H`
   continuity has a double root (the control is continuous, so `H` differs
   only to second order), so Newton converges linearly and junction times
@@ -578,8 +641,9 @@ with PyPI trusted publishing, so no tokens are stored.
    attitude slews.
 5. ~~Path constraints: order, exterior penalty with located crossings,
    termination; exact boundary arcs and touch points for order 1 and 2, with
-   bounded and bang-bang controls~~. Next: singular arcs, and a
-   control-continuity entry condition for order-1 limits.
+   bounded and bang-bang controls; order-1 singular arcs~~. Next: boundary
+   arcs that join singular arcs (Goddard with a dynamic-pressure limit), and
+   a control-continuity entry condition for order-1 limits.
 6. Ways to choose initial costates, as separate optional layers on top of the
    forward map: ~~single shooting and continuation~~; next, gradient-free
    search (PSO, differential evolution) and learned samplers of the costate

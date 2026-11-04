@@ -82,6 +82,7 @@ def _render_wrapper(pmp, prefix, header_name, macros):
         "constraint_names": repr(tuple(c.name for c in pmp.path_constraints)),
         "constraint_orders": repr(tuple(c.order for c in pmp.path_constraints)),
         "exact_arcs": repr(tuple(c.boundary is not None for c in pmp.path_constraints)),
+        "singular_arcs": repr(tuple(a is not None for a in pmp.singular_arcs)),
         "NC1": str(max(macros["NC"], 1)),
         "NM1": str(max(macros["NM"], 1)),
         "NK1": str(max(macros["NK"], 1)),
@@ -182,12 +183,15 @@ class Kernels:
     ``cost_rate``, ``switching``, ``switching_gradient``, ``constraint``,
     ``modes``, ``constraint_rate``, ``initial_arc``, ``residual``,
     ``residual_jacobian``, ``stm_jump``, ``propagate``, ``propagate_batch``,
-    and for exact boundary arcs ``propagate_boundary``, ``boundary_rhs``,
+    for exact boundary arcs ``propagate_boundary``, ``boundary_rhs``,
     ``boundary_jacobian``, ``boundary_control``, ``boundary_multiplier``,
     ``boundary_hamiltonian``, ``hamiltonian_gradient``, ``tangency``,
-    ``tangency_gradient``) and so are its FNI types (``Dynamics``,
-    ``ArcDynamics``, ``BoundaryDynamics``, ``Switching``, ``Constraint``,
-    ``ConstraintRate``). All of them take ``z = [x, lambda]`` and
+    ``tangency_gradient``, and for singular arcs ``propagate_singular``,
+    ``singular_rhs``, ``singular_jacobian``, ``singular_control``,
+    ``singular_hamiltonian``, ``singular_legendre``, ``singular_junction``)
+    and so are its FNI types (``Dynamics``, ``ArcDynamics``,
+    ``BoundaryDynamics``, ``SingularDynamics``, ``Switching``,
+    ``Constraint``, ``ConstraintRate``). All of them take ``z = [x, lambda]`` and
     the parameter vector in the orders of ``system.z`` and ``system.params``.
     """
 
@@ -255,7 +259,7 @@ class Kernels:
 
     def trajectory(self, t0, z0, t1, params=None, *, t_eval=None, n_points=201, arc=None,
                    method="DOP853", rtol=1e-10, atol=1e-12, max_switches=10000,
-                   terminate=False, n_interior=4, constraint_events=True):
+                   terminate=False, n_interior=4, constraint_events=True, frozen=()):
         """The extremal from ``z0``, sampled: states, costates, controls, ``H`` and ``g``.
 
         Integrates like :func:`propagate`, as one FNI hybrid integration
@@ -264,7 +268,8 @@ class Kernels:
         dense output at ``t_eval`` (default: ``n_points`` evenly spaced
         times). With ``terminate`` (as in :func:`propagate`) the integration
         stops at a violation and only the times reached are sampled.
-        ``n_interior`` and ``constraint_events`` are as in :func:`propagate`.
+        ``n_interior``, ``constraint_events`` and ``frozen`` are as in
+        :func:`propagate`.
 
         Returns a dict with ``t``, ``z`` (len, NZ), ``u`` (len, NU), ``H``
         (len,), ``g`` (len, NC), ``switch_times``, ``switch_index``,
@@ -273,6 +278,7 @@ class Kernels:
         """
         mod = self.module
         nsw, nm = mod.N_SWITCHING, mod.N_MODES
+        frozen = {int(k) for k in frozen}
         p = None if params is None else np.asarray(params, dtype=float)
         z = np.asarray(z0, dtype=float)
         arc = mod.initial_arc(t0, z, p) if arc is None else np.array(arc, dtype=np.intc)
@@ -294,6 +300,9 @@ class Kernels:
             # function's rate at the crossing, and a tangential zero flips it.
             # A saturation kink only restarts the step.
             if k >= nsw + nc:
+                return y
+            if k in frozen:
+                unchanged.append((t, k))
                 return y
             a = dynamics.arc
             flag = 1 - a[k]

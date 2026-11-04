@@ -26,6 +26,11 @@ Classical:
 - **speed_limit**: minimum time over a distance with ``|u| <= u_max`` and
   ``v <= V``: bang-bang with a boundary arc, exactly by multi-arc shooting
   seeded through a smoothing continuation (``1 + eps u^2/2``, ``eps -> 0``).
+
+Rockets:
+- **goddard**: Goddard's maximum-altitude climb through drag, full thrust, a
+  singular arc and a coast (Graichen & Petit 2008), exactly by multi-arc
+  shooting from random guesses.
 """
 
 import time
@@ -569,6 +574,33 @@ def run_speed_limit(cache_dir=None, seed=0):
     return rows
 
 
+def run_goddard(cache_dir=None, seed=0):
+    """Full thrust, singular, coast: the exact structure from random guesses."""
+    start = time.perf_counter()
+    k = build_kernels(derive(examples.goddard(), singular=True), cache_dir=cache_dir)
+    params = list(examples.GODDARD_PARAMS)
+    shoot = MultiArcShooting(k, params, [("singular", "u", "upper", "lower")])
+
+    def sample(rng):
+        lam0 = [-rng.uniform(1, 6), -rng.uniform(0, 0.5), rng.uniform(-0.1, 0.1)]
+        t_in = rng.uniform(0.005, 0.05)
+        return shoot.pack_arcs(shoot.pack(lam0, [rng.uniform(-0.2, 0.2)], rng.uniform(0.15, 0.3)),
+                               [(t_in, t_in + rng.uniform(0.02, 0.1))])
+
+    sol, tries = shoot.multistart(sample, n_tries=200, seed=seed)
+    t_in, t_out = shoot.unpack_arcs(sol.v)[0]
+    h_f = shoot.trajectory(sol.v)["z"][-1, 0]
+    d = shoot.diagnostics(sol.v)
+    details = {"residual": sol.residual_norm, "random guesses": tries, "t_in": t_in,
+               "t_out": t_out, "singular thrust": [float(d["singular_u"][0][0][0]),
+                                                   float(d["singular_u"][0][1][0])],
+               "Legendre-Clebsch min": d["singular_legendre"][0][0]}
+    seconds = time.perf_counter() - start
+    source = "Graichen & Petit (2008), collocation with a vanishing penalty"
+    return [Result("goddard", "h(t_f)", h_f, 1.01283692, source, 1e-8, seconds, details),
+            Result("goddard", "t_f", sol.tf, 0.19885626, source, 1e-7, seconds, details)]
+
+
 ALL = {
     "brachistochrone": run_brachistochrone,
     "bryson_denham": run_bryson_denham,
@@ -578,4 +610,5 @@ ALL = {
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,
     "cart_pole": run_cart_pole,
+    "goddard": run_goddard,
 }

@@ -39,6 +39,15 @@ cdef extern from "{{header}}" nogil:
     int P_b_tangency "{{P}}boundary_tangency"(int c, double t, const double* z, const double* p, double* N)
     int P_b_tangency_grad "{{P}}boundary_tangency_grad"(int c, double t, const double* z, const double* p, double* Nt, double* Nx)
     int P_b_tangency_hess "{{P}}boundary_tangency_hess"(int c, double t, const double* z, const double* p, double* Nxx, double* Nxt)
+    int P_s_rhs "{{P}}singular_rhs"(int k, double t, const double* z, const double* p, double* dz)
+    int P_s_jac "{{P}}singular_jac"(int k, double t, const double* z, const double* p, double* A)
+    int P_s_stm_rhs "{{P}}singular_stm_rhs"(int k, double t, const double* y, const double* p, double* dy)
+    int P_s_hamiltonian "{{P}}singular_hamiltonian"(int k, double t, const double* z, const double* p, double* H)
+    int P_s_cost_rate "{{P}}singular_cost_rate"(int k, double t, const double* z, const double* p, double* L)
+    int P_s_control "{{P}}singular_control"(int k, double t, const double* z, const double* p, double* u)
+    int P_s_legendre "{{P}}singular_legendre"(int k, double t, const double* z, const double* p, double* LC)
+    int P_s_junction "{{P}}singular_junction"(int k, double t, const double* z, const double* p, double* N)
+    int P_s_junction_grad "{{P}}singular_junction_grad"(int k, double t, const double* z, const double* p, double* Nt, double* Nz)
     int P_control "{{P}}control"(double t, const double* z, const double* p, double* u)
     int P_control_bounds "{{P}}control_bounds"(double t, const double* z, const double* p, double* lo, double* hi)
     int P_hamiltonian "{{P}}hamiltonian"(double t, const double* z, const double* p, double* H)
@@ -79,6 +88,7 @@ N_KINKS = NK
 CONSTRAINT_NAMES = {{constraint_names}}
 CONSTRAINT_ORDERS = {{constraint_orders}}
 EXACT_ARCS = {{exact_arcs}}     # per constraint: boundary-arc kernels generated
+SINGULAR_ARCS = {{singular_arcs}}   # per switching function: singular-arc kernels generated
 N_CONTROLS = NU
 N_MULTIPLIERS = NNU
 N_RESIDUALS = NR
@@ -159,6 +169,9 @@ cdef struct _ctx:
     int with_p
     int with_cost       # last entry of the state is J = int L dt
     int constraint_events   # 0: path constraints are not watched (exact multi-arc shooting)
+    int frozen[NSW1]    # 1: switching function k is not watched, its flag is held
+    Py_ssize_t calls    # right-hand-side evaluations so far
+    Py_ssize_t max_calls    # > 0: fail past this many (a runaway trajectory)
 
 
 cdef struct _ev_ctx:
@@ -171,8 +184,15 @@ cdef int _rhs_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ct
     return P_rhs(t, y, <const double*> ctx, dydt)
 
 
+cdef enum:
+    RC_TOO_MANY_EVALUATIONS = 5
+
+
 cdef int _rhs_arc_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ctx) noexcept nogil:
     cdef _ctx* c = <_ctx*> ctx
+    c.calls += 1
+    if c.max_calls > 0 and c.calls > c.max_calls:
+        return RC_TOO_MANY_EVALUATIONS
     cdef int rc = P_rhs_arc(t, y, c.p, c.arc, dydt)
     if rc == 0 and c.with_cost:
         rc = P_cost_rate_arc(t, y, c.p, c.arc, &dydt[n - 1])
@@ -181,6 +201,9 @@ cdef int _rhs_arc_fn(double t, const double* y, double* dydt, Py_ssize_t n, void
 
 cdef int _stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ctx) noexcept nogil:
     cdef _ctx* c = <_ctx*> ctx
+    c.calls += 1
+    if c.max_calls > 0 and c.calls > c.max_calls:
+        return RC_TOO_MANY_EVALUATIONS
     cdef int rc = P_stm_rhs(t, y, c.p, c.arc, c.with_p, dydt)
     if rc == 0 and c.with_cost:
         rc = P_cost_rate_arc(t, y, c.p, c.arc, &dydt[n - 1])
@@ -256,6 +279,8 @@ cdef class ArcDynamics(OdeSystem):
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
         self.ctx.with_p = 1 if param_sensitivity else 0
+        self.ctx.calls = 0
+        self.ctx.max_calls = 0
         self.ctx.with_cost = 0
         self.arc = np.zeros(NM, dtype=np.intc) if arc is None else arc
         self.c_fn = _stm_fn if stm else _rhs_arc_fn
@@ -704,6 +729,8 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     for k in range(NE):
         if not ctx.constraint_events and NSW <= k < NM + NC:
             continue                    # the path constraints' guards
+        if k < NSW and ctx.frozen[k]:
+            continue                    # a control held at one bound
         evc[ne].p = ctx.p
         evc[ne].arc = ctx.arc
         kind[ne] = k
@@ -813,7 +840,8 @@ def _initial_y(z, stm, Py_ssize_t ny):
 def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensitivity=False,
               cost=False, arc=None, method="DOP853", double rtol=1e-10, double atol=1e-12,
               first_step=None, double max_step=np.inf, Py_ssize_t max_switches=10000,
-              terminate=False, Py_ssize_t n_interior=4, constraint_events=True):
+              terminate=False, Py_ssize_t n_interior=4, constraint_events=True, frozen=(),
+              Py_ssize_t max_nfev=0):
     """Integrate the extremal from ``z0 = [x0, lambda0]`` from ``t0`` to ``t1``.
 
     The integration runs arc by arc and stops at every switch, so each
@@ -852,6 +880,14 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
         ``False`` ignores the path constraints: no crossings are located and
         their penalties stay off. Exact multi-arc shooting uses this on the
         arcs where the limit is inactive.
+    frozen : sequence of int
+        Switching functions not watched: their bang-bang controls hold the
+        bound ``arc`` gives them, whatever the sign of ``S``. Exact
+        multi-arc shooting uses this beside singular arcs.
+    max_nfev : int
+        If positive, fail (``RuntimeError``) after this many evaluations of
+        the right-hand side, so a trajectory that runs into a singularity
+        fails fast instead of shrinking its steps for millions of them.
 
     Returns
     -------
@@ -901,6 +937,14 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     ctx.with_p = 1 if param_sensitivity else 0
     ctx.with_cost = 1 if cost else 0
     ctx.constraint_events = 1 if constraint_events else 0
+    ctx.calls = 0
+    ctx.max_calls = max_nfev
+    for k in range(NSW1):
+        ctx.frozen[k] = 0
+    for k in frozen:
+        if not 0 <= k < NSW:
+            raise ValueError(f"frozen switching function {k} out of range ({NSW})")
+        ctx.frozen[k] = 1
     for k in range(NM):
         ctx.arc[k] = arc_buf[k]
     for k in range(NC1):
@@ -948,6 +992,10 @@ cdef int _propagate_rows(int meth, int do_stm, int with_p, int with_cost, Py_ssi
     ctx.with_p = with_p
     ctx.with_cost = with_cost
     ctx.constraint_events = 1
+    ctx.calls = 0
+    ctx.max_calls = 0
+    for k in range(NSW1):
+        ctx.frozen[k] = 0
     for k in range(NC1):
         ctx.stop_on[k] = stop_on[k]
     for r in range(start, stop):
@@ -1103,11 +1151,23 @@ def _exact(c):
 cdef struct _b_ctx:
     const double* p
     int c
+    int singular        # 1: singular arc of switching function c
+    Py_ssize_t calls
+    Py_ssize_t max_calls
 
 
 cdef int _b_rhs_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ctx) noexcept nogil:
     cdef _b_ctx* b = <_b_ctx*> ctx
-    cdef int rc = P_b_rhs(b.c, t, y, b.p, dydt)
+    cdef int rc
+    b.calls += 1
+    if b.max_calls > 0 and b.calls > b.max_calls:
+        return RC_TOO_MANY_EVALUATIONS
+    if b.singular:
+        rc = P_s_rhs(b.c, t, y, b.p, dydt)
+        if rc == 0 and n == NZ + 1:
+            rc = P_s_cost_rate(b.c, t, y, b.p, &dydt[NZ])
+        return rc
+    rc = P_b_rhs(b.c, t, y, b.p, dydt)
     if rc == 0 and n == NZ + 1:
         rc = P_b_cost_rate(b.c, t, y, b.p, &dydt[NZ])
     return rc
@@ -1115,7 +1175,16 @@ cdef int _b_rhs_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* 
 
 cdef int _b_stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ctx) noexcept nogil:
     cdef _b_ctx* b = <_b_ctx*> ctx
-    cdef int rc = P_b_stm_rhs(b.c, t, y, b.p, dydt)
+    cdef int rc
+    b.calls += 1
+    if b.max_calls > 0 and b.calls > b.max_calls:
+        return RC_TOO_MANY_EVALUATIONS
+    if b.singular:
+        rc = P_s_stm_rhs(b.c, t, y, b.p, dydt)
+        if rc == 0 and n == NZ + NZ * NZ + 1:
+            rc = P_s_cost_rate(b.c, t, y, b.p, &dydt[n - 1])
+        return rc
+    rc = P_b_stm_rhs(b.c, t, y, b.p, dydt)
     if rc == 0 and n == NZ + NZ * NZ + 1:
         rc = P_b_cost_rate(b.c, t, y, b.p, &dydt[n - 1])
     return rc
@@ -1136,6 +1205,9 @@ cdef class BoundaryDynamics(OdeSystem):
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
         self.ctx.c = _exact(c)
+        self.ctx.singular = 0
+        self.ctx.calls = 0
+        self.ctx.max_calls = 0
         self.c_fn = _b_rhs_fn
         self.c_ctx = &self.ctx
 
@@ -1243,20 +1315,30 @@ def tangency_gradient(c, double t, z, params=None):
 
 def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, cost=False,
                        method="DOP853", double rtol=1e-10, double atol=1e-12, first_step=None,
-                       double max_step=np.inf):
+                       double max_step=np.inf, Py_ssize_t max_nfev=0):
     """Integrate along a boundary arc of constraint ``c`` from ``t0`` to ``t1``.
 
     No events are watched: the arc's control holds ``g^(q) = 0``, so ``g``
-    stays at zero if ``N = 0`` at ``t0``. Returns a dict with ``t``, ``z``,
+    stays at zero if ``N = 0`` at ``t0``. ``max_nfev`` is as in
+    :func:`propagate`. Returns a dict with ``t``, ``z``,
     ``stm`` (NZ, NZ) or None, ``cost`` or None, ``dz_dt1``, ``nfev`` and
     ``status``.
     """
+    return _propagate_on(_exact(c), 0, t0, z0, t1, params, stm, cost, method, rtol, atol,
+                         first_step, max_step, max_nfev)
+
+
+def _propagate_on(int c, int singular, double t0, z0, double t1, params, stm, cost, method,
+                  double rtol, double atol, first_step, double max_step, Py_ssize_t max_nfev):
     cdef _b_ctx ctx
     cdef fni_options opt
     cdef fni_stats st
     cdef int rc, meth
     cdef Py_ssize_t ny = NZ + (NZ * NZ if stm else 0) + (1 if cost else 0)
-    ctx.c = _exact(c)
+    ctx.c = c
+    ctx.singular = singular
+    ctx.calls = 0
+    ctx.max_calls = max_nfev
     if method not in _METHODS:
         raise ValueError(f"method must be one of {list(_METHODS)}")
     meth = _METHODS[method]
@@ -1279,7 +1361,124 @@ def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, c
         "z": y_out[:NZ].copy(),
         "stm": y_out[NZ:NZ + NZ * NZ].reshape(NZ, NZ).copy() if stm else None,
         "cost": float(y_out[ny - 1]) if cost else None,
-        "dz_dt1": boundary_rhs(ctx.c, st.t_final, y_out[:NZ], p_arr[:NP] if NP else None),
+        "dz_dt1": (singular_rhs if singular else boundary_rhs)(
+            ctx.c, st.t_final, y_out[:NZ], p_arr[:NP] if NP else None),
         "nfev": st.nfev,
         "status": st.status,
     }
+
+
+# -----------------------------------------------------------------------------
+# Singular arcs: a bang-bang control with S = 0 on an interval
+# -----------------------------------------------------------------------------
+
+def _singular(k):
+    k = int(k)
+    if not 0 <= k < NSW:
+        raise ValueError(f"switching function index {k} out of range ({NSW})")
+    if not SINGULAR_ARCS[k]:
+        raise ValueError(f"switching function {k} has no singular-arc kernels "
+                         "(see PontryaginSystem.singular_unsupported[k])")
+    return k
+
+
+cdef class SingularDynamics(OdeSystem):
+    """``z' = F(t, z, u_s, p)`` on a singular arc of switching function ``k``.
+
+    The control is the singular control, from ``S'' = 0``.
+    """
+
+    cdef _b_ctx ctx
+
+    def __init__(self, k, params=None):
+        self.n_states = NZ
+        if NP:
+            self._init_params(_params(params)[:NP], PARAM_NAMES)
+        self.ctx.p = self._params_ptr()
+        self.ctx.c = _singular(k)
+        self.ctx.singular = 1
+        self.ctx.calls = 0
+        self.ctx.max_calls = 0
+        self.c_fn = _b_rhs_fn
+        self.c_ctx = &self.ctx
+
+
+def singular_rhs(k, double t, z, params=None):
+    """``F(u_s)`` (NZ,) on a singular arc of switching function ``k``."""
+    cdef int i = _singular(k)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(NZ)
+    cdef double[::1] ov = out
+    _check(P_s_rhs(i, t, &zv[0], &pv[0], &ov[0]), "singular_rhs")
+    return out
+
+
+def singular_jacobian(k, double t, z, params=None):
+    """``d F(u_s) / dz`` (NZ, NZ)."""
+    cdef int i = _singular(k)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(NZ * NZ)
+    cdef double[::1] ov = out
+    _check(P_s_jac(i, t, &zv[0], &pv[0], &ov[0]), "singular_jacobian")
+    return out.reshape(NZ, NZ)
+
+
+def singular_control(k, double t, z, params=None):
+    """The controls (NU,) on a singular arc of switching function ``k``."""
+    cdef int i = _singular(k)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    out = np.zeros(max(NU, 1))
+    cdef double[::1] ov = out
+    _check(P_s_control(i, t, &zv[0], &pv[0], &ov[0]), "singular_control")
+    return out[:NU]
+
+
+def singular_hamiltonian(k, double t, z, params=None):
+    """``H`` at the singular control."""
+    cdef int i = _singular(k)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef double H = 0.0
+    _check(P_s_hamiltonian(i, t, &zv[0], &pv[0], &H), "singular_hamiltonian")
+    return H
+
+
+def singular_legendre(k, double t, z, params=None):
+    """The Legendre-Clebsch coefficient ``-dS''/du``: ``>= 0`` on a minimizing arc."""
+    cdef int i = _singular(k)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef double LC = 0.0
+    _check(P_s_legendre(i, t, &zv[0], &pv[0], &LC), "singular_legendre")
+    return LC
+
+
+def singular_junction(k, double t, z, params=None):
+    """``(N, dN/dt, dN/dz)`` for ``N = (S, S')``: ``(2,), (2,), (2, NZ)``."""
+    cdef int i = _singular(k)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    n = np.zeros(2)
+    nt = np.zeros(2)
+    nz = np.zeros(2 * NZ)
+    cdef double[::1] a = n
+    cdef double[::1] b = nt
+    cdef double[::1] cc = nz
+    _check(P_s_junction(i, t, &zv[0], &pv[0], &a[0]), "singular_junction")
+    _check(P_s_junction_grad(i, t, &zv[0], &pv[0], &b[0], &cc[0]), "singular_junction")
+    return n, nt, nz.reshape(2, NZ)
+
+
+def propagate_singular(k, double t0, z0, double t1, params=None, *, stm=False, cost=False,
+                       method="DOP853", double rtol=1e-10, double atol=1e-12, first_step=None,
+                       double max_step=np.inf, Py_ssize_t max_nfev=0):
+    """Integrate along a singular arc of switching function ``k`` from ``t0`` to ``t1``.
+
+    As :func:`propagate_boundary`: no events, and ``S`` and ``S'`` stay
+    where they start (at zero, at a junction). Returns the same dict.
+    """
+    return _propagate_on(_singular(k), 1, t0, z0, t1, params, stm, cost, method, rtol, atol,
+                         first_step, max_step, max_nfev)

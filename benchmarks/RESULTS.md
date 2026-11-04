@@ -19,3 +19,5 @@
 | robot_arm | t_f | 9.140911746 | 9.1409 | 1.3e-06 ok | COPS robot arm; GAMS NOA / PROPT (nh = 800 discretization) | 50.7 |
 | cart_pole | J (published extremal) | 58.80766746 | 58.80819 | 8.9e-06 ok | ASSET reproduction of Kelly 2017 (LGL5, 64 segments) | 42.1 |
 | cart_pole | J (best of random search) | 57.9447803 | 57.9447803 | 6.4e-12 ok | independent SciPy simulation of Kelly's equations under this u(t) | 31.1 |
+| goddard | h(t_f) | 1.012836918 | 1.01283692 | 1.7e-09 ok | Graichen & Petit (2008), collocation with a vanishing penalty | 19.4 |
+| goddard | t_f | 0.1988562621 | 0.19885626 | 1.1e-08 ok | Graichen & Petit (2008), collocation with a vanishing penalty | 19.4 |

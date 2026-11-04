@@ -237,6 +237,67 @@ def speed_limited_min_time(smoothed=False):
         path_constraints=[PathConstraint(v - V, "v_max", penalty=penalty)])
 
 
+def singular_regulator(smoothed=False):
+    """``min int x^2``, ``x' = u``, ``|u| <= 1``, from ``x(0) = a`` to ``x(T) = a``.
+
+    The simplest singular arc. ``S = lambda``, ``S' = -2 x`` and
+    ``S'' = -2 u``, so the singular arc is ``x = 0`` with ``u_s = 0``, and
+    its Legendre-Clebsch coefficient ``-dS''/du = 2`` is positive. For
+    ``T > 2 a > 0``: ``u = -1`` to ``t = a``, singular to ``T - a``, then
+    ``u = +1``. ``lambda(0) = a^2``, ``nu = -a^2`` and the cost is
+    ``2 a^3 / 3``.
+
+    With ``smoothed=True`` the running cost is ``x^2 + eps u^2 / 2``: the
+    control is then clipped-linear, and ``eps -> 0`` approaches the
+    bang-singular one.
+
+    params: ``T, a`` (plus ``eps`` if smoothed).
+    """
+    t, x, u = sp.symbols("t x u", real=True)
+    T, a = sp.symbols("T a", positive=True)
+    params, cost = [T, a], x ** 2
+    if smoothed:
+        eps = sp.Symbol("eps", positive=True)
+        params.append(eps)
+        cost += eps * u ** 2 / 2
+    return OptimalControlProblem(
+        name="singular_regulator" + ("_smoothed" if smoothed else ""), time=t, states=[x],
+        controls=[u], params=params, dynamics=[u], running_cost=cost, initial_state=[a],
+        final_state={x: a}, final_time=T, control_sets=[Box(u, -1, 1)])
+
+
+def goddard():
+    """Goddard's rocket: the highest climb on a given propellant, through drag.
+
+    Vertical flight in normalized units (Seywald & Cliff 1992; Graichen &
+    Petit 2008): ``h' = v``, ``v' = (u - D) / m - 1 / h^2``, ``m' = -u / c``
+    with drag ``D = D_0 v^2 exp(-beta (h - 1))`` and thrust ``0 <= u <=
+    u_max``. From rest at ``h = 1``, ``m = 1``, burn down to ``m(t_f) = m_f``
+    and maximize ``h(t_f)``, with ``t_f`` free. The standard values are
+    ``GODDARD_PARAMS``: ``D_0 = 310``, ``beta = 500``, ``c = 0.5``,
+    ``u_max = 3.5``, ``m_f = 0.6``.
+
+    Full thrust is too much in the dense air: the optimum is full thrust, a
+    singular arc on which the thrust balances drag against the climb, then
+    a coast. ``h(t_f) = 1.01283692`` at ``t_f = 0.19885626`` (Graichen &
+    Petit 2008).
+
+    params: ``D_0, beta, c, u_max, m_f``.
+    """
+    t, v, u = sp.symbols("t v u", real=True)
+    h, m = sp.symbols("h m", positive=True)       # radius and mass
+    D0, beta, c, umax, mf = sp.symbols("D_0 beta c u_max m_f", positive=True)
+    drag = D0 * v ** 2 * sp.exp(-beta * (h - 1))
+    return OptimalControlProblem(
+        name="goddard", time=t, states=[h, v, m], controls=[u],
+        params=[D0, beta, c, umax, mf], dynamics=[v, (u - drag) / m - 1 / h ** 2, -u / c],
+        terminal_cost=-h, initial_state=[1, 0, 1], final_state={m: mf},
+        control_sets=[Box(u, 0, umax)])
+
+
+GODDARD_PARAMS = (310.0, 500.0, 0.5, 3.5, 0.6)
+
+
 def all_examples():
     """Every example, by name (the bounded and smoothed variants included)."""
     return {
@@ -251,4 +312,7 @@ def all_examples():
         "velocity_limited_move_bounded": velocity_limited_move(bounded=True),
         "speed_limited_min_time": speed_limited_min_time(),
         "speed_limited_min_time_smoothed": speed_limited_min_time(smoothed=True),
+        "singular_regulator": singular_regulator(),
+        "singular_regulator_smoothed": singular_regulator(smoothed=True),
+        "goddard": goddard(),
     }
