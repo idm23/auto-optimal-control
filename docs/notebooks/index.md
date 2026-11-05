@@ -10,6 +10,10 @@ with the package, showing all of the code and checking the answers
 independently. A reader who works through all seventeen can use every part
 of the package; Lecture 17 maps each module to the lectures that teach it.
 
+Diagrams drawn to illustrate an idea, rather than to solve something, have their
+plotting code folded away: click "Show code cell source" above a figure to see
+it. Everything else shows its code.
+
 ## Part I. Formulating optimal control
 
 | # | Lecture | The challenge | New ideas |
