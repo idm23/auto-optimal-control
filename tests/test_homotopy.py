@@ -8,7 +8,7 @@ import pytest
 import sympy as sp
 
 from auto_optimal_control import examples
-from auto_optimal_control.homotopy import EPS, RHO, Homotopy, exact, regularize
+from auto_optimal_control.homotopy import EPS, OFF, RHO, Homotopy, exact, regularize
 from auto_optimal_control.problem import OptimalControlProblem, PathConstraint
 
 
@@ -25,7 +25,7 @@ def test_regularize_adds_smoothing_and_penalties():
     reg, eps, rhos = regularize(problem)
     names = [str(p) for p in reg.params]
     assert names[:len(problem.params)] == [str(p) for p in problem.params]
-    assert names[len(problem.params):] == [EPS, RHO + "q_max"]
+    assert names[len(problem.params):] == [EPS, RHO + "q_max", OFF + "q_max"]
     u = problem.controls[0]
     # eps ((u - 1.75) / 1.75)^2 / 2 for 0 <= u <= u_max.
     umax = [p for p in problem.params if str(p) == "u_max"][0]
@@ -33,6 +33,9 @@ def test_regularize_adds_smoothing_and_penalties():
                         - eps * ((u - umax / 2) / (umax / 2)) ** 2 / 2)
     assert extra == 0
     assert [c.penalty for c in reg.path_constraints] == list(rhos)
+    # Each limit carries an offset: g - off <= 0.
+    off = sp.Symbol(OFF + "q_max", real=True)
+    assert sp.simplify(reg.path_constraints[0].expr - problem.path_constraints[0].expr + off) == 0
 
 
 def test_regularize_without_bang_bang_controls():
@@ -129,3 +132,20 @@ def test_order_three_limit_is_reported_inexact(kernel_cache):
     assert not r.exact
     assert r.solution.success          # the last penalty solution
     assert "no exact structure" in r.message
+
+
+@pytest.mark.parametrize("J, A, V, D, arcs", [
+    (1.0, 1.0, 2.0, 10.0, ("a_max", "v_max", "a_min")),    # every limit reached
+    pytest.param(1.0, 1.0, 2.0, 4.0, ("a_max", "a_min"), marks=pytest.mark.slow),   # no cruise
+    pytest.param(1.0, 1.0, 0.5, 10.0, ("v_max",), marks=pytest.mark.slow),          # A never reached
+    pytest.param(1.0, 1.0, 2.0, 1.0, (), marks=pytest.mark.slow),                   # bang-bang only
+])
+def test_jerk_limited_move_matches_the_s_curve(kernel_cache, J, A, V, D, arcs):
+    """The S-curve of motion control, found by tightening the limits."""
+    h = Homotopy(examples.jerk_limited_move(), cache_dir=kernel_cache)
+    r = h.solve([J, A, V, D], ([-3, -3, -3], [3, 3, 3]), (0.5, 30.0))
+    assert r.exact, r.message
+    tf, _, _ = examples.jerk_limited_min_time(J, A, V, D)
+    assert r.solution.tf == pytest.approx(tf, abs=1e-9)
+    assert tuple(name for _, name in r.arcs) == arcs
+    assert all(kind == "boundary" for kind, _ in r.arcs)

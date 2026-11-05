@@ -195,23 +195,37 @@ How it works:
 
 1. **Regularize.** `regularize(problem)` adds `eps ((u - mid) / half)² / 2`
    to the running cost for each bang-bang control (its law becomes
-   clipped-linear) and an exterior penalty weight per path constraint, as
-   runtime parameters.
+   clipped-linear), and for each path constraint an exterior penalty weight
+   and an offset (`g - off ≤ 0`), all runtime parameters.
 2. **Sample.** Single shooting from random draws on the regularized problem,
-   at `eps = 1` with the penalties off.
-3. **Continue, in phases.** When a limit is violated, `eps` is held while its
-   penalty weight ramps up from a millionth of a cost-based scale; then
-   `eps` falls. Steps adapt (they grow after a success and halve after a
-   failure) and a secant predictor starts each solve.
-4. **Read the structure and jump.** After each step the regularized solution
-   is read. Intervals where a limit is violated become boundary arcs (or,
-   for order 2, touch points). Stretches where a bang-bang control stays
-   strictly between its bounds, away from a limit, become singular arcs, or
-   the ramps of ordinary switches when they are short. A stretch that
-   leaves a boundary arc becomes a joined singular arc. Each reading gives
-   candidate structures. `MultiArcShooting` on the *exact* problem tries
-   each, seeded with the regularized costates and junction times, jump
-   multipliers fitted to the costates, and a few jittered seeds.
+   at `eps = 1` with every limit off.
+3. **The active-set route** (problems with path constraints). Each limit's
+   offset starts just above the unconstrained solution and is tightened to
+   zero, with exact arcs on the smoothed problem. When a free arc starts to
+   violate a limit, the structure changes there: a newborn touch point
+   (order 2) or short boundary arc (order 1) with zero jump; a touch point
+   violated beside it grows into a boundary arc or splits in two;
+   neighbouring arcs of one limit merge; dead arcs are retired. Then `eps`
+   falls with the structure following, and the exact problem is tried with
+   the current structure at every step. Arcs are born where a limit first
+   comes into play, small and with small jumps, which is where exact-arc
+   shooting is well conditioned. The jerk-limited S-curve below is solved
+   this way in every regime, in a few seconds.
+4. **The penalty route**, the route that finds singular arcs. It goes first
+   when the exact problem may have them (Goddard's rocket); otherwise it is
+   the active-set route's fallback, and the other way round. When a limit
+   is violated, `eps` is held while its penalty weight ramps up from a
+   millionth of a cost-based scale; then `eps` falls. Steps adapt (they
+   grow after a success and halve after a failure) and a secant predictor
+   starts each solve. After each step the regularized solution is read. Intervals where a limit is
+   violated become boundary arcs (or, for order 2, touch points). Stretches
+   where a bang-bang control stays strictly between its bounds, away from a
+   limit, become singular arcs, or the ramps of ordinary switches when they
+   are short. A stretch that leaves a boundary arc becomes a joined singular
+   arc. Each reading gives candidate structures. `MultiArcShooting` on the
+   *exact* problem tries each, seeded with the regularized costates and
+   junction times, jump multipliers fitted to the costates, and a few
+   jittered seeds.
 5. **Accept.** A candidate is accepted when the exact solve converges and
    passes the necessary conditions it can check: no violation on free arcs,
    controls within bounds on special arcs, `mu ≥ 0`, `nu ≥ 0`,
@@ -378,6 +392,27 @@ shoot.cost(sol.v), shoot.diagnostics(sol.v), shoot.trajectory(sol.v)
 `bryson_denham` (order 2, both regimes) and `speed_limited_min_time`
 (bang-bang) are solved against their closed forms.
 
+### Jerk-limited motion: the S-curve
+
+`examples.jerk_limited_move()` is one axis of a machine: `x''' = j` with
+`|j| ≤ J`, `|a| ≤ A` and `v ≤ V`, rest to rest over `D` in minimum time. Its
+answer is motion control's S-curve: jerk on to the acceleration limit, ride
+it (an order-1 boundary arc), jerk off onto the speed limit (an order-2
+boundary arc), cruise, and back. `jerk_limited_min_time(J, A, V, D)` gives
+the time in closed form, and the automatic solve finds the structure in
+every regime:
+
+```python
+h = Homotopy(examples.jerk_limited_move())
+r = h.solve([1.0, 1.0, 2.0, 10.0], ([-3, -3, -3], [3, 3, 3]), (0.5, 30.0))
+r.arcs            # (('boundary', 'a_max'), ('boundary', 'v_max'), ('boundary', 'a_min'))
+r.solution.tf     # 8.0, the closed form, to 1e-14
+```
+
+With `V = 0.5` the acceleration limit is never reached and only the cruise
+is a boundary arc; with `D = 4` there is no cruise; with `D = 1` the jerk is
+bang-bang with two switches and no limit is reached.
+
 ### Singular arcs
 
 Where a bang-bang control's switching function `S` vanishes on an interval,
@@ -538,12 +573,13 @@ a speed limit, a singular regulator and Goddard's rocket (singular arcs).
   - The singular regulator.
   - Goddard: a singular arc, and with `q ≤ 10` a boundary arc joined to a
     singular arc.
+  - The jerk-limited S-curve in its four regimes, against the closed form.
 
   An order-3 limit comes back flagged as inexact.
 
 ## Benchmarks against the literature
 
-`benchmarks/` solves ten canonical problems from scratch and compares each
+`benchmarks/` solves eleven canonical problems from scratch and compares each
 indirect solution with a published value. Each benchmark gives
 `auto_optimal_control.homotopy` the problem, its parameter values and a box
 (or a function) to draw costates and `t_f` from, and nothing else. No
@@ -560,6 +596,7 @@ never as a starting point.
 | Velocity-limited move (order 1, 3 cases) | `∫u²/2` | matches to 1e-14 | closed form, `4V²/(3t₁)` | — |
 | Velocity-limited move with a force limit (2 cases) | `∫u²/2` | matches to 1e-13 | closed form (saturated, a ramp, the limit) | — |
 | Minimum time with a speed limit (2 cases), bang-bang | `t_f` | matches to 1e-15 | closed form, `D/V + V/u_max` | — |
+| Jerk-limited S-curve (4 regimes: every limit, no cruise, no acceleration arc, none) | `t_f` | matches to 1e-14 | closed form (seven-segment profile) | — |
 | Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
 | Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
@@ -577,10 +614,12 @@ Notes:
   automatic smoothing falls to `ε ≈ 1e-3` before the exact bang-bang solve
   is accepted; the switches are located by the integration. The robot arm's
   `u_θ` switch falls at `t_f/2`, by the problem's symmetry.
-- **Bryson–Denham:** the penalty only has to make the violation readable.
-  For `l = 0.2` the first solve already reads as a touch point; for
-  `l = 0.1` the penalty ramps over 8 steps before the boundary arc is
-  accepted. Both are then exact.
+- **Bryson–Denham, the velocity and speed limits, the S-curve:** found by
+  the active-set route. Tightening the limit grows the touch point
+  (`l = 0.2`) or boundary arc (`l = 0.1`) directly, and the exact problem
+  is accepted at the first try. The S-curve's speed arc is born first, as
+  a touch point that grows into the cruise; its acceleration arcs are born
+  once `ε` has fallen to about 0.5, where the exact problem then solves.
 - **Goddard:** full thrust to `t = 0.023510`, singular thrust (rising from
   2.14 to 3.09) to `t = 0.072671`, then a coast. The singular arc is read
   from the smoothed thrust at `ε ≈ 0.06`, where the smoothed problem's own
@@ -702,10 +741,13 @@ keeps a one-line summary at the bottom. The rendered videos are in
   control (the boundary control is solved for every control at once), and a
   singular arc that ends directly on a boundary arc (the reverse join is
   supported).
-- **Structure reading is heuristic.** `homotopy` reads arcs from a
+- **Structure finding is heuristic.** The penalty route reads arcs from a
   regularized solution with fixed thresholds (stretches shorter than 2% of
   the horizon are switches, not singular arcs; limits closer than 2% are
-  joined) and only accepts structures that pass the necessary-condition
+  joined); the active-set route changes the structure where a free arc
+  violates a limit by more than 1e-6 of that limit's range along the
+  unconstrained solution, and stops after `Homotopy.active_set_seconds`
+  (60 s). Both only accept structures that pass the necessary-condition
   checks. A structure it cannot read, or that needs arcs shorter than
   that, is reported with `exact = False`. It returns one extremal: the
   cheapest accepted at the first step where any is, from the costate draws
@@ -776,6 +818,11 @@ with PyPI trusted publishing, so no tokens are stored.
    and structure detection from a costate distribution~~; next, arcs with
    several limits and controls active at once, gradient-free search (PSO,
    differential evolution) and learned samplers of the costate space.
+7. Robot motion: ~~a jerk-limited axis with acceleration and speed limits
+   (the S-curve), its structure found by tightening the limits~~; next, a
+   planar two-link arm with jerk control and torque limits (a limit that
+   involves several controls, several limits active at once), singular arcs
+   on a constrained arm, and learned warm starts to scale to six joints.
 
 ## License
 
