@@ -266,7 +266,7 @@ def singular_regulator(smoothed=False):
         final_state={x: a}, final_time=T, control_sets=[Box(u, -1, 1)])
 
 
-def goddard():
+def goddard(dynamic_pressure=False):
     """Goddard's rocket: the highest climb on a given propellant, through drag.
 
     Vertical flight in normalized units (Seywald & Cliff 1992; Graichen &
@@ -282,20 +282,37 @@ def goddard():
     a coast. ``h(t_f) = 1.01283692`` at ``t_f = 0.19885626`` (Graichen &
     Petit 2008).
 
-    params: ``D_0, beta, c, u_max, m_f``.
+    With ``dynamic_pressure=True`` the path constraint
+    ``q = rho_0 v^2 exp(-beta (h - 1)) / 2 <= q_max`` (order 1) is added,
+    with ``rho_0 = 12400`` (so ``q = 20 D``) and ``q_max = 10`` in
+    ``GODDARD_Q_PARAMS``. Unconstrained, ``q`` peaks near 14.9 at the
+    singular entry, so the limit is ridden between the full-thrust and the
+    singular arcs: ``h(t_f) = 1.01271727`` at ``t_f = 0.20407108``
+    (Graichen & Petit 2008). ``rho`` weighs its exterior penalty.
+
+    params: ``D_0, beta, c, u_max, m_f`` (plus ``rho_0, q_max, rho`` with the
+    limit).
     """
     t, v, u = sp.symbols("t v u", real=True)
     h, m = sp.symbols("h m", positive=True)       # radius and mass
     D0, beta, c, umax, mf = sp.symbols("D_0 beta c u_max m_f", positive=True)
+    params, limits = [D0, beta, c, umax, mf], []
+    if dynamic_pressure:
+        rho0, qmax = sp.symbols("rho_0 q_max", positive=True)
+        rho = sp.Symbol("rho", nonnegative=True)
+        params += [rho0, qmax, rho]
+        q = rho0 * v ** 2 * sp.exp(-beta * (h - 1)) / 2
+        limits.append(PathConstraint(q - qmax, "q_max", penalty=rho))
     drag = D0 * v ** 2 * sp.exp(-beta * (h - 1))
     return OptimalControlProblem(
-        name="goddard", time=t, states=[h, v, m], controls=[u],
-        params=[D0, beta, c, umax, mf], dynamics=[v, (u - drag) / m - 1 / h ** 2, -u / c],
+        name="goddard" + ("_q" if dynamic_pressure else ""), time=t, states=[h, v, m],
+        controls=[u], params=params, dynamics=[v, (u - drag) / m - 1 / h ** 2, -u / c],
         terminal_cost=-h, initial_state=[1, 0, 1], final_state={m: mf},
-        control_sets=[Box(u, 0, umax)])
+        control_sets=[Box(u, 0, umax)], path_constraints=limits)
 
 
 GODDARD_PARAMS = (310.0, 500.0, 0.5, 3.5, 0.6)
+GODDARD_Q_PARAMS = GODDARD_PARAMS + (12400.0, 10.0, 0.0)
 
 
 def all_examples():
@@ -315,4 +332,5 @@ def all_examples():
         "singular_regulator": singular_regulator(),
         "singular_regulator_smoothed": singular_regulator(smoothed=True),
         "goddard": goddard(),
+        "goddard_q": goddard(dynamic_pressure=True),
     }

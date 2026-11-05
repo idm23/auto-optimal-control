@@ -113,3 +113,21 @@ def test_every_suite_states_its_problem():
         problem = suite.PROBLEM
         assert problem.name and problem.story and problem.summary, name
         assert problem.formulation and problem.solved_by, name
+
+
+@pytest.mark.slow
+def test_goddard_recording_and_animation(kernel_cache, tmp_path):
+    pytest.importorskip("matplotlib")
+    from visuals import goddard
+
+    data = goddard.record(cache_dir=kernel_cache, verbose=False)
+    assert data["free_R"][-1] < 1e-10 and data["q_R"][-1] < 1e-10
+    assert data["free_x"][-1][-1, 0] == pytest.approx(1.01283692, abs=1e-8)
+    assert data["q_x"][-1][-1, 0] == pytest.approx(1.01271727, rel=1e-6)
+    # q of the resampled (interpolated) states: the limit holds to the grid.
+    assert data["q_x"][-1][:, 4].max() < 10 + 1e-3
+    assert data["free_x"][-1][:, 4].max() > 14                # and binds
+    out = goddard.animate(data, tmp_path / "goddard.gif", fps=3, dpi=40, stills_dir=tmp_path)
+    assert out.stat().st_size > 0
+    for stage in ("problem", "free", "q", "motion"):
+        assert (tmp_path / f"goddard_{stage}.png").exists()

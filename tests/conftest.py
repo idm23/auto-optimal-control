@@ -15,7 +15,7 @@ from auto_optimal_control.pontryagin import derive
 
 
 # Examples whose singular arcs are derived (exact singular-arc shooting).
-SINGULAR = {"singular_regulator", "goddard"}
+SINGULAR = {"singular_regulator", "goddard", "goddard_q"}
 
 
 def pytest_addoption(parser):

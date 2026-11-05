@@ -360,13 +360,30 @@ sol = shoot.solve(v)            # h(t_f) = 1.01283692, t_f = 0.19885626
   junction times instead, through `from_smoothed`. Smoothed single shooting
   does not reach small `eps`, though: near the singular arc the extremal grows
   like `exp(sqrt(2/eps) t)`.
+- **Joined to a boundary arc** `("singular", u, before, after, "joined")`:
+  the singular arc starts where the boundary arc just before it ends, with no
+  free arc between (ride a limit, then singular). Unknown: the exit time.
+  `S = S' = 0` at the junction replace the boundary arc's `H` continuity at
+  its exit, which they imply. Goddard with a dynamic-pressure limit has this
+  structure:
+
+  ```python
+  kq = build_kernels(derive(goddard(dynamic_pressure=True), singular=True))
+  arcs = [("boundary", "q_max"), ("singular", "u", "upper", "lower", "joined")]
+  shoot = MultiArcShooting(kq, GODDARD_Q_PARAMS, arcs)
+  ```
+
+  On a free arc with a held control, `H` is evaluated at the bound held,
+  not at the law's choice: at the boundary entry `S` is zero to round-off,
+  and the two can disagree.
 - **Order 1 only.** At order 2 and above a bang arc cannot join the
   singular arc directly; the control chatters (Fuller's phenomenon). `derive`
   says so in `singular_unsupported`. Unit-vector control sets, and other
   controls with bounds, are not supported on singular arcs.
 
 `singular_regulator` (`min ∫x²`, `|u| ≤ 1`) is solved against its closed
-form, and Goddard's rocket against the literature (below).
+form, and Goddard's rocket, with and without the dynamic-pressure limit,
+against the literature (below).
 
 ## What `derive` produces
 
@@ -474,6 +491,7 @@ checks them too. They are solved with `auto_optimal_control.shooting`.
 | Cart-pole swing-up (published extremal) | `∫u²` | 58.807667 | 58.80819 | Kelly (2017) SIAM Review; value from the ASSET reproduction |
 | Cart-pole swing-up (random search) | `∫u²` | **57.944780** | — | this work; checked by an independent simulation |
 | Goddard rocket, singular arc (random guesses) | `h(t_f)`, `t_f` | 1.012836918, 0.198856262 | 1.01283692, 0.19885626 | Graichen & Petit (2008), collocation |
+| Goddard rocket with `q ≤ 10`, boundary + joined singular arcs | `h(t_f)`, `t_f` | 1.012717683, 0.204047216 | 1.01271727, 0.20407108 | Graichen & Petit (2008), collocation |
 
 Notes:
 - **The reference values come from direct (collocation) methods or smoothed
@@ -490,7 +508,14 @@ Notes:
   conditioning grows with ρ.
 - **Goddard:** full thrust to `t = 0.023510`, singular thrust (rising from
   2.14 to 3.09) to `t = 0.072671`, then a coast. The exact structure
-  converges from the third random guess.
+  converges from the third random guess. With `q ≤ 10` (the free climb
+  peaks at `q = 14.9`): full thrust to `t = 0.017480`, the limit ridden to
+  `t = 0.074407` (thrust 1.81 to 3.36), a short singular arc to
+  `t = 0.078655`, then the coast. This climbs 4e-7 higher than the
+  reference, which keeps `q` strictly inside the limit (saturation functions
+  with a vanishing penalty); `t_f` differs by 1.2e-4. An independent SciPy
+  simulation of the original equations under this thrust history gives the
+  same `h(t_f)` to 1e-14, `m(t_f) = 0.6` and `max q = 10 + 2e-11`.
 - **Cart-pole:** Kelly's direct method from his straight-line guess converges
   to an extremal where the cart overshoots to `x = 1.18`, with `J = 58.808`.
   Polishing it indirectly reproduces the published value. Random costate
@@ -512,6 +537,7 @@ uv run --group viz python benchmarks/animate.py earth_mars --stills
 uv run --group viz python benchmarks/animate.py bryson_denham --stills
 uv run --group viz python benchmarks/animate.py velocity_limit --stills
 uv run --group viz python benchmarks/animate.py speed_limit --stills
+uv run --group viz python benchmarks/animate.py goddard --stills
 uv run --group viz python benchmarks/animate.py cart_pole --reuse --out outputs/cart_pole.gif
 ```
 
@@ -558,11 +584,19 @@ keeps a one-line summary at the bottom. The rendered videos are in
   3. The bang-bang exact solve: full power, cruise on the limit, brakes,
      `t_f = 4` to round-off.
   4. The run, beside the run without a speed limit.
+- **Goddard's rocket** ([`goddard.mp4`](https://github.com/idm23/auto-optimal-control/blob/main/docs/visuals/goddard.mp4)),
+  singular arcs and a dynamic-pressure limit:
+  1. Exact shooting on full thrust, singular, coast, from a rough guess: the
+     free climb's `q` peaks at 14.9.
+  2. With `q ≤ 10`, seeded from where the free climb crosses the limit: full
+     thrust, ride the limit, a joined singular arc, coast.
+  3. Both rockets climbing, flames scaled by thrust.
 
 | | | |
 |---|---|---|
 | ![cart-pole](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/cart_pole_polish.png) | ![earth-mars](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/earth_mars_flight.png) | ![bryson-denham](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/bryson_denham_arc_exact.png) |
 | ![velocity-limit](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/velocity_limit_exact.png) | ![speed-limit](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/speed_limit_eps.png) | ![speed-limit problem](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/speed_limit_problem.png) |
+| ![goddard singular](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/goddard_free.png) | ![goddard q-limit](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/goddard_q.png) | ![goddard climb](https://raw.githubusercontent.com/idm23/auto-optimal-control/main/docs/visuals/goddard_motion.png) |
 
 ## Limitations
 
@@ -583,7 +617,8 @@ keeps a one-line summary at the bottom. The rendered videos are in
   solution, or for bang-bang controls from a smoothed problem. Not supported
   with exact arcs: unit-vector control sets, limits that depend explicitly on
   time (`H` then jumps at the entry), order 3 or more, two constraints active
-  at once, and a boundary arc that joins a singular arc directly.
+  at once, and a singular arc that ends directly on a boundary arc (the
+  reverse join is supported).
 - **Order-1 entries with a smooth control converge linearly.** There `H`
   continuity has a double root (the control is continuous, so `H` differs
   only to second order), so Newton converges linearly and junction times
@@ -641,9 +676,9 @@ with PyPI trusted publishing, so no tokens are stored.
    attitude slews.
 5. ~~Path constraints: order, exterior penalty with located crossings,
    termination; exact boundary arcs and touch points for order 1 and 2, with
-   bounded and bang-bang controls; order-1 singular arcs~~. Next: boundary
-   arcs that join singular arcs (Goddard with a dynamic-pressure limit), and
-   a control-continuity entry condition for order-1 limits.
+   bounded and bang-bang controls; order-1 singular arcs, joined to boundary
+   arcs (Goddard with a dynamic-pressure limit)~~. Next: a control-continuity
+   entry condition for order-1 limits.
 6. Ways to choose initial costates, as separate optional layers on top of the
    forward map: ~~single shooting and continuation~~; next, gradient-free
    search (PSO, differential evolution) and learned samplers of the costate

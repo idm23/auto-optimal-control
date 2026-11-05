@@ -30,7 +30,9 @@ Classical:
 Rockets:
 - **goddard**: Goddard's maximum-altitude climb through drag, full thrust, a
   singular arc and a coast (Graichen & Petit 2008), exactly by multi-arc
-  shooting from random guesses.
+  shooting from random guesses; then with the dynamic-pressure limit
+  ``q <= 10``: full thrust, the limit ridden, a joined singular arc and a
+  coast, seeded from the free solution.
 """
 
 import time
@@ -574,12 +576,53 @@ def run_speed_limit(cache_dir=None, seed=0):
     return rows
 
 
+GODDARD_REFERENCE = {"free": (1.01283692, 0.19885626), "q": (1.01271727, 0.20407108)}
+GODDARD_SOURCE = "Graichen & Petit (2008), collocation with saturation functions"
+
+
+def goddard_kernels(cache_dir=None):
+    """Kernels of Goddard's rocket without and with the dynamic-pressure limit."""
+    return tuple(build_kernels(derive(examples.goddard(q), singular=True), cache_dir=cache_dir)
+                 for q in (False, True))
+
+
+def goddard_free(k, guess=None, record=None):
+    """Full thrust, singular, coast, from a rough guess (or ``guess``)."""
+    cls = record(MultiArcShooting) if record else MultiArcShooting
+    shoot = cls(k, list(examples.GODDARD_PARAMS), [("singular", "u", "upper", "lower")])
+    if guess is None:
+        guess = shoot.pack_arcs(shoot.pack([-2.5, -0.18, 0.005], [-0.03], 0.2), [(0.03, 0.1)])
+    return shoot, shoot.solve(guess)
+
+
+def goddard_q(kq, free, free_sol, record=None):
+    """Full thrust, ride q = q_max, singular, coast: seeded from the free solution.
+
+    The free extremal's q rises above the limit and falls back: the crossings
+    give the boundary arc, the jump ``pi`` starts at 0 and the singular arc
+    ends where the free one did.
+    """
+    params = list(examples.GODDARD_Q_PARAMS)
+    cls = record(MultiArcShooting) if record else MultiArcShooting
+    shoot = cls(kq, params, [("boundary", "q_max"), ("singular", "u", "upper", "lower", "joined")])
+    tr = free.trajectory(free_sol.v, n_points=4001)
+    h, v = tr["z"][:, 0], tr["z"][:, 1]
+    q = params[5] * v ** 2 * np.exp(-params[1] * (h - 1)) / 2
+    over = np.flatnonzero(q > params[6])
+    t_in, t_out = tr["t"][over[0]], tr["t"][over[-1]]
+    t_sing = free.unpack_arcs(free_sol.v)[0][1]
+    guess = shoot.pack_arcs(free_sol.v, [(t_in, t_out, [0.0]), max(t_sing, t_out + 1e-3)])
+    return shoot, shoot.solve(guess), guess
+
+
 def run_goddard(cache_dir=None, seed=0):
-    """Full thrust, singular, coast: the exact structure from random guesses."""
+    """Full thrust, singular, coast: the exact structure from random guesses.
+
+    Then the dynamic-pressure limit, from that solution."""
     start = time.perf_counter()
-    k = build_kernels(derive(examples.goddard(), singular=True), cache_dir=cache_dir)
-    params = list(examples.GODDARD_PARAMS)
-    shoot = MultiArcShooting(k, params, [("singular", "u", "upper", "lower")])
+    k, kq = goddard_kernels(cache_dir)
+    shoot = MultiArcShooting(k, list(examples.GODDARD_PARAMS),
+                             [("singular", "u", "upper", "lower")])
 
     def sample(rng):
         lam0 = [-rng.uniform(1, 6), -rng.uniform(0, 0.5), rng.uniform(-0.1, 0.1)]
@@ -596,9 +639,27 @@ def run_goddard(cache_dir=None, seed=0):
                                                    float(d["singular_u"][0][1][0])],
                "Legendre-Clebsch min": d["singular_legendre"][0][0]}
     seconds = time.perf_counter() - start
-    source = "Graichen & Petit (2008), collocation with a vanishing penalty"
-    return [Result("goddard", "h(t_f)", h_f, 1.01283692, source, 1e-8, seconds, details),
-            Result("goddard", "t_f", sol.tf, 0.19885626, source, 1e-7, seconds, details)]
+    (h_ref, tf_ref), (hq_ref, tfq_ref) = GODDARD_REFERENCE["free"], GODDARD_REFERENCE["q"]
+    rows = [Result("goddard", "h(t_f)", h_f, h_ref, GODDARD_SOURCE, 1e-8, seconds, details),
+            Result("goddard", "t_f", sol.tf, tf_ref, GODDARD_SOURCE, 1e-7, seconds, details)]
+
+    start = time.perf_counter()
+    qshoot, qsol, _ = goddard_q(kq, shoot, sol)
+    (b_in, b_out, pi), s_out = qshoot.unpack_arcs(qsol.v)
+    hq_f = qshoot.trajectory(qsol.v)["z"][-1, 0]
+    d = qshoot.diagnostics(qsol.v)
+    details = {"residual": qsol.residual_norm, "max q - q_max": qsol.max_violation,
+               "boundary arc": [b_in, b_out], "singular exit": s_out, "pi": float(pi[0]),
+               "mu min": d["boundary_mu"][0][0], "Legendre-Clebsch min":
+               d["singular_legendre"][0][0]}
+    seconds = time.perf_counter() - start
+    # The reference keeps q strictly inside the limit (saturation functions
+    # with a vanishing penalty); the exact extremal climbs 4e-7 higher.
+    rows += [Result("goddard", "h(t_f), q <= 10", hq_f, hq_ref, GODDARD_SOURCE, 1e-6, seconds,
+                    details),
+             Result("goddard", "t_f, q <= 10", qsol.tf, tfq_ref, GODDARD_SOURCE, 2e-4, seconds,
+                    details)]
+    return rows
 
 
 ALL = {
