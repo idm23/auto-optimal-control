@@ -14,7 +14,7 @@ upright, a distance $d = 1$ m down the track.
 | # | Lecture | Problem | New ideas |
 |---|---|---|---|
 | 1 | {doc}`01_necessary_conditions` | minimum effort, $T = 2$ s | the Hamiltonian and costate equations from a first variation; the boundary value problem; the minimum principle, the clipped and bang-bang laws and the switching function; the state transition matrix and its jump at a switch |
-| 2 | {doc}`02_shooting_the_swing_up` | minimum effort, $\lvert u \rvert \le 20$ N | single shooting and why it is sensitive; random multistart; seeding from a direct collocation solution; several extremals; independent verification |
+| 2 | {doc}`02_shooting_the_swing_up` | minimum effort, $\lvert u \rvert \le 20$ N | single shooting and why it is sensitive; random multistart; a direct collocation solution for comparison; several extremals; independent verification |
 | 3 | A motor with a limit *(in preparation)* | the force limit tightened until it binds | the clipped law in action; continuation in the limit; kinks in the dynamics |
 | 4 | As fast as possible *(in preparation)* | minimum time | bang-bang control; free final time; seeding a bang-bang solve by smoothing; singular arcs |
 | 5 | A track with ends *(in preparation)* | $\lvert q_1 \rvert \le x_{\max}$ | state constraints and their order; exterior penalties; boundary arcs, touch points and costate jumps |
@@ -53,7 +53,7 @@ The lectures follow the order and notation of these courses and texts:
   [Online notes](https://underactuated.mit.edu/).
 - M. Kelly, "An Introduction to Trajectory Optimization: How to Do Your Own
   Direct Collocation", *SIAM Review* 59(4), 2017: the cart-pole problem, its
-  published solution, and the direct method used in Lecture 2.
+  published solution, and the direct method Lecture 2 compares with.
 - D. E. Kirk, *Optimal Control Theory: An Introduction* (Dover, 2004),
   chapter 5; A. E. Bryson and Y.-C. Ho, *Applied Optimal Control* (1975),
   chapters 2 and 3, including state-variable inequality constraints.

@@ -29,6 +29,12 @@ each carries its own docstring: use `help(kernels.propagate)`.
 .. automodule:: auto_optimal_control.shooting
 ```
 
+## Solving from a costate distribution
+
+```{eval-rst}
+.. automodule:: auto_optimal_control.homotopy
+```
+
 ## NumPy evaluation
 
 ```{eval-rst}
