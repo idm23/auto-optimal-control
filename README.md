@@ -7,7 +7,8 @@ bang-bang controls, the state–costate dynamics and the boundary-condition
 residuals.
 
 **Documentation:** https://idm23.github.io/auto-optimal-control/, including a
-lecture course on the indirect method built around one cart-pole.
+seventeen-lecture course on optimal control by the indirect method that
+covers every part of the package.
 
 Integration runs on
 [fast-numerical-integration](https://github.com/idm23/fast-numerical-integration)

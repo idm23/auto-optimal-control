@@ -17,10 +17,12 @@ The kernels are compiled when you first build them, so you need a C compiler
 
 ## Where to start
 
-- **{doc}`notebooks/index`**: a short lecture course on indirect optimal
-  control. It follows one cart-pole through increasingly constrained
-  problems: the necessary conditions, shooting, control limits, minimum time
-  and bang-bang control, and state constraints.
+- **{doc}`notebooks/index`**: a seventeen-lecture course on optimal control
+  by the indirect method, in five parts. It goes from the brachistochrone and
+  the calculus of variations through the minimum principle, dynamic
+  programming, compiled kernels, shooting and continuation, to bang-bang and
+  singular control, state constraints, the automatic homotopy and spacecraft
+  trajectories, with the history of each idea and every part of the package.
 - **{doc}`api`**: the package's modules, classes and functions.
 - **The README on [GitHub](https://github.com/idm23/auto-optimal-control)**:
   the benchmarks against the literature, the animations, and the current
