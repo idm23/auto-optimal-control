@@ -347,6 +347,13 @@ class MultiArcShooting(SingleShooting):
       them at zero along the arc, and ``H`` is continuous at both junctions
       because ``S = 0`` there, so the exit time is fixed by the conditions
       downstream.
+    - ``("singular", u, before, after, "joined")``: a singular arc that
+      starts where the boundary arc just before it ends, with no free arc
+      between (riding a limit, then singular). Unknown: the exit time.
+      Conditions: ``S = S' = 0`` at the junction, which replace the
+      boundary arc's ``H`` continuity at its exit (``H`` is linear in ``u``
+      and ``S = 0``, so it holds already). ``before`` is still the bound
+      held on the last free arc before.
     - ``("switch", u)``: a bang-bang switch of a control that has a
       singular arc. Unknown: the switch time. Condition: ``S = 0`` there.
 
@@ -386,7 +393,7 @@ class MultiArcShooting(SingleShooting):
     so the smoothed ``v`` is a starting point for the bang-bang one.
     """
 
-    _SIZES = {"touch": 2, "singular": 2, "switch": 1}
+    _SIZES = {"touch": 2, "singular": 2, "singular_joined": 1, "switch": 1}
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000):
@@ -411,10 +418,17 @@ class MultiArcShooting(SingleShooting):
                 self.arcs.append((kind, int(c), q))
             elif kind in ("singular", "switch"):
                 c = self._switching_index(c)
-                if kind == "singular":
+                joined = kind == "singular" and len(rest) == 3 and rest[2] == "joined"
+                if joined:
+                    rest = rest[:2]
+                    if not self.arcs or self.arcs[-1][0] != "boundary":
+                        raise ValueError("a joined singular arc must follow a boundary arc")
+                    kind = "singular_joined"
+                if kind == "singular_joined" or kind == "singular":
                     if len(rest) != 2 or any(r not in ("lower", "upper") for r in rest):
                         raise ValueError("a singular entry is ('singular', control, before, "
-                                         "after), with before and after 'lower' or 'upper'")
+                                         "after), with before and after 'lower' or 'upper', "
+                                         "optionally followed by 'joined'")
                     if not k.SINGULAR_ARCS[c]:
                         why = k.system.singular_unsupported[c]
                         raise ValueError(f"no singular arc for switching function {c}: {why}")
@@ -431,7 +445,7 @@ class MultiArcShooting(SingleShooting):
         for c, pairs in sides.items():
             flag = pairs[0][0]
             for kind, cc, _ in self.arcs:
-                if cc == c and kind == "singular":
+                if cc == c and kind in ("singular", "singular_joined"):
                     break
                 if cc == c and kind == "switch":
                     flag = 1 - flag
@@ -443,7 +457,7 @@ class MultiArcShooting(SingleShooting):
                     raise ValueError(f"switch entries are for controls with a singular arc; "
                                      f"switching function {c} has none")
                 flags[c] = 1 - flags[c]
-            elif kind == "singular":
+            elif kind in ("singular", "singular_joined"):
                 if extra[0] != flags[c]:
                     raise ValueError(f"switching function {c}: a singular arc entered from "
                                      f"{'upper' if extra[0] else 'lower'} follows one at "
@@ -480,7 +494,8 @@ class MultiArcShooting(SingleShooting):
                 return k.CONSTRAINT_NAMES[c]
             return k.system.switching_functions[c].control.name
 
-        arcs = ", ".join(f"{kind} {name(kind, c)}" for kind, c, _ in self.arcs)
+        arcs = ", ".join(f"{kind.replace('_', ' ')} {name(kind, c)}"
+                         for kind, c, _ in self.arcs)
         return (f"<MultiArcShooting {k.module.__name__}: [{arcs}], "
                 f"{self.n_unknowns} unknowns, params={self.params.tolist()}>")
 
@@ -489,7 +504,8 @@ class MultiArcShooting(SingleShooting):
     def pack_arcs(self, base, arc_values):
         """``v`` from :class:`SingleShooting` unknowns ``base`` and, per arc,
         ``(t_in, t_out, pi)`` for a boundary arc, ``(t_c, nu)`` for a touch,
-        ``(t_in, t_out)`` for a singular arc or ``t_s`` for a switch."""
+        ``(t_in, t_out)`` for a singular arc, ``t_out`` for a joined one or
+        ``t_s`` for a switch."""
         parts = [np.asarray(base, dtype=float).reshape(-1)[:self.n_base]]
         for (kind, c, q), val in zip(self.arcs, arc_values, strict=True):
             if kind == "boundary":
@@ -503,14 +519,15 @@ class MultiArcShooting(SingleShooting):
         return np.concatenate(parts)
 
     def unpack_arcs(self, v):
-        """Per arc, ``(t_in, t_out, pi)``, ``(t_c, nu)``, ``(t_in, t_out)`` or ``t_s``."""
+        """Per arc, ``(t_in, t_out, pi)``, ``(t_c, nu)``, ``(t_in, t_out)``, or
+        ``t_out`` (joined singular) or ``t_s`` (switch)."""
         v = np.asarray(v, dtype=float).reshape(-1)
         out = []
         for (kind, _, _), sl in zip(self.arcs, self._arc_slices):
             w = v[sl]
             if kind == "boundary":
                 out.append((w[0], w[1], w[2:].copy()))
-            elif kind == "switch":
+            elif kind in ("switch", "singular_joined"):
                 out.append(w[0])
             else:
                 out.append((w[0], w[1]))
@@ -528,6 +545,31 @@ class MultiArcShooting(SingleShooting):
         for c, flag in flags.items():
             arc[c] = flag
         return arc
+
+    def _free_hamiltonian(self, t, z, flags):
+        """``(H, dH/dt, dH/dz)`` on a free arc, with the held controls at their bounds.
+
+        ``H`` is linear in a bang-bang control ``u`` with coefficient ``S``,
+        so ``H(u_held) = H(u*) + S (u_held - u*)``, and the law ``u*`` and
+        the bounds are piecewise constant in ``z``."""
+        k, p = self.kernels, self.params
+        H = k.hamiltonian(t, z, p)
+        Ht, Hz = k.hamiltonian_gradient(t, z, p)
+        if not flags:
+            return H, Ht, Hz
+        S = k.switching(t, z, p)
+        St, Sz, _ = k.switching_gradient(t, z, p)
+        u = k.control(t, z, p)
+        lo, hi = k.control_bounds(t, z, p)
+        controls = list(k.system.controls)
+        for c, flag in flags.items():
+            j = controls.index(k.system.switching_functions[c].control)
+            du = (hi[j] if flag else lo[j]) - u[j]
+            if du:
+                H = H + S[c] * du
+                Ht = Ht + St[c] * du
+                Hz = Hz + Sz[c] * du
+        return H, Ht, Hz
 
     def _segment(self, kind, c, ta, dta, z, D, tb, dtb, jac, cost=False, flags=None):
         """Propagate a free (``kind is None``), boundary or singular arc; chain ``D = dz/dv``."""
@@ -577,8 +619,22 @@ class MultiArcShooting(SingleShooting):
         rows, grads, segments = [], [], []
         z, D, t, dt = z0, D0, self.t0, np.zeros(N)
         flags = dict(self.frozen)
-        for (kind, c, q), sl in zip(self.arcs, self._arc_slices):
+        arcs = list(zip(self.arcs, self._arc_slices))
+        for i_arc, ((kind, c, q), sl) in enumerate(arcs):
             w = v[sl]
+            if kind == "singular_joined":
+                # Starts at the boundary arc's exit (t, dt, z, D as it left them).
+                Nv, Nt, Nz = k.singular_junction(c, t, z, p)
+                for i in range(2):
+                    rows.append(Nv[i])
+                    grads.append(Nt[i] * dt + Nz[i] @ D if jac else None)
+                t_out, d_out = w[0], unit(sl.start)
+                r, D = self._segment("singular", c, t, dt, z, D, t_out, d_out, jac, record)
+                segments.append(("singular", c, t, t_out, z, None, r))
+                z = r["z"]
+                flags[c] = q[1]
+                t, dt = t_out, d_out
+                continue
             t_in, d_in = w[0], unit(sl.start)
             r, D = self._segment(None, None, t, dt, z, D, t_in, d_in, jac, record, flags)
             segments.append((None, None, t, t_in, z, dict(flags), r))
@@ -626,21 +682,23 @@ class MultiArcShooting(SingleShooting):
                     D = Dp
                 continue
             # H continuous at the entry: H(u*, z-) = H(u_b, z+).
-            Hf_t, Hf_z = k.hamiltonian_gradient(t_in, z, p)
+            Hf, Hf_t, Hf_z = self._free_hamiltonian(t_in, z, flags)
             Hb_t, Hb_z = k.hamiltonian_gradient(t_in, zp, p, boundary=c)
-            rows.append(k.hamiltonian(t_in, z, p) - k.boundary_hamiltonian(c, t_in, zp, p))
+            rows.append(Hf - k.boundary_hamiltonian(c, t_in, zp, p))
             grads.append((Hf_t - Hb_t) * d_in + Hf_z @ D - Hb_z @ Dp if jac else None)
             t_out, d_out = w[1], unit(sl.start + 1)
             r, D = self._segment("boundary", c, t_in, d_in, zp, Dp if jac else None, t_out,
                                  d_out, jac, record)
             segments.append(("boundary", c, t_in, t_out, zp, None, r))
             z = r["z"]
+            t, dt = t_out, d_out
+            if i_arc + 1 < len(arcs) and arcs[i_arc + 1][0][0] == "singular_joined":
+                continue                 # S = S' = 0 there make H continuous
             # H continuous at the exit; the costates are continuous there.
             Hb_t, Hb_z = k.hamiltonian_gradient(t_out, z, p, boundary=c)
-            Hf_t, Hf_z = k.hamiltonian_gradient(t_out, z, p)
-            rows.append(k.boundary_hamiltonian(c, t_out, z, p) - k.hamiltonian(t_out, z, p))
+            Hf, Hf_t, Hf_z = self._free_hamiltonian(t_out, z, flags)
+            rows.append(k.boundary_hamiltonian(c, t_out, z, p) - Hf)
             grads.append((Hb_t - Hf_t) * d_out + (Hb_z - Hf_z) @ D if jac else None)
-            t, dt = t_out, d_out
         d_tf = unit(m + n + k.N_MULTIPLIERS) if k.FREE_FINAL_TIME else np.zeros(N)
         r, D = self._segment(None, None, t, dt, z, D, tf, d_tf, jac, record, flags)
         segments.append((None, None, t, tf, z, dict(flags), r))
@@ -799,7 +857,7 @@ class MultiArcShooting(SingleShooting):
 
     def _singular_bound_violation(self, tr):
         return [self._bound_violation(tr, tr["singular"] == c)
-                for kind, c, _ in self.arcs if kind == "singular"]
+                for kind, c, _ in self.arcs if kind.startswith("singular")]
 
     def _violations(self, tr):
         k = self.kernels
@@ -857,7 +915,7 @@ class MultiArcShooting(SingleShooting):
                       for ti, zi in zip(tr["t"][on], tr["z"][on])]
                 out["boundary_mu"].append((min(mu), max(mu)))
                 out["boundary_u"].append((tr["u"][on].min(axis=0), tr["u"][on].max(axis=0)))
-            elif kind == "singular":
+            elif kind.startswith("singular"):
                 on = tr["singular"] == c
                 lc = [k.singular_legendre(c, ti, zi, p)
                       for ti, zi in zip(tr["t"][on], tr["z"][on])]
@@ -892,7 +950,7 @@ class MultiArcShooting(SingleShooting):
         Returns ``(shooting, v0)``.
         """
         shoot = cls(kernels, params, arcs, **options)
-        if any(kind in ("singular", "switch") for kind, _, _ in shoot.arcs):
+        if any(kind.startswith("singular") or kind == "switch" for kind, _, _ in shoot.arcs):
             raise ValueError("from_penalty supports boundary arcs and touches; for singular "
                              "arcs use from_smoothed")
         k = kernels

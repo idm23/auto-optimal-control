@@ -229,3 +229,50 @@ def test_goddard_exact(god):
     assert 0 < lo[0] < hi[0] < GODDARD[3]
     assert d["singular_legendre"][0][0] > 0
     assert d["held_sign_violation"][0] < 1e-10
+
+
+# -- Goddard with a dynamic-pressure limit ------------------------------------
+
+@pytest.fixture(scope="module")
+def god_q_solution(god, compiled):
+    """Full thrust, ride q = 10, singular, coast, seeded from the free solution."""
+    kq = compiled["goddard_q"][2]
+    free = MultiArcShooting(god, GODDARD, [("singular", "u", "upper", "lower")])
+    fsol = free.solve(free.pack_arcs(free.pack([-2.5, -0.18, 0.005], [-0.03], 0.2), [(0.03, 0.1)]))
+    params = list(examples.GODDARD_Q_PARAMS)
+    sh = MultiArcShooting(kq, params, [("boundary", "q_max"),
+                                       ("singular", "u", "upper", "lower", "joined")])
+    t_out = free.unpack_arcs(fsol.v)[0][1]
+    return sh, sh.solve(sh.pack_arcs(fsol.v, [(0.015, 0.05, [0.0]), t_out]))
+
+
+def test_goddard_dynamic_pressure(god_q_solution):
+    sh, sol = god_q_solution
+    assert sol.success and sol.max_violation < 1e-10
+    assert len(sol.v) == 9               # base 5, boundary (t_in, t_out, pi), singular exit
+    R, J = sh.residual_jacobian(sol.v)
+    assert np.allclose(J, fd_jacobian(sh.residual, sol.v, h=1e-8), rtol=1e-4,
+                       atol=1e-5 * np.abs(J).max())
+    (b_in, b_out, pi), s_out = sh.unpack_arcs(sol.v)
+    assert 0 < b_in < b_out < s_out < sol.tf
+    tr = sh.trajectory(sol.v, n_points=4001)
+    # Graichen & Petit (2008) report 1.01271727, approaching the limit from
+    # inside; the exact extremal is 4e-7 higher and still feasible.
+    assert tr["z"][-1, 0] == pytest.approx(1.01271727, rel=1e-6)
+    assert tr["z"][-1, 0] > 1.01271727
+    assert tr["z"][-1, 0] < 1.01283692      # below the free optimum
+    assert sol.tf == pytest.approx(0.20407108, rel=2e-4)
+    q = 12400 * tr["z"][:, 1] ** 2 * np.exp(-500 * (tr["z"][:, 0] - 1)) / 2
+    assert q.max() == pytest.approx(10.0, abs=1e-9)
+    on = tr["arc"] == 0
+    assert np.abs(q[on] - 10).max() < 1e-9
+    d = sh.diagnostics(sol.v)
+    assert pi[0] > 0 and d["boundary_mu"][0][0] > -1e-12
+    assert d["boundary_bound_violation"] == [0.0] and d["singular_bound_violation"] == [0.0]
+    assert d["singular_legendre"][0][0] > 0
+    assert d["held_sign_violation"][0] < 1e-10
+
+
+def test_joined_needs_a_boundary_arc(god):
+    with pytest.raises(ValueError, match="must follow a boundary arc"):
+        MultiArcShooting(god, GODDARD, [("singular", "u", "upper", "lower", "joined")])
