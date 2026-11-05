@@ -1,38 +1,36 @@
 """Canonical indirect-method benchmarks with literature reference values.
 
-Each ``run_*`` function builds the problem, finds the extremal from scratch
-(random costate guesses, continuation, or costates lifted from a direct
-solution), and returns :class:`Result` rows comparing the indirect solution
-with a published value.
+Each ``run_*`` function gives :class:`~auto_optimal_control.homotopy.Homotopy`
+the problem, its parameter values and a box (or a function) to draw initial
+costates and ``t_f`` from, and nothing else: smoothing, penalties,
+continuation and the arc structure are found automatically. It returns
+:class:`Result` rows comparing the indirect solution with a published value.
 
 Spacecraft:
 - **orbit_raising**: maximum-radius low-thrust orbit transfer (Bryson & Ho 1975).
-- **earth_mars**: fuel-optimal Earth-to-Mars rendezvous with energy-to-fuel
-  continuation (benchmark of Taheri et al.; arXiv:2409.01490, Table 1).
+- **earth_mars**: fuel-optimal Earth-to-Mars rendezvous, bang-bang throttle
+  (benchmark of Taheri et al.; arXiv:2409.01490, Table 1).
 
 Robotics:
 - **robot_arm**: minimum-time COPS robot arm, bang-bang in three torques
   (Dolan, Moré & Munson, COPS 3.0).
 - **cart_pole**: minimum-effort cart-pole swing-up (Kelly 2017, SIAM Review).
+  Kelly's direct method is run for comparison only.
 
 Classical:
 - **brachistochrone**: minimum-time descent; closed-form cycloid.
 - **bryson_denham**: minimum energy with the order-2 state limit ``x <= l``
-  (Bryson, Denham & Dreyfus 1963), solved by exterior-penalty continuation in
-  both regimes (a touch point and a boundary arc), then exactly by multi-arc
-  shooting seeded from the penalty solution.
+  (Bryson, Denham & Dreyfus 1963): a touch point and a boundary arc.
 - **velocity_limit**: a rest-to-rest move with the order-1 limit ``v <= V``,
-  exactly by multi-arc shooting, also with the force clipped to ``|u| <= u_max``.
+  also with the force clipped to ``|u| <= u_max``.
 - **speed_limit**: minimum time over a distance with ``|u| <= u_max`` and
-  ``v <= V``: bang-bang with a boundary arc, exactly by multi-arc shooting
-  seeded through a smoothing continuation (``1 + eps u^2/2``, ``eps -> 0``).
+  ``v <= V``: bang-bang with a boundary arc.
 
 Rockets:
 - **goddard**: Goddard's maximum-altitude climb through drag, full thrust, a
-  singular arc and a coast (Graichen & Petit 2008), exactly by multi-arc
-  shooting from random guesses; then with the dynamic-pressure limit
-  ``q <= 10``: full thrust, the limit ridden, a joined singular arc and a
-  coast, seeded from the free solution.
+  singular arc and a coast (Graichen & Petit 2008); then with the
+  dynamic-pressure limit ``q <= 10``: full thrust, the limit ridden, a joined
+  singular arc and a coast.
 """
 
 import time
@@ -45,9 +43,11 @@ from scipy.optimize import brentq
 from auto_optimal_control import examples
 from auto_optimal_control.build import build_kernels
 from auto_optimal_control.pontryagin import derive
+from auto_optimal_control.homotopy import Homotopy
 from auto_optimal_control.problem import Box, OptimalControlProblem, UnitVector
-from auto_optimal_control.shooting import (MultiArcShooting, ShootingError, SingleShooting,
-                                           continuation, parameter_continuation)
+# Re-exported for the animations in visuals/, which import them from here.
+from auto_optimal_control.shooting import (  # noqa: F401
+    MultiArcShooting, ShootingError, SingleShooting, continuation, parameter_continuation)
 
 
 @dataclass
@@ -96,19 +96,23 @@ def brachistochrone_exact(g, xf, yf):
     return phi * np.sqrt(R / g)
 
 
+def _details(r):
+    """What a :class:`~auto_optimal_control.homotopy.HomotopyResult` found, for the report."""
+    return {"residual": r.solution.residual_norm, "random draws": r.tries,
+            "continuation steps": len(r.steps), "structure": list(r.arcs) or "free arcs"}
+
+
 def run_brachistochrone(cache_dir=None, seed=0):
-    start = time.perf_counter()
-    k = _kernels(brachistochrone_problem(), cache_dir)
     rows = []
     rng = np.random.default_rng(seed)
+    h = Homotopy(brachistochrone_problem(), cache_dir=cache_dir)
     for g, xf, yf in [(9.81, 1.0, 1.0), (9.81, 2.0, 0.5), (1.0, 1.0, 2.0)]:
-        shoot = SingleShooting(k, [g, xf, yf])
-        sol, _ = shoot.multistart(
-            lambda rng: shoot.guess_multipliers(rng.uniform(-1, 1, 3), tf=rng.uniform(0.2, 3.0)),
-            n_tries=100, seed=rng)
-        rows.append(Result("brachistochrone", f"t_f (g={g}, x_f={xf}, y_f={yf})", sol.tf,
+        start = time.perf_counter()
+        r = h.solve(
+            [g, xf, yf], ([-1] * 3, [1] * 3), (0.2, 3.0), n_tries=100, seed=rng)
+        rows.append(Result("brachistochrone", f"t_f (g={g}, x_f={xf}, y_f={yf})", r.solution.tf,
                            brachistochrone_exact(g, xf, yf), "closed form (cycloid)", 1e-10,
-                           time.perf_counter() - start, {"residual": sol.residual_norm}))
+                           time.perf_counter() - start, _details(r)))
     return rows
 
 
@@ -136,15 +140,13 @@ def orbit_raising_problem():
 
 def run_orbit_raising(cache_dir=None, seed=0):
     start = time.perf_counter()
-    k = _kernels(orbit_raising_problem(), cache_dir)
-    shoot = SingleShooting(k, ORBIT_PARAMS)
-    sol, tries = shoot.multistart(lambda rng: shoot.guess_multipliers(rng.uniform(-2, 2, 4)),
-                                  n_tries=200, seed=seed)
-    r = k.propagate(sol.t0, sol.z0, sol.tf, ORBIT_PARAMS)
-    return [Result("orbit_raising", "r(t_f)", r["z"][0], 1.5252775945,
+    r = Homotopy(orbit_raising_problem(), cache_dir=cache_dir).solve(
+        ORBIT_PARAMS, ([-2] * 4, [2] * 4), seed=seed)
+    k, sol = r.shooting.kernels, r.solution
+    rf = k.propagate(sol.t0, sol.z0, sol.tf, r.params)
+    return [Result("orbit_raising", "r(t_f)", rf["z"][0], 1.5252775945,
                    "YAPSS orbit-raising example (IPOPT); Bryson & Ho 1975 pp. 66-69 give 1.525",
-                   1e-6, time.perf_counter() - start,
-                   {"residual": sol.residual_norm, "random guesses": tries})]
+                   1e-6, time.perf_counter() - start, _details(r))]
 
 
 # =============================================================================
@@ -194,53 +196,37 @@ def earth_mars_problem(homotopy):
 
 
 def run_earth_mars(cache_dir=None, seed=0):
+    """Fuel-optimal: bang-bang throttle, reached from the costate box of the paper."""
     start = time.perf_counter()
-    kh = _kernels(earth_mars_problem(True), cache_dir)
-    kf = _kernels(earth_mars_problem(False), cache_dir)
     M = MARS
     x0 = np.concatenate([M["rE"], M["vE"], [1.0]])
     base = [M["mu"], M["T"], M["c"], M["tf"], *x0, *M["rM"], *M["vM"]]
-    energy = SingleShooting(kh, base + [1.0])
-    sol, tries = energy.multistart(        # costates in [0, 1], as in the paper
-        lambda rng: energy.guess_multipliers(rng.uniform(0, 1, 7)), n_tries=200, seed=seed)
-
-    def at(eps, guess):
-        return SingleShooting(kh, base + [eps]).solve(guess, tol=1e-9)
-
-    path = continuation(at, 1.0, [0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 1e-3, 1e-4], sol.v)
-    sol = SingleShooting(kf, base).solve(path[-1][1].v)
-    err = sol.residual_norm
-    r = kf.propagate(sol.t0, sol.z0, sol.tf, base, cost=True)
-    days = r["switch_times"] * TU / 86400.0
-    return [Result("earth_mars", "m(t_f) [kg]", r["z"][6] * M["m0"], 603.935,
+    r = Homotopy(earth_mars_problem(False), cache_dir=cache_dir).solve(
+        base, ([0] * 7, [1] * 7), seed=seed)
+    k, sol = r.shooting.kernels, r.solution
+    rf = k.propagate(sol.t0, sol.z0, sol.tf, r.params)
+    days = rf["switch_times"] * TU / 86400.0
+    return [Result("earth_mars", "m(t_f) [kg]", rf["z"][6] * M["m0"], 603.935,
                    "arXiv:2409.01490 Table 2 (HTS/L2 smoothing, rho = 1e-5)", 2e-5,
                    time.perf_counter() - start,
-                   {"residual": err, "random guesses": tries, "continuation steps": len(path),
-                    "switches (days)": np.round(days, 3).tolist()})]
+                   {**_details(r), "switches (days)": np.round(days, 3).tolist()})]
 
 
 # =============================================================================
 # COPS robot arm, minimum time
 # =============================================================================
 
-def robot_arm_problem(homotopy):
-    """COPS #8: L rho'' = u_rho, I_theta theta'' = u_theta, I_phi phi'' = u_phi, |u| <= 1.
-
-    ``homotopy`` uses ``L = 1 + eps sum(u^2)`` (saturated controls); eps -> 0
-    gives the bang-bang minimum-time problem.
-    """
+def robot_arm_problem():
+    """COPS #8: L rho'' = u_rho, I_theta theta'' = u_theta, I_phi phi'' = u_phi, |u| <= 1."""
     t = sp.Symbol("t", real=True)
     rho, th, ph, wr, wt, wp = sp.symbols("rho theta phi rho_d theta_d phi_d", real=True)
     ur, ut, up = sp.symbols("u_rho u_theta u_phi", real=True)
-    L, eps = sp.symbols("L epsilon", positive=True)
+    L = sp.Symbol("L", positive=True)
     I_phi = ((L - rho) ** 3 + rho ** 3) / 3
     I_theta = I_phi * sp.sin(ph) ** 2
-    cost = 1 + eps * (ur ** 2 + ut ** 2 + up ** 2) if homotopy else 1
     return OptimalControlProblem(
-        name="robot_arm_" + ("homotopy" if homotopy else "time"), time=t,
-        states=[rho, th, ph, wr, wt, wp], controls=[ur, ut, up],
-        params=[L] + ([eps] if homotopy else []),
-        dynamics=[wr, wt, wp, ur / L, ut / I_theta, up / I_phi], running_cost=cost,
+        name="robot_arm", time=t, states=[rho, th, ph, wr, wt, wp], controls=[ur, ut, up],
+        params=[L], dynamics=[wr, wt, wp, ur / L, ut / I_theta, up / I_phi], running_cost=1,
         initial_state=[sp.Rational(9, 2), 0, sp.pi / 4, 0, 0, 0],
         final_state={rho: sp.Rational(9, 2), th: 2 * sp.pi / 3, ph: sp.pi / 4,
                      wr: 0, wt: 0, wp: 0},
@@ -249,29 +235,17 @@ def robot_arm_problem(homotopy):
 
 def run_robot_arm(cache_dir=None, seed=0):
     start = time.perf_counter()
-    kh = _kernels(robot_arm_problem(True), cache_dir)
-    kb = _kernels(robot_arm_problem(False), cache_dir)
-    smooth = SingleShooting(kh, [5.0, 1.0])
-    sol, tries = smooth.multistart(
-        lambda rng: smooth.guess_multipliers(rng.uniform(-1, 1, 6) * 10 ** rng.uniform(-1, 1, 6),
-                                             tf=rng.uniform(5, 15)),
+    r = Homotopy(robot_arm_problem(), cache_dir=cache_dir).solve(
+        [5.0], lambda rng: rng.uniform(-1, 1, 6) * 10 ** rng.uniform(-1, 1, 6), (5.0, 15.0),
         n_tries=300, seed=seed)
-
-    def at(eps, guess):
-        return SingleShooting(kh, [5.0, eps]).solve(guess, tol=1e-9)
-
-    path = continuation(at, 1.0, [0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 3e-3, 1e-3, 3e-4, 1e-4],
-                        sol.v)
-    sol = SingleShooting(kb, [5.0]).solve(path[-1][1].v)
-    err = sol.residual_norm
-    r = kb.propagate(sol.t0, sol.z0, sol.tf, [5.0])
+    k, sol = r.shooting.kernels, r.solution
+    rf = k.propagate(sol.t0, sol.z0, sol.tf, r.params)
     return [Result("robot_arm", "t_f", sol.tf, 9.1409,
                    "COPS robot arm; GAMS NOA / PROPT (nh = 800 discretization)", 2e-5,
                    time.perf_counter() - start,
-                   {"residual": err, "random guesses": tries, "continuation steps": len(path),
-                    "switches": np.round(r["switch_times"], 6).tolist(),
+                   {**_details(r), "switches": np.round(rf["switch_times"], 6).tolist(),
                     "switching control": [("u_rho", "u_theta", "u_phi")[i]
-                                          for i in r["switch_index"]]})]
+                                          for i in rf["switch_index"]]})]
 
 
 # =============================================================================
@@ -346,83 +320,39 @@ def cart_pole_direct(p=CART_POLE_PARAMS, N=40):
     return t, X, U, cost(res.x)
 
 
-def costates_from_direct(t, X, U, p):
-    """Initial costates consistent with a direct solution.
 
-    Along the given trajectory the costate equation ``lam' = -(df/dx)^T lam``
-    is linear, so ``lam(t) = Psi(t) lam0``. The control law ``u = -(df/du . lam)/2``
-    then fixes ``lam0`` by least squares.
-    """
-    from scipy.integrate import solve_ivp as scipy_ivp
-    from scipy.interpolate import CubicSpline
-
-    Xs, Us = CubicSpline(t, X), CubicSpline(t, U)
-
-    def jac(x, u, e=1e-7):
-        A = np.column_stack([(_cart_pole_plant(x + dx, u, p) - _cart_pole_plant(x - dx, u, p)) / (2 * e)
-                             for dx in np.eye(4) * e])
-        b = (_cart_pole_plant(x, u + e, p) - _cart_pole_plant(x, u - e, p)) / (2 * e)
-        return A, b
-
-    def adjoint(s, Y):
-        A, _ = jac(Xs(s), float(Us(s)))
-        return (-A.T @ Y.reshape(4, 4)).ravel()
-
-    sol = scipy_ivp(adjoint, (t[0], t[-1]), np.eye(4).ravel(), dense_output=True,
-                    rtol=1e-10, atol=1e-12)
-    samples = np.linspace(t[0], t[-1], 202)[1:-1]
-    rows = [-0.5 * jac(Xs(s), float(Us(s)))[1] @ sol.sol(s).reshape(4, 4) for s in samples]
-    return np.linalg.lstsq(np.array(rows), Us(samples), rcond=None)[0]
 
 
 def run_cart_pole(cache_dir=None, seed=0, n_random=400):
+    """Random costate draws, each solved to its extremal; the cheapest is checked by an
+    independent simulation. Kelly's direct method is run only for comparison: from his
+    straight-line guess it converges to the published, more expensive local minimum."""
     start = time.perf_counter()
-    k = _kernels(cart_pole_problem(), cache_dir)
     p = CART_POLE_PARAMS
-    shoot = SingleShooting(k, p)
-
-    def polish(lam0):
-        sol = shoot.solve(shoot.guess_multipliers(lam0))
-        r = k.propagate(sol.t0, sol.z0, sol.tf, p, cost=True)
-        tr = shoot.trajectory(sol.v, n_points=2001)
-        return (sol.v, sol.residual_norm, r["cost"], float(np.abs(tr["z"][:, 0]).max()),
-                float(np.abs(tr["u"]).max()))
-
-    # 1) The published extremal: Kelly's direct method, then the indirect polish.
-    t, X, U, J_direct = cart_pole_direct(p)
-    v, err, J, xmax, umax = polish(costates_from_direct(t, X, U, p))
-    rows = [Result("cart_pole", "J (published extremal)", J, 58.80819,
-                   "ASSET reproduction of Kelly 2017 (LGL5, 64 segments)", 2e-5,
-                   time.perf_counter() - start,
-                   {"residual": err, "direct HS N=40 J": float(J_direct), "max |x|": xmax,
-                    "max |u|": umax})]
-
-    # 2) Random costate search: finds a different, cheaper extremal. It is not in
-    # the literature, so it is checked independently: Kelly's equations are
-    # simulated with SciPy under this extremal's control history.
-    start2 = time.perf_counter()
+    h = Homotopy(cart_pole_problem(), cache_dir=cache_dir)
     rng = np.random.default_rng(seed)
     found = {}
     for _ in range(n_random):
-        lam0 = rng.uniform(-60, 60, 4)
-        try:
-            v, err, J, xmax, umax = polish(lam0)
-        except (ShootingError, RuntimeError, ValueError, np.linalg.LinAlgError):
-            continue
-        if err < 1e-10:
-            key = round(J, 6)
+        r = h.solve(p, ([-60] * 4, [60] * 4), n_tries=1, seed=rng)
+        if r.exact:
+            key = round(r.objective, 6)
             hits = found[key][1] + 1 if key in found else 1
-            found[key] = (v, hits, xmax, J)
+            found[key] = (r, hits)
     best = min(found)
-    J_sim, x_end = simulate_cart_pole(k, found[best][0][:4], p)
-    rows.append(Result("cart_pole", "J (best of random search)", found[best][3], float(J_sim),
-                       "independent SciPy simulation of Kelly's equations under this u(t)",
-                       1e-8, time.perf_counter() - start2,
-                       {"extremals found (J: hits)": {j: found[j][1] for j in sorted(found)},
-                        "max |x|": found[best][2],
-                        "simulated end-state error": float(np.abs(x_end - [p[5], np.pi, 0, 0]).max()),
-                        "published J": 58.80819}))
-    return rows
+    r = found[best][0]
+    J_sim, x_end = simulate_cart_pole(r.shooting.kernels, r.solution.lam0, p)
+    tr = r.shooting.trajectory(r.solution.v, n_points=2001)
+    seconds = time.perf_counter() - start
+    _, _, _, J_direct = cart_pole_direct(p)
+    return [Result("cart_pole", "J (cheapest extremal found)", r.objective, float(J_sim),
+                   "independent SciPy simulation of Kelly's equations under this u(t)", 1e-8,
+                   seconds,
+                   {"residual": r.solution.residual_norm, "random draws": n_random,
+                    "extremals found (J: hits)": {j: found[j][1] for j in sorted(found)},
+                    "max |x|": float(np.abs(tr["z"][:, 0]).max()),
+                    "simulated end-state error": float(np.abs(x_end - [p[5], np.pi, 0, 0]).max()),
+                    "published J (Kelly 2017, direct)": 58.80819,
+                    "Kelly's direct method here (HS, N = 40), comparison only": float(J_direct)})]
 
 
 def simulate_cart_pole(k, lam0, p, n=4001):
@@ -456,123 +386,55 @@ def bryson_denham_exact(ell):
 
 
 def run_bryson_denham(cache_dir=None, seed=0):
-    """Raise the penalty weight rho from 1 by continuation. The penalty
-    solution approaches the exact cost from below; the gap shrinks as rho
-    grows, so the tolerance reflects the final rho, not the integration."""
-    k = _kernels(examples.bryson_denham(), cache_dir)
+    """A touch point (l = 0.2) and a boundary arc (l = 0.1), each found from a costate box."""
     rows = []
-    for ell, rho_max, tol, rtol in [(0.2, 1e8, 1e-10, 1e-4), (0.1, 1e7, 1e-8, 1e-3)]:
+    h = Homotopy(examples.bryson_denham(), cache_dir=cache_dir)
+    for ell in (0.2, 0.1):
         start = time.perf_counter()
-        v = SingleShooting(k, [ell, 1.0]).solve([0, 2.0, 0, 0]).v
-        path = parameter_continuation(k, [ell, 1.0], "rho",
-                                      np.logspace(0, np.log10(rho_max), 33), v,
-                                      solve_options=dict(tol=tol))
-        rho, sol = path[-1]
-        r = k.propagate(0, sol.z0, 1.0, [ell, rho], cost=True)
+        r = h.solve(
+            [ell, 0.0], ([-10, -10], [10, 10]), seed=seed)
         regime = "touch" if ell >= 1 / 6 else "boundary arc"
-        rows.append(Result("bryson_denham", f"J (l={ell}, {regime}, rho={rho:.0e})", r["cost"],
-                           bryson_denham_exact(ell), "closed form (Bryson, Denham & Dreyfus 1963)",
-                           rtol, time.perf_counter() - start,
-                           {"max_violation": sol.max_violation, "solves": len(path)}))
-        # Exact: the penalty solution seeds multi-arc shooting with the arc structure.
-        start = time.perf_counter()
-        arcs = [("touch" if ell >= 1 / 6 else "boundary", "x_max")]
-        shoot, v = MultiArcShooting.from_penalty(k, [ell, 0.0], arcs, sol, [ell, rho])
-        ex = shoot.solve(v)
-        rows.append(Result("bryson_denham", f"J (l={ell}, {regime}, exact arcs)", shoot.cost(ex.v),
+        rows.append(Result("bryson_denham", f"J (l={ell}, {regime})", r.objective,
                            bryson_denham_exact(ell), "closed form (Bryson, Denham & Dreyfus 1963)",
                            1e-10, time.perf_counter() - start,
-                           {"residual": ex.residual_norm, "max_violation": ex.max_violation}))
+                           {**_details(r), "max_violation": r.solution.max_violation}))
     return rows
 
 
 def run_velocity_limit(cache_dir=None, seed=0):
-    """Order-1 limit v <= V on a rest-to-rest move: penalty continuation to
-    rho = 100, then exact multi-arc shooting."""
-    k = _kernels(examples.velocity_limited_move(), cache_dir)
+    """Order-1 limit v <= V on a rest-to-rest move, and with the force clipped as well."""
     rows = []
+    h = Homotopy(examples.velocity_limited_move(), cache_dir=cache_dir)
     for V in (1.1, 1.2, 1.4):
         start = time.perf_counter()
-        v = SingleShooting(k, [V, 1.0]).solve([12.0, 6.0, 0, 0]).v
-        rho, sol = parameter_continuation(k, [V, 1.0], "rho", np.logspace(0, 2, 9), v)[-1]
-        shoot, v = MultiArcShooting.from_penalty(k, [V, 0.0], [("boundary", "v_max")], sol,
-                                                 [V, rho])
-        ex = shoot.solve(v)
+        r = h.solve(
+            [V, 0.0], ([-20, -20], [20, 20]), seed=seed)
         t1 = 3 * (V - 1) / (2 * V)
-        rows.append(Result("velocity_limit", f"J (V={V}, exact arcs)", shoot.cost(ex.v),
-                           4 * V ** 2 / (3 * t1), "closed form (order-1 boundary arc)", 1e-10,
-                           time.perf_counter() - start,
-                           {"residual": ex.residual_norm, "t_in": shoot.unpack_arcs(ex.v)[0][0]}))
-    # The force clipped as well: full force, a ramp onto the limit, the limit.
-    k = _kernels(examples.velocity_limited_move(bounded=True), cache_dir)
+        rows.append(Result("velocity_limit", f"J (V={V})", r.objective, 4 * V ** 2 / (3 * t1),
+                           "closed form (order-1 boundary arc)", 1e-10,
+                           time.perf_counter() - start, _details(r)))
+    h = Homotopy(examples.velocity_limited_move(bounded=True), cache_dir=cache_dir)
     for V, umax in ((1.2, 8.0), (1.25, 7.0)):
         start = time.perf_counter()
-        v = SingleShooting(k, [V, 1.0, umax]).solve([12.0, 6.0, 0, 0]).v
-        rho, sol = parameter_continuation(k, [V, 1.0, umax], "rho", np.logspace(0, 2, 9), v)[-1]
-        shoot, v = MultiArcShooting.from_penalty(k, [V, 0.0, umax], [("boundary", "v_max")], sol,
-                                                 [V, rho, umax])
-        ex = shoot.solve(v)
+        r = h.solve([V, 0.0, umax], ([-20, -20], [20, 20]), seed=seed)
         J, _, s_full = examples.velocity_limited_move_bounded_exact(V, umax)
-        rows.append(Result("velocity_limit", f"J (V={V}, |u|<={umax}, exact arcs)",
-                           shoot.cost(ex.v), J, "closed form (saturated, then a boundary arc)",
-                           1e-10, time.perf_counter() - start,
-                           {"residual": ex.residual_norm, "full_force": s_full,
-                            "bound_violation": shoot.diagnostics(ex.v)["boundary_bound_violation"]}))
+        rows.append(Result("velocity_limit", f"J (V={V}, |u|<={umax})", r.objective, J,
+                           "closed form (saturated, then a boundary arc)", 1e-10,
+                           time.perf_counter() - start, {**_details(r), "full_force": s_full}))
     return rows
-
-
-def speed_limit_record(V, D, umax, cache_dir=None, eps_min=1e-4, record=None):
-    """Smoothed min time, penalty -> exact arcs -> eps down -> bang-bang exact arcs.
-
-    Returns ``(bang-bang shooting, its solution, eps path, smoothed kernels)``.
-    ``record`` wraps the shooting classes (the animation records evaluations).
-    """
-    wrap = record or (lambda cls: cls)
-    ks = _kernels(examples.speed_limited_min_time(smoothed=True), cache_dir)
-    kb = _kernels(examples.speed_limited_min_time(), cache_dir)
-    base = [V, D, umax]
-    single = SingleShooting(ks, base + [1.0, 1.0])
-    # Costates on the scale of the unconstrained run (full power for half of
-    # t_guess, peaking at v_peak): lam_x ~ -1/v_peak, lam_v(0) ~ lam_x t_guess/2.
-    t_guess = 2 * np.sqrt(D / umax)
-    v_peak = umax * t_guess / 2
-
-    def sample(r):
-        lx = -r.uniform(0.3, 3) / v_peak
-        return single.pack([lx, lx * r.uniform(0.2, 1.5) * t_guess / 2],
-                           tf=r.uniform(0.8, 1.5) * t_guess)
-
-    sol, _ = single.multistart(sample, n_tries=200, seed=0)
-    path = parameter_continuation(ks, base + [1.0, 1.0], "rho", np.logspace(0, 1.5, 7), sol.v,
-                                  solve_options=dict(tol=1e-9))
-    rho, pen = path[-1]
-    arcs = [("boundary", "v_max")]
-    shoot, v = wrap(MultiArcShooting).from_penalty(ks, base + [1.0, 0.0], arcs, pen,
-                                                   base + [1.0, rho])
-    first = shoot.solve(v)
-
-    def solve_at(eps, guess):
-        return wrap(MultiArcShooting)(ks, base + [eps, 0.0], arcs).solve(guess)
-
-    n = int(round(4 * np.log10(1 / eps_min))) + 1
-    eps_path = [(1.0, first)] + continuation(solve_at, 1.0, np.logspace(0, np.log10(eps_min), n)[1:],
-                                             first.v)
-    bang = wrap(MultiArcShooting)(kb, base, arcs)
-    return bang, bang.solve(eps_path[-1][1].v), {"penalty": path, "seed": (shoot, v),
-                                                  "eps": eps_path}, ks
 
 
 def run_speed_limit(cache_dir=None, seed=0):
     """Minimum time with |u| <= u_max and v <= V: t_f = D/V + V/u_max."""
     rows = []
+    h = Homotopy(examples.speed_limited_min_time(), cache_dir=cache_dir)
     for V, D, umax in ((1.0, 3.0, 1.0), (2.0, 10.0, 0.5)):
         start = time.perf_counter()
-        bang, sol, _, _ = speed_limit_record(V, D, umax, cache_dir)
-        t_in, t_out, _ = bang.unpack_arcs(sol.v)[0]
-        rows.append(Result("speed_limit", f"t_f (V={V}, D={D}, u_max={umax}, bang-bang exact arcs)",
-                           sol.tf, D / V + V / umax, "closed form (full power, cruise, brake)",
-                           1e-10, time.perf_counter() - start,
-                           {"residual": sol.residual_norm, "t_in": t_in, "t_out": t_out}))
+        r = h.solve(
+            [V, D, umax], ([-3, -3], [0, 3]), (1.0, 20.0), seed=seed)
+        rows.append(Result("speed_limit", f"t_f (V={V}, D={D}, u_max={umax})", r.solution.tf,
+                           D / V + V / umax, "closed form (full power, cruise, brake)", 1e-10,
+                           time.perf_counter() - start, _details(r)))
     return rows
 
 
@@ -580,85 +442,36 @@ GODDARD_REFERENCE = {"free": (1.01283692, 0.19885626), "q": (1.01271727, 0.20407
 GODDARD_SOURCE = "Graichen & Petit (2008), collocation with saturation functions"
 
 
-def goddard_kernels(cache_dir=None):
-    """Kernels of Goddard's rocket without and with the dynamic-pressure limit."""
-    return tuple(build_kernels(derive(examples.goddard(q), singular=True), cache_dir=cache_dir)
-                 for q in (False, True))
-
-
-def goddard_free(k, guess=None, record=None):
-    """Full thrust, singular, coast, from a rough guess (or ``guess``)."""
-    cls = record(MultiArcShooting) if record else MultiArcShooting
-    shoot = cls(k, list(examples.GODDARD_PARAMS), [("singular", "u", "upper", "lower")])
-    if guess is None:
-        guess = shoot.pack_arcs(shoot.pack([-2.5, -0.18, 0.005], [-0.03], 0.2), [(0.03, 0.1)])
-    return shoot, shoot.solve(guess)
-
-
-def goddard_q(kq, free, free_sol, record=None):
-    """Full thrust, ride q = q_max, singular, coast: seeded from the free solution.
-
-    The free extremal's q rises above the limit and falls back: the crossings
-    give the boundary arc, the jump ``pi`` starts at 0 and the singular arc
-    ends where the free one did.
-    """
-    params = list(examples.GODDARD_Q_PARAMS)
-    cls = record(MultiArcShooting) if record else MultiArcShooting
-    shoot = cls(kq, params, [("boundary", "q_max"), ("singular", "u", "upper", "lower", "joined")])
-    tr = free.trajectory(free_sol.v, n_points=4001)
-    h, v = tr["z"][:, 0], tr["z"][:, 1]
-    q = params[5] * v ** 2 * np.exp(-params[1] * (h - 1)) / 2
-    over = np.flatnonzero(q > params[6])
-    t_in, t_out = tr["t"][over[0]], tr["t"][over[-1]]
-    t_sing = free.unpack_arcs(free_sol.v)[0][1]
-    guess = shoot.pack_arcs(free_sol.v, [(t_in, t_out, [0.0]), max(t_sing, t_out + 1e-3)])
-    return shoot, shoot.solve(guess), guess
+GODDARD_COSTATES = ([-6, -0.5, -0.1], [-1, 0, 0.1])
+GODDARD_FINAL_TIME = (0.15, 0.3)
 
 
 def run_goddard(cache_dir=None, seed=0):
-    """Full thrust, singular, coast: the exact structure from random guesses.
-
-    Then the dynamic-pressure limit, from that solution."""
-    start = time.perf_counter()
-    k, kq = goddard_kernels(cache_dir)
-    shoot = MultiArcShooting(k, list(examples.GODDARD_PARAMS),
-                             [("singular", "u", "upper", "lower")])
-
-    def sample(rng):
-        lam0 = [-rng.uniform(1, 6), -rng.uniform(0, 0.5), rng.uniform(-0.1, 0.1)]
-        t_in = rng.uniform(0.005, 0.05)
-        return shoot.pack_arcs(shoot.pack(lam0, [rng.uniform(-0.2, 0.2)], rng.uniform(0.15, 0.3)),
-                               [(t_in, t_in + rng.uniform(0.02, 0.1))])
-
-    sol, tries = shoot.multistart(sample, n_tries=200, seed=seed)
-    t_in, t_out = shoot.unpack_arcs(sol.v)[0]
-    h_f = shoot.trajectory(sol.v)["z"][-1, 0]
-    d = shoot.diagnostics(sol.v)
-    details = {"residual": sol.residual_norm, "random guesses": tries, "t_in": t_in,
-               "t_out": t_out, "singular thrust": [float(d["singular_u"][0][0][0]),
-                                                   float(d["singular_u"][0][1][0])],
-               "Legendre-Clebsch min": d["singular_legendre"][0][0]}
-    seconds = time.perf_counter() - start
+    """Full thrust, singular, coast; then with q <= 10: full thrust, the limit ridden, a
+    joined singular arc and a coast. Both structures are found, from one costate box."""
+    rows = []
     (h_ref, tf_ref), (hq_ref, tfq_ref) = GODDARD_REFERENCE["free"], GODDARD_REFERENCE["q"]
-    rows = [Result("goddard", "h(t_f)", h_f, h_ref, GODDARD_SOURCE, 1e-8, seconds, details),
-            Result("goddard", "t_f", sol.tf, tf_ref, GODDARD_SOURCE, 1e-7, seconds, details)]
-
-    start = time.perf_counter()
-    qshoot, qsol, _ = goddard_q(kq, shoot, sol)
-    (b_in, b_out, pi), s_out = qshoot.unpack_arcs(qsol.v)
-    hq_f = qshoot.trajectory(qsol.v)["z"][-1, 0]
-    d = qshoot.diagnostics(qsol.v)
-    details = {"residual": qsol.residual_norm, "max q - q_max": qsol.max_violation,
-               "boundary arc": [b_in, b_out], "singular exit": s_out, "pi": float(pi[0]),
-               "mu min": d["boundary_mu"][0][0], "Legendre-Clebsch min":
-               d["singular_legendre"][0][0]}
-    seconds = time.perf_counter() - start
-    # The reference keeps q strictly inside the limit (saturation functions
-    # with a vanishing penalty); the exact extremal climbs 4e-7 higher.
-    rows += [Result("goddard", "h(t_f), q <= 10", hq_f, hq_ref, GODDARD_SOURCE, 1e-6, seconds,
-                    details),
-             Result("goddard", "t_f, q <= 10", qsol.tf, tfq_ref, GODDARD_SOURCE, 2e-4, seconds,
-                    details)]
+    for q, params, tols in ((False, examples.GODDARD_PARAMS, (1e-8, 1e-7)),
+                            (True, examples.GODDARD_Q_PARAMS, (1e-6, 2e-4))):
+        start = time.perf_counter()
+        r = Homotopy(examples.goddard(q), cache_dir=cache_dir).solve(
+            list(params), GODDARD_COSTATES, GODDARD_FINAL_TIME, seed=seed)
+        d = r.shooting.diagnostics(r.solution.v)
+        details = {**_details(r), "junctions": [np.round(np.atleast_1d(a[:2] if isinstance(
+                       a, tuple) else a), 6).tolist() for a in r.shooting.unpack_arcs(r.solution.v)],
+                   "Legendre-Clebsch min": d["singular_legendre"][0][0]}
+        if q:
+            details["max q - q_max"] = r.solution.max_violation
+            details["mu min"] = d["boundary_mu"][0][0]
+        seconds = time.perf_counter() - start
+        label = ", q <= 10" if q else ""
+        refs = (hq_ref, tfq_ref) if q else (h_ref, tf_ref)
+        # The reference keeps q strictly inside the limit (saturation functions
+        # with a vanishing penalty); the exact extremal climbs 4e-7 higher.
+        rows += [Result("goddard", f"h(t_f){label}", -r.objective, refs[0], GODDARD_SOURCE,
+                        tols[0], seconds, details),
+                 Result("goddard", f"t_f{label}", r.solution.tf, refs[1], GODDARD_SOURCE,
+                        tols[1], seconds, details)]
     return rows
 
 

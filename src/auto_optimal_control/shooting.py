@@ -34,7 +34,8 @@ instead: given the sequence of boundary arcs, touch points and singular arcs,
 its unknowns add the junction times and the costate-jump multipliers, and its
 Jacobian chains the STM across the arcs. :meth:`MultiArcShooting.from_penalty`
 seeds it from a penalty solution, :meth:`MultiArcShooting.from_smoothed` from
-a smoothed problem.
+a smoothed problem, given the structure.
+:mod:`auto_optimal_control.homotopy` finds the structure itself.
 """
 
 from dataclasses import dataclass

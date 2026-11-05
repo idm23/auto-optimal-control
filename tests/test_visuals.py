@@ -1,6 +1,6 @@
 """benchmarks/animate.py: recording a solve and rendering it (needs the viz group).
 
-Slow (the direct method alone takes about 40 s); run with ``--runslow``.
+Slow (the cart-pole's comparison direct method alone takes about 40 s); run with ``--runslow``.
 """
 
 import sys
@@ -17,11 +17,13 @@ def test_cart_pole_recording_and_animation(kernel_cache, tmp_path):
     pytest.importorskip("matplotlib")
     from visuals import cart_pole
 
-    data = cart_pole.record(cache_dir=kernel_cache, n_random=6, verbose=False)
-    # The recorded stages end where the benchmark does.
+    data = cart_pole.record(cache_dir=kernel_cache, n_random=30, verbose=False)
+    # The recorded stages end where the benchmark does: the direct method (a
+    # comparison) at the published solution, the search below it.
     assert data["direct_defect"][-1] < 1e-8
     assert data["polish_R"][-1] < 1e-10
-    assert data["published_J"] == pytest.approx(58.80819, rel=2e-5)
+    assert data["published_J"] == pytest.approx(58.80819, rel=1e-4)
+    assert data["best_J"] < data["published_J"]
     assert np.isfinite(data["polish_z"]).all()
     np.testing.assert_allclose(data["published_z"][-1], [1.0, np.pi, 0, 0], atol=1e-6)
     cart_pole.save(data, tmp_path / "rec.npz")

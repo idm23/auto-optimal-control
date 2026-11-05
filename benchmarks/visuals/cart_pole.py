@@ -1,16 +1,19 @@
 """Record and animate how the cart-pole benchmark is solved.
 
-The solve has three stages, and the animation adds a fourth:
+The animation has four stages:
 
-1. **Direct method.** Kelly's Hermite-Simpson collocation, from his
-   straight-line guess (SLSQP). The early iterates are not dynamically
-   feasible: the pole turns at a constant rate while the cart slides.
-2. **Indirect polish.** Costates lifted from the direct solution, then Newton
-   on the shooting residual. Every evaluation is a real extremal of the cart
-   and pole, which misses the target until the residual vanishes.
-3. **Random costate search.** Shooting from random costates finds several
+1. **Direct method, for comparison.** Kelly's Hermite-Simpson collocation,
+   from his straight-line guess (SLSQP). The early iterates are not
+   dynamically feasible: the pole turns at a constant rate while the cart
+   slides. It converges to the published solution. Nothing below uses it.
+2. **Shooting from a random draw.** Newton on the shooting residual from the
+   first random costate draw that converges. Every evaluation is a real
+   extremal of the cart and pole, which misses the target until the residual
+   vanishes.
+3. **Random costate search.** Shooting from random costates finds the
    extremals, one cheaper than the published solution.
-4. **Both extremals**, swinging up side by side with their controls.
+4. **Both solutions**, the direct one and the cheapest extremal, swinging up
+   side by side with their controls.
 
 :func:`record` runs the solves and returns plain arrays (it can be saved with
 :func:`save` and reloaded with :func:`load`). :func:`animate` renders them
@@ -21,8 +24,7 @@ import time
 
 import numpy as np
 
-from problems import (CART_POLE_PARAMS, ShootingError, SingleShooting, _kernels,
-                      cart_pole_problem, costates_from_direct)
+from problems import CART_POLE_PARAMS, ShootingError, SingleShooting, _kernels, cart_pole_problem
 from visuals.common import BLUE, GRID, INK, INK2, MUTED, ORANGE, SURF, Problem, write
 
 PUBLISHED_J = 58.80819
@@ -46,11 +48,10 @@ PROBLEM = Problem(
                       r"$g = 9.81$ m/s$^2$"),
     ],
     solved_by=[
-        "Direct: Kelly's Hermite-Simpson collocation from his straight-line guess (SLSQP).",
-        "Indirect polish: costates lifted from the direct solution, then Newton on the "
-        "shooting residual.",
-        "Random costate search: shooting from random costates finds other extremals, one "
-        "cheaper than the published one.",
+        "For comparison: Kelly's direct method (Hermite-Simpson collocation, SLSQP) from his "
+        "straight-line guess.",
+        "Indirect: Newton on the shooting residual from random costate draws, nothing else.",
+        "The random search finds the extremals, one cheaper than the published solution.",
     ],
     summary="min ∫u² dt,  cart-pole swing-up in T = 2 s,  |u| ≤ 20 N,  cart moves 1 m",
     source="Reference: M. Kelly, An introduction to trajectory optimization, SIAM Review 59 "
@@ -155,33 +156,14 @@ def record(cache_dir=None, seed=0, n_random=400, verbose=True):
     say(f"direct: {len(its) - 1} SLSQP iterations, J = {its[-1][2]:.4f} "
         f"({time.perf_counter() - start:.0f} s)")
 
-    # 2. Indirect polish from the lifted costates.
-    shoot = _RecordingShooting(k, p)
-    lam0 = costates_from_direct(t_dir, its[-1][0], its[-1][1], p)
-    v0 = shoot.guess_multipliers(lam0)
-    shoot.evaluations.clear()
-    sol = shoot.solve(v0)
-    polish_t, polish_z, polish_u, polish_R = [], [], [], []
-    for v, R in [(v0, np.nan)] + shoot.evaluations:
-        s = _sample(k, np.concatenate([np.zeros(4), v[:4]]), p)
-        if s is None:
-            continue
-        polish_t.append(s[0])
-        polish_z.append(s[1])
-        polish_u.append(s[2])
-        polish_R.append(R)
-    out["polish_t"], out["polish_z"] = polish_t[0], np.array(polish_z)
-    out["polish_u"], out["polish_R"] = np.array(polish_u), np.array(polish_R)
-    out["published_lam0"] = sol.lam0
-    out["published_J"] = k.propagate(0, sol.z0, p[6], p, cost=True)["cost"]
-    say(f"polish: {len(shoot.evaluations)} evaluations, J = {out['published_J']:.6f}")
-
-    # 3. Random costate search.
+    # 2 and 3. Random costate search; the first draw that converges is
+    # replayed with every Newton evaluation kept.
     plain = SingleShooting(k, p)
     rng = np.random.default_rng(seed)
-    tries_J, tries_z, tries_ok = [], [], []
+    draws, tries_J, tries_z, tries_ok = [], [], [], []
     for _ in range(n_random):
         lam0 = rng.uniform(-60, 60, 4)
+        draws.append(lam0)
         try:
             s = plain.solve(plain.guess_multipliers(lam0))
         except (ShootingError, RuntimeError, ValueError, np.linalg.LinAlgError):
@@ -195,25 +177,41 @@ def record(cache_dir=None, seed=0, n_random=400, verbose=True):
     out["search_J"], out["search_ok"] = np.array(tries_J), np.array(tries_ok)
     out["search_z"] = np.array(tries_z)
     out["best_found"] = bool(out["search_ok"].any())
+    # The direct solution, resampled for the motion (orange).
+    from scipy.interpolate import CubicSpline
+    t_m = np.linspace(0, p[6], 241)
+    out["published_t"] = t_m
+    out["published_z"] = CubicSpline(t_dir, its[-1][0])(t_m)
+    out["published_u"] = CubicSpline(t_dir, its[-1][1])(t_m)
+    out["published_J"] = its[-1][2]
     if not out["best_found"]:
-        # Too few starts to converge: show the published extremal in its place.
-        say(f"search: none of {n_random} starts converged")
-        out["best_J"] = out["published_J"]
-        lam_best = sol.lam0
-    else:
-        best = int(np.nanargmin(out["search_J"]))
-        out["best_J"] = out["search_J"][best]
-        say(f"search: {int(out['search_ok'].sum())}/{n_random} converged, "
-            f"best J = {out['best_J']:.6f} ({time.perf_counter() - start:.0f} s)")
-        rng = np.random.default_rng(seed)
-        for _ in range(best + 1):           # replay the draw that found the best one
-            lam0 = rng.uniform(-60, 60, 4)
-        lam_best = plain.solve(plain.guess_multipliers(lam0)).lam0
+        raise RuntimeError(f"none of {n_random} random costate draws converged: use more")
+    first = int(np.flatnonzero(out["search_ok"])[0])
+    shoot = _RecordingShooting(k, p)
+    v0 = shoot.guess_multipliers(draws[first])
+    shoot.evaluations.clear()
+    shoot.solve(v0)
+    polish_t, polish_z, polish_u, polish_R = [], [], [], []
+    for v, R in [(v0, np.nan)] + shoot.evaluations:
+        smp = _sample(k, np.concatenate([np.zeros(4), v[:4]]), p)
+        if smp is None:
+            continue
+        polish_t.append(smp[0])
+        polish_z.append(smp[1])
+        polish_u.append(smp[2])
+        polish_R.append(R)
+    out["polish_t"], out["polish_z"] = polish_t[0], np.array(polish_z)
+    out["polish_u"], out["polish_R"] = np.array(polish_u), np.array(polish_R)
+    say(f"draw {first + 1}: {len(shoot.evaluations)} evaluations to converge")
+    best = int(np.nanargmin(out["search_J"]))
+    out["best_J"] = out["search_J"][best]
+    say(f"search: {int(out['search_ok'].sum())}/{n_random} converged, "
+        f"best J = {out['best_J']:.6f} ({time.perf_counter() - start:.0f} s)")
+    lam_best = plain.solve(plain.guess_multipliers(draws[best])).lam0
 
-    # 4. Both extremals, finely sampled for the motion.
-    for name, lam in (("published", sol.lam0), ("best", lam_best)):
-        t, z, u = _sample(k, np.concatenate([np.zeros(4), lam]), p, n=241)
-        out[f"{name}_t"], out[f"{name}_z"], out[f"{name}_u"] = t, z, u
+    # 4. The cheapest extremal, finely sampled for the motion.
+    t, z, u = _sample(k, np.concatenate([np.zeros(4), lam_best]), p, n=241)
+    out["best_t"], out["best_z"], out["best_u"] = t, z, u
     return out
 
 
@@ -263,21 +261,21 @@ def _frame_plan(data, fps):
 
 
 CAPTIONS = {
-    "direct": ("1  Direct method (Kelly 2017)",
-               "Hermite-Simpson collocation from a straight-line guess. Early iterates are not "
-               "dynamically feasible:\nthe defects measure how far each is from the equations of "
-               "motion."),
-    "polish": ("2  Indirect polish",
-               "Costates lifted from the direct solution, then Newton on the shooting residual. "
+    "direct": ("1  For comparison: the direct method (Kelly 2017)",
+               "Hermite-Simpson collocation from a straight-line guess; nothing below uses it. "
+               "Early iterates are not\ndynamically feasible: the defects measure how far each is "
+               "from the equations of motion."),
+    "polish": ("2  Shooting from a random costate draw",
+               "Newton on the shooting residual from the first random draw that converges. "
                "Every evaluation is a\nreal extremal of the cart and pole; it misses the target "
                "until the residual vanishes."),
     "search": ("3  Random costate search",
                "Shooting from random costates. {n_ok} of {n} starts converge, {to_best} to an "
                "extremal that never\npushes the cart past x = 1 and costs {gain:.1f}% less "
                "than the published one."),
-    "motion": ("4  The two extremals",
-               "Published (orange) and the cheaper one found by search (blue), in real time "
-               "(slowed 2x)."),
+    "motion": ("4  The two solutions",
+               "The direct solution, which is the published one (orange), and the cheaper "
+               "extremal found by search (blue),\nin real time (slowed 2x)."),
 }
 
 
@@ -495,7 +493,7 @@ def animate(data, path, fps=30, dpi=100, stills_dir=None):
             for h in head:
                 h.set_xdata([tt])
             state["mhead"].set_xdata([tt])
-            status.set_text(f"t = {tt:.2f} s   published J = {data['published_J']:.3f}   "
+            status.set_text(f"t = {tt:.2f} s   direct J = {data['published_J']:.3f}   "
                             f"found J = {data['best_J']:.3f}")
         return ()
 

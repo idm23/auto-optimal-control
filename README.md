@@ -22,9 +22,11 @@ extremal: pick `lambda(t_0)` and get the optimal trajectory, its controls,
 its cost, its switch times, its boundary residuals and, if you want them,
 exact sensitivities. The package doesn't decide how `lambda(t_0)` is chosen.
 Shooting, multiple shooting, continuation, or a learned sampler that proposes
-costates can all be built on top of the same calls. One such layer ships with
-the package, optionally: `auto_optimal_control.shooting`, a single-shooting
-system with exact Jacobians and a solver.
+costates can all be built on top of the same calls. Two such layers ship with
+the package, optionally: `auto_optimal_control.shooting`, single and multi-arc
+shooting with exact Jacobians and a solver, and `auto_optimal_control.homotopy`,
+which goes from a costate distribution to the exact extremal with no other
+input: it smooths, penalizes, continues and finds the arc structure itself.
 
 ## Installation
 
@@ -166,6 +168,67 @@ sol.success, sol.lam0, sol.tf, sol.z0
 `solve` needs SciPy: `pip install auto-optimal-control[shooting]`. The
 residual and Jacobian need only NumPy, so a sampler or any other solver can
 use them directly.
+
+## Solving from a costate distribution (optional)
+
+`auto_optimal_control.homotopy` needs only the problem, its parameter values
+and a distribution to draw initial costates (and `t_f`, when it is free)
+from. Everything else is found: the smoothing of bang-bang controls, the
+penalties on path constraints, the continuation schedule, and the arc
+structure (boundary arcs, touch points, singular arcs, joins) of the exact
+solution.
+
+```python
+from auto_optimal_control import examples
+from auto_optimal_control.homotopy import Homotopy
+
+h = Homotopy(examples.goddard(dynamic_pressure=True))   # derives and compiles once
+r = h.solve(examples.GODDARD_Q_PARAMS,
+            costates=([-6, -0.5, -0.1], [-1, 0, 0.1]),  # uniform box, or rng -> lam0
+            final_time=(0.15, 0.3))
+r.exact, r.arcs        # True, (('boundary', 'q_max'), ('singular', 'u', 'upper', 'lower', 'joined'))
+r.objective, r.solution.tf, r.shooting.unpack_arcs(r.solution.v)
+```
+
+How it works:
+
+1. **Regularize.** `regularize(problem)` adds `eps ((u - mid) / half)² / 2`
+   to the running cost for each bang-bang control (its law becomes
+   clipped-linear) and an exterior penalty weight per path constraint, as
+   runtime parameters.
+2. **Sample.** Single shooting from random draws on the regularized problem,
+   at `eps = 1` with the penalties off.
+3. **Continue, in phases.** When a limit is violated, `eps` is held while its
+   penalty weight ramps up from a millionth of a cost-based scale; then
+   `eps` falls. Steps adapt (they grow after a success and halve after a
+   failure) and a secant predictor starts each solve.
+4. **Read the structure and jump.** After each step the regularized solution
+   is read. Intervals where a limit is violated become boundary arcs (or,
+   for order 2, touch points). Stretches where a bang-bang control stays
+   strictly between its bounds, away from a limit, become singular arcs, or
+   the ramps of ordinary switches when they are short. A stretch that
+   leaves a boundary arc becomes a joined singular arc. Each reading gives
+   candidate structures. `MultiArcShooting` on the *exact* problem tries
+   each, seeded with the regularized costates and junction times, jump
+   multipliers fitted to the costates, and a few jittered seeds.
+5. **Accept.** A candidate is accepted when the exact solve converges and
+   passes the necessary conditions it can check: no violation on free arcs,
+   controls within bounds on special arcs, `mu ≥ 0`, `nu ≥ 0`,
+   Legendre–Clebsch, and the held bounds agreeing with the switching
+   function. Among the candidates accepted at one step, the cheapest wins.
+
+Bang-bang switches on free arcs need no reading: they are events of the
+integration. A problem without bang-bang controls or path constraints is
+solved by step 2 alone. The exact structure is usually accepted early, long
+before `eps` is small. Goddard's smoothed problem cannot be continued below
+`eps ≈ 0.02` (single shooting grows like `exp(sqrt(2/eps) t)` near a singular
+arc), but its exact structure is read and solved at `eps ≈ 0.06`.
+
+`r.exact` is `False` when no candidate was accepted. That happens with a limit
+of order 3 or more, two limits active at once, or a structure
+`MultiArcShooting` cannot represent. `r.solution` is then the last
+regularized solution, on `r.shooting` at `r.params`, and `r.message` says why.
+`r.steps` logs the continuation and `r.tries` the random draws.
 
 ## Defining a problem
 
@@ -418,7 +481,7 @@ a speed limit, a singular regulator and Goddard's rocket (singular arcs).
 
 ## Tests
 
-`uv run pytest` (about 30 s; it compiles every example from scratch) checks the following; `uv run pytest --runslow` (about 3 min) adds the benchmarks:
+`uv run pytest` (about a minute; it compiles every example from scratch) checks the following; `uv run pytest --runslow` (about 13 min) adds the benchmarks, the animations and the slower automatic solves:
 
 - **`test_problem.py`:** problem validation.
 - **`test_derivation.py`:** each example's Hamiltonian, control law,
@@ -466,31 +529,41 @@ a speed limit, a singular regulator and Goddard's rocket (singular arcs).
 - **`test_shooting.py`:** `SingleShooting`'s unknown layout, its Jacobian
   against finite differences (including a free initial state), solves
   against closed forms, multistart and continuation.
+- **`test_homotopy.py`:** `regularize` and `exact`. Then the automatic solve,
+  given only a costate box, finds each structure and its closed form:
+  - Bryson–Denham: a touch point and a boundary arc.
+  - The velocity limit with a force bound.
+  - The speed limit: bang-bang with a boundary arc.
+  - The singular regulator.
+  - Goddard: a singular arc, and with `q ≤ 10` a boundary arc joined to a
+    singular arc.
+
+  An order-3 limit comes back flagged as inexact.
 
 ## Benchmarks against the literature
 
 `benchmarks/` solves ten canonical problems from scratch and compares each
-indirect solution with a published value. It starts from random costate
-guesses, uses continuation where needed, and for the cart-pole lifts
-costates from a direct solution. Run them with
+indirect solution with a published value. Each benchmark gives
+`auto_optimal_control.homotopy` the problem, its parameter values and a box
+(or a function) to draw costates and `t_f` from, and nothing else. No
+smoothed or penalized variant is written by hand, no continuation schedule
+is set, and no arc structure is given. Run them with
 `uv run python benchmarks/run.py`; `uv run pytest --runslow`, which CI runs,
-checks them too. They are solved with `auto_optimal_control.shooting`.
+checks them too. Direct methods appear only as comparisons (the cart-pole),
+never as a starting point.
 
 | Benchmark | Quantity | This package | Reference | Source |
 |---|---|---|---|---|
 | Brachistochrone (3 cases) | `t_f` | matches to 1e-13 | closed-form cycloid | — |
-| Bryson–Denham, touch point (`l = 0.2`, ρ = 1e8) | `∫u²/2` | 2.2399263 | 2.24 | closed form (Bryson, Denham & Dreyfus 1963) |
-| Bryson–Denham, boundary arc (`l = 0.1`, ρ = 1e7) | `∫u²/2` | 4.4430848 | 4.4444444 | closed form, `4/(9l)` |
-| Bryson–Denham, both regimes, exact arcs | `∫u²/2` | matches to 1e-14 | closed form | — |
-| Velocity-limited move (order 1, 3 cases), exact arcs | `∫u²/2` | matches to 1e-14 | closed form, `4V²/(3t₁)` | — |
-| Velocity-limited move with a force limit (2 cases), exact arcs | `∫u²/2` | matches to 1e-12 | closed form (saturated, a ramp, the limit) | — |
-| Minimum time with a speed limit (2 cases), bang-bang exact arcs | `t_f` | matches to 1e-15 | closed form, `D/V + V/u_max` | — |
+| Bryson–Denham: a touch point (`l = 0.2`) and a boundary arc (`l = 0.1`) | `∫u²/2` | matches to 1e-15 | closed form (Bryson, Denham & Dreyfus 1963) | — |
+| Velocity-limited move (order 1, 3 cases) | `∫u²/2` | matches to 1e-14 | closed form, `4V²/(3t₁)` | — |
+| Velocity-limited move with a force limit (2 cases) | `∫u²/2` | matches to 1e-13 | closed form (saturated, a ramp, the limit) | — |
+| Minimum time with a speed limit (2 cases), bang-bang | `t_f` | matches to 1e-15 | closed form, `D/V + V/u_max` | — |
 | Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
 | Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
-| Cart-pole swing-up (published extremal) | `∫u²` | 58.807667 | 58.80819 | Kelly (2017) SIAM Review; value from the ASSET reproduction |
-| Cart-pole swing-up (random search) | `∫u²` | **57.944780** | — | this work; checked by an independent simulation |
-| Goddard rocket, singular arc (random guesses) | `h(t_f)`, `t_f` | 1.012836918, 0.198856262 | 1.01283692, 0.19885626 | Graichen & Petit (2008), collocation |
+| Cart-pole swing-up (cheapest extremal found) | `∫u²` | **57.944780** | 58.80819, a different local minimum | Kelly (2017) SIAM Review (direct); this value checked by an independent simulation |
+| Goddard rocket, singular arc | `h(t_f)`, `t_f` | 1.012836918, 0.198856262 | 1.01283692, 0.19885626 | Graichen & Petit (2008), collocation |
 | Goddard rocket with `q ≤ 10`, boundary + joined singular arcs | `h(t_f)`, `t_f` | 1.012717683, 0.204047216 | 1.01271727, 0.20407108 | Graichen & Petit (2008), collocation |
 
 Notes:
@@ -499,16 +572,18 @@ Notes:
   solutions here locate switches exactly. On Earth–Mars, the exact bang-bang
   solution keeps 0.005 kg more mass than the smoothed one (ρ = 1e-5), which is
   the expected sign. It has four switches, at 46.6, 68.0, 142.7 and 290.3 days.
-- **Robot arm:** pure bang-bang with five switches, found by continuation
-  from `L = 1 + ε Σu²` (saturated controls) to ε = 1e-4, then solved exactly.
-  The `u_θ` switch falls at `t_f/2`, by the problem's symmetry.
-- **Bryson–Denham:** the exterior penalty approaches the closed form from
-  below. The gap shrinks as ρ grows, about 3e-5 and 3e-4 at the final
-  weights. Single shooting limits how far ρ can go on the boundary arc: its
-  conditioning grows with ρ.
+- **Robot arm and Earth–Mars:** pure bang-bang, five and four switches. The
+  automatic smoothing falls to `ε ≈ 1e-3` before the exact bang-bang solve
+  is accepted; the switches are located by the integration. The robot arm's
+  `u_θ` switch falls at `t_f/2`, by the problem's symmetry.
+- **Bryson–Denham:** the penalty only has to make the violation readable.
+  For `l = 0.2` the first solve already reads as a touch point; for
+  `l = 0.1` the penalty ramps over 8 steps before the boundary arc is
+  accepted. Both are then exact.
 - **Goddard:** full thrust to `t = 0.023510`, singular thrust (rising from
-  2.14 to 3.09) to `t = 0.072671`, then a coast. The exact structure
-  converges from the third random guess. With `q ≤ 10` (the free climb
+  2.14 to 3.09) to `t = 0.072671`, then a coast. The singular arc is read
+  from the smoothed thrust at `ε ≈ 0.06`, where the smoothed problem's own
+  continuation is close to stalling. With `q ≤ 10` (the free climb
   peaks at `q = 14.9`): full thrust to `t = 0.017480`, the limit ridden to
   `t = 0.074407` (thrust 1.81 to 3.36), a short singular arc to
   `t = 0.078655`, then the coast. This climbs 4e-7 higher than the
@@ -516,14 +591,15 @@ Notes:
   with a vanishing penalty); `t_f` differs by 1.2e-4. An independent SciPy
   simulation of the original equations under this thrust history gives the
   same `h(t_f)` to 1e-14, `m(t_f) = 0.6` and `max q = 10 + 2e-11`.
-- **Cart-pole:** Kelly's direct method from his straight-line guess converges
-  to an extremal where the cart overshoots to `x = 1.18`, with `J = 58.808`.
-  Polishing it indirectly reproduces the published value. Random costate
-  search finds a different extremal that never passes `x = 1`, with
-  `J = 57.945`, 1.5% cheaper. Driving SciPy's integrator on Kelly's equations
-  with that control history confirms it reaches the target with that cost.
-  Indirect search over costate space found a better local optimum than the
-  published one.
+- **Cart-pole:** 43 of 400 random draws in `[-60, 60]⁴` converge, all to
+  the same extremal: the cart never passes `x = 1`, and `J = 57.945`.
+  Driving SciPy's integrator on Kelly's equations with that control history
+  confirms it reaches the target with that cost. For comparison only, the
+  benchmark also runs Kelly's direct method (Hermite–Simpson, N = 40, SLSQP)
+  from his straight-line guess. It converges to the published solution
+  (`J = 58.8125` here, 58.80819 published), a different local minimum where
+  the cart overshoots to `x = 1.18`, 1.5% more expensive. Nothing in the
+  package or the benchmarks starts from it.
 
 ### Watching the solves
 
@@ -541,6 +617,9 @@ uv run --group viz python benchmarks/animate.py goddard --stills
 uv run --group viz python benchmarks/animate.py cart_pole --reuse --out outputs/cart_pole.gif
 ```
 
+The animations show the lower-level tools step by step (`SingleShooting`,
+`continuation`, `MultiArcShooting` with a given structure), so each stage is
+visible. The benchmarks reach the same solutions through `homotopy`.
 Recording runs the solves (seconds to about a minute) and saves
 `<out>.npz`, so `--reuse` re-renders without solving. Each animation opens
 with a card stating the problem (story, formulation, how it is solved) and
@@ -548,13 +627,15 @@ keeps a one-line summary at the bottom. The rendered videos are in
 [`docs/visuals/`](https://github.com/idm23/auto-optimal-control/tree/main/docs/visuals).
 
 - **Cart-pole** ([`cart_pole.mp4`](https://github.com/idm23/auto-optimal-control/blob/main/docs/visuals/cart_pole.mp4)):
-  1. Kelly's direct-method iterates, from a dynamically infeasible
-     straight-line guess.
-  2. Every Newton evaluation of the indirect polish. Each is a real swing-up
-     that misses the target until the residual vanishes.
+  1. For comparison, Kelly's direct-method iterates, from a dynamically
+     infeasible straight-line guess, converging to the published solution.
+     Nothing after it uses it.
+  2. Every Newton evaluation from the first random costate draw that
+     converges. Each is a real swing-up that misses the target until the
+     residual vanishes.
   3. Random costate search, where every converged start finds the cheaper
      extremal.
-  4. Both extremals swinging up side by side.
+  4. The direct solution and the cheaper extremal swinging up side by side.
 - **Earth–Mars** ([`earth_mars.mp4`](https://github.com/idm23/auto-optimal-control/blob/main/docs/visuals/earth_mars.mp4)):
   1. Energy-optimal shooting from random costates, showing every Newton
      evaluation of the winning start as a real flight from Earth.
@@ -600,11 +681,11 @@ keeps a one-line summary at the bottom. The rendered videos are in
 
 ## Limitations
 
-- **Singular arcs need the structure, and order 1.** Outside
+- **Singular arcs are order 1, one control at a time.** Outside
   `MultiArcShooting`, where a switching function stays at zero over an
-  interval, the control takes its lower bound. Exact singular arcs need
-  their place in the structure, an order-1 arc, and one singular control at
-  a time.
+  interval, the control takes its lower bound. Exact singular arcs need an
+  order-1 arc and one singular control at a time; `homotopy` finds their
+  place in the structure.
 - **Saturation corners and switches carry the tolerance.** The corners of
   a clipped (quadratic, bounded) control are kinks in the dynamics. Like
   bang-bang switches, they are located and the integration restarts there.
@@ -612,13 +693,23 @@ keeps a one-line summary at the bottom. The rendered videos are in
   it, so it carries that step's error, at the integration tolerance.
 - **Tangential switches** (`dS/dt = 0` at the switch) have no jump and stop
   propagation with status `-3`.
-- **Exact arcs need the structure.** `MultiArcShooting` solves a given
-  sequence of boundary arcs and touch points. Find it from a penalty
-  solution, or for bang-bang controls from a smoothed problem. Not supported
-  with exact arcs: unit-vector control sets, limits that depend explicitly on
-  time (`H` then jumps at the entry), order 3 or more, two constraints active
-  at once, and a singular arc that ends directly on a boundary arc (the
-  reverse join is supported).
+- **What exact arcs support.** `MultiArcShooting` solves a given sequence
+  of boundary arcs, touch points and singular arcs, and `homotopy` finds that
+  sequence. Not supported: unit-vector control sets, limits that depend
+  explicitly on time (`H` then jumps at the entry), order 3 or more, two
+  constraints active at once, one limit with more than one bang-bang
+  control (the boundary control is solved for every control at once), and a
+  singular arc that ends directly on a boundary arc (the reverse join is
+  supported).
+- **Structure reading is heuristic.** `homotopy` reads arcs from a
+  regularized solution with fixed thresholds (stretches shorter than 2% of
+  the horizon are switches, not singular arcs; limits closer than 2% are
+  joined) and only accepts structures that pass the necessary-condition
+  checks. A structure it cannot read, or that needs arcs shorter than
+  that, is reported with `exact = False`. It returns one extremal: the
+  cheapest accepted at the first step where any is, from the costate draws
+  it was given. Other draws can lead to other extremals (the cart-pole has
+  two).
 - **Order-1 entries with a smooth control converge linearly.** There `H`
   continuity has a double root (the control is continuous, so `H` differs
   only to second order), so Newton converges linearly and junction times
@@ -680,9 +771,10 @@ with PyPI trusted publishing, so no tokens are stored.
    arcs (Goddard with a dynamic-pressure limit)~~. Next: a control-continuity
    entry condition for order-1 limits.
 6. Ways to choose initial costates, as separate optional layers on top of the
-   forward map: ~~single shooting and continuation~~; next, gradient-free
-   search (PSO, differential evolution) and learned samplers of the costate
-   space.
+   forward map: ~~single shooting and continuation~~; ~~automatic homotopy
+   and structure detection from a costate distribution~~; next, arcs with
+   several limits and controls active at once, gradient-free search (PSO,
+   differential evolution) and learned samplers of the costate space.
 
 ## License
 

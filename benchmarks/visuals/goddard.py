@@ -16,7 +16,7 @@ function stays at zero, before coasting to the top.
 
 import numpy as np
 
-from problems import GODDARD_REFERENCE, goddard_free, goddard_kernels, goddard_q
+from problems import GODDARD_REFERENCE, MultiArcShooting, build_kernels, derive
 from visuals.common import (BLUE, GRID, INK2, MUTED, ORANGE, Problem, header, load,
                             recording, save, style, write)
 
@@ -26,6 +26,42 @@ __all__ = ["record", "animate", "save", "load", "PROBLEM"]
 N_T = 401
 P = examples.GODDARD_Q_PARAMS
 RHO0, QMAX, BETA, UMAX = P[5], P[6], P[1], P[3]
+
+
+def goddard_kernels(cache_dir=None):
+    """Kernels of Goddard's rocket without and with the dynamic-pressure limit."""
+    return tuple(build_kernels(derive(examples.goddard(q), singular=True), cache_dir=cache_dir)
+                 for q in (False, True))
+
+
+def goddard_free(k, guess=None, record=None):
+    """Full thrust, singular, coast, from a rough guess (or ``guess``)."""
+    cls = record(MultiArcShooting) if record else MultiArcShooting
+    shoot = cls(k, list(examples.GODDARD_PARAMS), [("singular", "u", "upper", "lower")])
+    if guess is None:
+        guess = shoot.pack_arcs(shoot.pack([-2.5, -0.18, 0.005], [-0.03], 0.2), [(0.03, 0.1)])
+    return shoot, shoot.solve(guess)
+
+
+def goddard_q(kq, free, free_sol, record=None):
+    """Full thrust, ride q = q_max, singular, coast: seeded from the free solution.
+
+    The free extremal's q rises above the limit and falls back: the crossings
+    give the boundary arc, the jump ``pi`` starts at 0 and the singular arc
+    ends where the free one did.
+    """
+    params = list(examples.GODDARD_Q_PARAMS)
+    cls = record(MultiArcShooting) if record else MultiArcShooting
+    shoot = cls(kq, params, [("boundary", "q_max"), ("singular", "u", "upper", "lower", "joined")])
+    tr = free.trajectory(free_sol.v, n_points=4001)
+    h, v = tr["z"][:, 0], tr["z"][:, 1]
+    q = params[5] * v ** 2 * np.exp(-params[1] * (h - 1)) / 2
+    over = np.flatnonzero(q > params[6])
+    t_in, t_out = tr["t"][over[0]], tr["t"][over[-1]]
+    t_sing = free.unpack_arcs(free_sol.v)[0][1]
+    guess = shoot.pack_arcs(free_sol.v, [(t_in, t_out, [0.0]), max(t_sing, t_out + 1e-3)])
+    return shoot, shoot.solve(guess), guess
+
 
 PROBLEM = Problem(
     name="Goddard's rocket: the highest climb through drag",

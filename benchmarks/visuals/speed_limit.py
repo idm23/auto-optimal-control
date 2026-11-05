@@ -21,13 +21,56 @@ arc. So the problem is smoothed first.
 
 import numpy as np
 
-from problems import speed_limit_record
+from problems import (MultiArcShooting, SingleShooting, _kernels, continuation, examples,
+                      parameter_continuation)
 from visuals.common import (BLUE, GRID, INK2, MUTED, ORANGE, Problem, header, load,
                             recording, save, style, write)
 
 __all__ = ["record", "animate", "save", "load", "PROBLEM"]
 V, D, UMAX = 1.0, 3.0, 1.0
 N_T = 401
+
+
+def speed_limit_record(V, D, umax, cache_dir=None, eps_min=1e-4, record=None):
+    """Smoothed min time, penalty -> exact arcs -> eps down -> bang-bang exact arcs.
+
+    Returns ``(bang-bang shooting, its solution, eps path, smoothed kernels)``.
+    ``record`` wraps the shooting classes (the animation records evaluations).
+    """
+    wrap = record or (lambda cls: cls)
+    ks = _kernels(examples.speed_limited_min_time(smoothed=True), cache_dir)
+    kb = _kernels(examples.speed_limited_min_time(), cache_dir)
+    base = [V, D, umax]
+    single = SingleShooting(ks, base + [1.0, 1.0])
+    # Costates on the scale of the unconstrained run (full power for half of
+    # t_guess, peaking at v_peak): lam_x ~ -1/v_peak, lam_v(0) ~ lam_x t_guess/2.
+    t_guess = 2 * np.sqrt(D / umax)
+    v_peak = umax * t_guess / 2
+
+    def sample(r):
+        lx = -r.uniform(0.3, 3) / v_peak
+        return single.pack([lx, lx * r.uniform(0.2, 1.5) * t_guess / 2],
+                           tf=r.uniform(0.8, 1.5) * t_guess)
+
+    sol, _ = single.multistart(sample, n_tries=200, seed=0)
+    path = parameter_continuation(ks, base + [1.0, 1.0], "rho", np.logspace(0, 1.5, 7), sol.v,
+                                  solve_options=dict(tol=1e-9))
+    rho, pen = path[-1]
+    arcs = [("boundary", "v_max")]
+    shoot, v = wrap(MultiArcShooting).from_penalty(ks, base + [1.0, 0.0], arcs, pen,
+                                                   base + [1.0, rho])
+    first = shoot.solve(v)
+
+    def solve_at(eps, guess):
+        return wrap(MultiArcShooting)(ks, base + [eps, 0.0], arcs).solve(guess)
+
+    n = int(round(4 * np.log10(1 / eps_min))) + 1
+    eps_path = [(1.0, first)] + continuation(solve_at, 1.0, np.logspace(0, np.log10(eps_min), n)[1:],
+                                             first.v)
+    bang = wrap(MultiArcShooting)(kb, base, arcs)
+    return bang, bang.solve(eps_path[-1][1].v), {"penalty": path, "seed": (shoot, v),
+                                                  "eps": eps_path}, ks
+
 
 PROBLEM = Problem(
     name="Train between stations: minimum time under a speed limit",
@@ -91,7 +134,6 @@ def record(cache_dir=None, verbose=True):
     out.update(rho=np.array([r for r, _ in parts["penalty"]]), pen_z=np.array(Z),
                pen_u=np.array(U), pen_tf=np.array(TF), pen_viol=np.array(viol))
     # 2. Smoothing continuation with exact arcs.
-    from problems import MultiArcShooting
 
     Z, U, TF, EPS = [], [], [], []
     for eps, s in parts["eps"]:
