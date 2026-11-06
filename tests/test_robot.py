@@ -265,6 +265,16 @@ def test_minimum_time_through_run_time_arcs(monkeypatch, kernel_cache, taus, t_f
     assert r.solution.tf == pytest.approx(t_f, abs=2e-6)
 
 
+def test_axes_with_exactly_tied_moves_solve(kernel_cache):
+    # Their saturation corners coincide: integration used to run for ever there. The time
+    # of one axis alone is (32 D / J)^(1/3), a little longer with the jerk cost shared.
+    with pytest.warns(UserWarning, match="not unique"):
+        h = Homotopy(examples.two_axes_min_time(), cache_dir=kernel_cache)
+    r = h.solve([1.0, 1.0, 1.0], ([-3] * 6, [3] * 6), (1.0, 20.0))
+    assert r.exact and r.tries == 0
+    assert r.solution.tf == pytest.approx(32 ** (1 / 3), abs=1e-3) and r.solution.tf > 32 ** (1 / 3)
+
+
 def test_the_common_time_shares_the_cost_of_time():
     # Each path: (T, lam, H), with H = 1 + (the component's part). Alone a component would
     # stop where H = 0; two of them at the same time share it, so they stop later.
