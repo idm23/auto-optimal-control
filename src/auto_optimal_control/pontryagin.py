@@ -47,8 +47,10 @@ import itertools
 import warnings
 from dataclasses import dataclass
 
+import numpy as np
 import sympy as sp
 
+from auto_optimal_control.functions import greater, lesser
 from auto_optimal_control.problem import Box, OptimalControlProblem, UnitVector
 
 
@@ -136,7 +138,11 @@ class BoundaryArc:
     bang-bang (``H`` linear, so ``dH/du`` is the switching function): ``u_b``
     is then the control that rides the limit, which must lie within its
     bounds along the arc. ``bounds`` maps each bounded control to its
-    ``(lower, upper)``; shooting reports how far ``u_b`` leaves them.
+    ``(lower, upper)``; shooting reports how far ``u_b`` leaves them. When
+    riding leaves a line of controls (one more control than limits) and
+    ``H`` is quadratic, the bounds are kept instead: ``u_b`` is the best
+    point of the line within them (:func:`_clipped_on_line`), so a jerk can
+    sit at its bound while the other rides the torque limit.
 
     An arc that rides several limits at once (:attr:`PontryaginSystem.boundary_sets`)
     adjoins each with its own multiplier: the controls and ``mu_i`` solve
@@ -509,6 +515,7 @@ def _riding(problem, H, gqs, constraints=()):
             return None
         sol = sols[0]
     sol = {k: _tidy(v) for k, v in sol.items()}
+    sol = _clipped_on_line(problem, lagrangian, gqs, mus, sol)
     law = {u: sol[u] for u in problem.controls}
     xdot = tuple(_tidy(f.subs(law)) for f in problem.dynamics)
     lamdot = tuple(_tidy(-sp.diff(lagrangian, x).subs(sol)) for x in problem.states)
@@ -518,6 +525,110 @@ def _riding(problem, H, gqs, constraints=()):
                        hamiltonian=_tidy(H.subs(law)),
                        running_cost=_tidy(problem.running_cost.subs(law)),
                        bounds=bounds, constraints=tuple(constraints), multipliers=multipliers)
+
+
+def _sample_values(symbols, n, seed=0):
+    """Random values of ``symbols``: positive ones in [0.5, 2], others in [-2, 2]."""
+    rng = np.random.default_rng(seed)
+    return [rng.uniform(0.5, 2.0, n) if s.is_positive else rng.uniform(-2.0, 2.0, n)
+            for s in symbols]
+
+
+def _pivot(gqs, controls):
+    """The control to keep as the free parameter of the line ``g^(q) = 0``: the one
+    whose complement's coefficient matrix stays farthest from singular at random
+    points (so the others can be solved for along the whole arc)."""
+    best, best_score = None, -1.0
+    symbols = sorted(set().union(*(g.free_symbols for g in gqs)) - set(controls), key=str)
+    values = _sample_values(symbols, 64)
+    for p in controls:
+        others = [u for u in controls if u != p]
+        A = sp.Matrix([[sp.diff(g, u) for u in others] for g in gqs])
+        det = sp.lambdify(symbols, A.det(), "numpy")(*values)
+        score = float(np.min(np.abs(np.broadcast_to(det, (64,)))))
+        if score > best_score:
+            best, best_score = p, score
+    return best
+
+
+def _clipped_on_line(problem, lagrangian, gqs, mus, sol):
+    """``sol`` with the controls kept within their :class:`Box` bounds, when riding
+    leaves a line of controls (one more control than limits ridden).
+
+    ``g^(q) = 0`` then leaves one free parameter ``s``: the control kept free
+    (:func:`_pivot`), with the others affine in it. Each bound on a control
+    is an interval of ``s``, and with ``H`` convex the best point within all
+    of them is the unconstrained ``s*`` clipped to their intersection. The
+    multipliers come from the stationarity rows of the controls not at a
+    bound, so they change branch where the clip does. Otherwise ``sol`` is
+    returned as it is (and shooting reports how far the controls leave their
+    bounds).
+    """
+    controls = list(problem.controls)
+    boxes = {cs.control: cs for cs in problem.control_sets
+             if isinstance(cs, Box) and cs.lower.is_finite and cs.upper.is_finite}
+    if len(controls) != len(gqs) + 1 or not boxes:
+        return sol
+    p = _pivot(gqs, controls)
+    others = [u for u in controls if u != p]
+    along = _solve_linear(list(gqs), others)
+    if along is None:
+        return sol
+    # Candidate ends of the interval of s, with the control each one saturates.
+    lows, highs = [], []
+    if p in boxes:
+        lows.append((boxes[p].lower, p))
+        highs.append((boxes[p].upper, p))
+    for u in others:
+        if u not in boxes:
+            continue
+        beta = sp.diff(along[u], p)
+        if _is_zero(beta):
+            continue                     # fixed by the limits alone: only checked
+        alpha = along[u].subs(p, 0)
+        a, b = (boxes[u].lower - alpha) / beta, (boxes[u].upper - alpha) / beta
+        lows.append((lesser(a, b), u))
+        highs.append((greater(a, b), u))
+    if not lows:
+        return sol
+    s_star = sol[p]
+    low = greater(*[e for e, _ in lows])
+    high = lesser(*[e for e, _ in highs])
+    s = lesser(greater(s_star, low), high)
+    clipped = {p: s, **{u: along[u].subs(p, s) for u in others}}
+
+    def at_end(ends, is_low):
+        """Per multiplier, its value when the tightest of ``ends`` binds."""
+        values = []
+        for e, u in ends:
+            # The rows of every control but the saturated one give the multipliers.
+            rows = [sp.diff(lagrangian, v).subs(clipped) for v in controls if v != u]
+            m = _solve_linear(rows, mus)
+            if m is None:
+                return None
+            values.append(m)
+        out = {}
+        for mu in mus:
+            # The tightest end: the largest low, or the smallest high. Each test is a
+            # single comparison (SymPy's Piecewise can recurse on compound ones).
+            pick = values[-1][mu]
+            for k in range(len(ends) - 2, -1, -1):
+                e = ends[k][0]
+                # End k binds if it is at least as tight as every later one (an
+                # earlier one that is tighter was picked before it).
+                tests = [(e - f >= 0) if is_low else (f - e >= 0) for f, _ in ends[k + 1:]]
+                pick = sp.Piecewise((values[k][mu], sp.And(*tests)), (pick, True))
+            out[mu] = pick
+        return out
+
+    below, above = at_end(lows, True), at_end(highs, False)
+    if below is None or above is None:
+        return sol
+    out = dict(clipped)
+    for mu in mus:
+        out[mu] = sp.Piecewise((below[mu], s_star - low < 0), (above[mu], s_star - high > 0),
+                               (sol[mu], True))
+    return out
 
 
 def _exclusive(problem, a, b):

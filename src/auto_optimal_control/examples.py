@@ -372,6 +372,55 @@ def two_link_arm():
 TWO_LINK_ARM_PARAMS = (1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 1.0)   # m1, m2, l1, l2, T, q1f, q2f
 
 
+def two_link_arm_min_time():
+    """The arm of :func:`two_link_arm` in minimum time, with bounded jerks.
+
+    ``min t_f`` subject to ``|j_i| <= j_max`` and the torque limits
+    ``|tau_i| <= tau_i_max``, rest to rest from ``q = 0`` to ``(q1f, q2f)``.
+    As stated it is degenerate (:mod:`~auto_optimal_control.policy`): the
+    joints are coupled only through the torque limits, so whichever joint
+    does not set the time has a whole family of optimal motions.
+    :class:`~auto_optimal_control.homotopy.Homotopy` adds a secondary cost
+    by default, ``w int ((j1 / j_max)^2 + (j2 / j_max)^2) / 2``.
+
+    params: ``m1, m2, l1, l2, q1f, q2f, j_max, tau1_max, tau2_max``.
+    """
+    t = sp.Symbol("t", real=True)
+    q1, q2, w1, w2, a1, a2, j1, j2 = sp.symbols("q1 q2 w1 w2 a1 a2 j1 j2", real=True)
+    m1, m2, l1, l2, j_max, tau1_max, tau2_max = sp.symbols(
+        "m1 m2 l1 l2 j_max tau1_max tau2_max", positive=True)
+    q1f, q2f = sp.symbols("q1f q2f", real=True)
+    tau1, tau2 = two_link_arm_torques(m1, m2, l1, l2, q2, w1, w2, a1, a2)
+    return OptimalControlProblem(
+        name="two_link_arm_min_time", time=t, states=[q1, q2, w1, w2, a1, a2],
+        controls=[j1, j2], params=[m1, m2, l1, l2, q1f, q2f, j_max, tau1_max, tau2_max],
+        dynamics=[w1, w2, a1, a2, j1, j2], running_cost=1, initial_state=[0] * 6,
+        final_state={q1: q1f, q2: q2f, w1: 0, w2: 0, a1: 0, a2: 0},
+        control_sets=[Box(j1, -j_max, j_max), Box(j2, -j_max, j_max)],
+        path_constraints=[PathConstraint(tau1 - tau1_max, "tau1_max"),
+                          PathConstraint(-tau1 - tau1_max, "tau1_min"),
+                          PathConstraint(tau2 - tau2_max, "tau2_max"),
+                          PathConstraint(-tau2 - tau2_max, "tau2_min")])
+
+
+def two_axes_min_time():
+    """Two jerk-limited axes in minimum time, rest to rest over ``D1`` and ``D2`` (Lecture 18).
+
+    Uncoupled, so degenerate: only the slower axis sets ``t_f``. Alone, axis
+    ``i`` takes ``(32 D_i / J)^(1/3)``.
+
+    params: ``J, D1, D2``.
+    """
+    t = sp.Symbol("t", real=True)
+    x1, v1, a1, x2, v2, a2, j1, j2 = sp.symbols("x1 v1 a1 x2 v2 a2 j1 j2", real=True)
+    J, D1, D2 = sp.symbols("J D1 D2", positive=True)
+    return OptimalControlProblem(
+        name="two_axes_min_time", time=t, states=[x1, v1, a1, x2, v2, a2], controls=[j1, j2],
+        params=[J, D1, D2], dynamics=[v1, a1, j1, v2, a2, j2], running_cost=1,
+        initial_state=[0] * 6, final_state={x1: D1, v1: 0, a1: 0, x2: D2, v2: 0, a2: 0},
+        control_sets=[Box(j1, -J, J), Box(j2, -J, J)])
+
+
 def goddard(dynamic_pressure=False):
     """Goddard's rocket: the highest climb on a given propellant, through drag.
 
@@ -437,6 +486,8 @@ def all_examples():
         "speed_limited_min_time_smoothed": speed_limited_min_time(smoothed=True),
         "jerk_limited_move": jerk_limited_move(),
         "two_link_arm": two_link_arm(),
+        "two_link_arm_min_time": two_link_arm_min_time(),
+        "two_axes_min_time": two_axes_min_time(),
         "singular_regulator": singular_regulator(),
         "singular_regulator_smoothed": singular_regulator(smoothed=True),
         "goddard": goddard(),

@@ -7,7 +7,7 @@ bang-bang controls, the state–costate dynamics and the boundary-condition
 residuals.
 
 **Documentation:** https://idm23.github.io/auto-optimal-control/, including an
-eighteen-lecture course on optimal control by the indirect method that
+nineteen-lecture course on optimal control by the indirect method that
 covers every part of the package.
 
 Integration runs on
@@ -239,6 +239,57 @@ before `eps` is small. Goddard's smoothed problem cannot be continued below
 `eps ≈ 0.02` (single shooting grows like `exp(sqrt(2/eps) t)` near a singular
 arc), but its exact structure is read and solved at `eps ≈ 0.06`.
 
+### When the optimal motion is not unique
+
+Some problems have a unique optimal *cost* but not a unique optimal
+*motion*. Minimum time on two axes is the standard case: only the slower
+axis sets the time, and every motion of the faster one that finishes in
+time is optimal (Lecture 18). Its costates vanish, its control is
+undetermined and shooting's Jacobian is singular. `policy.analyze` finds
+this from the problem statement, before anything is solved:
+
+- it splits the states and controls into **components**, joined by the
+  dynamics, by cost terms and terminal constraints that involve several of
+  them, and by unit-vector sets (path constraints couple only while active,
+  so they don't count);
+- a component is **priced** when some cost term involves it;
+- the problem is **degenerate** when a controlled component is unpriced,
+  unless it is the only one and the cost is a free final time. A control
+  that enters the Hamiltonian linearly with no bound on one side is flagged
+  too.
+
+```python
+from auto_optimal_control.policy import Lexicographic, SecondaryCost, analyze
+
+print(analyze(examples.two_link_arm_min_time()))
+# not unique as stated:
+# - 2 separate controlled parts share only the final time (j1; j2): only the
+#   slowest sets it, and every motion of the others that finishes in time is optimal
+# - the path constraints tau1_max, tau1_min, tau2_max, tau2_min link these parts,
+#   but only while they are active; between them the freedom remains
+```
+
+A degenerate problem needs a **policy**: which of the equally good motions
+to return. `Homotopy(problem, policy=...)` takes:
+
+- `"auto"` (the default): `SecondaryCost()` when the problem is degenerate,
+  with a warning; nothing otherwise;
+- `SecondaryCost(weight=1e-2)`: adds `w ∫ Σ (u/s)²/2` over the controls of
+  the unpriced components (and unbounded linear ones), `s` each control's
+  bound. It is well posed for any `w > 0` and selects the smoothest of the
+  fastest motions. The final time comes out slightly above the minimum, and
+  the conditioning grows like `1/w`, so `w` cannot go to zero;
+- `Lexicographic(delta=1e-2)`: each component's own minimum time first
+  (each is well posed), then `t_f = (1 + δ) T*` fixed and the effort
+  minimized. Only for pure minimum-time problems whose components no path
+  constraint links;
+- `"as_stated"` to solve the problem anyway, or `"strict"` to raise
+  `IllPosedProblem` instead.
+
+`r.policy` records what was applied. On Lecture 18's two axes,
+`Lexicographic` recovers `T* = 6.8399037867` exactly and the slack axis as
+the minimum-jerk quintic to 1e-14.
+
 `r.exact` is `False` when no candidate was accepted. That happens with a limit
 of order 3 or more, two limits active at once, or a structure
 `MultiArcShooting` cannot represent. `r.solution` is then the last
@@ -439,6 +490,23 @@ each structure as the limits tighten, and an independent simulation of the
 arm under the jerk found confirms the cost, the final state and torques
 exactly at their limits.
 
+### Minimum time on the arm
+
+`examples.two_link_arm_min_time()` asks the arm for its fastest move, with
+bounded jerks `|jᵢ| ≤ j_max` as well as the torque limits. As stated it is
+degenerate (above), so the default policy adds `0.01 ∫ ((j₁/j_max)² +
+(j₂/j_max)²)/2`. Riding one torque limit then leaves a *line* of jerk
+pairs, and the jerk bounds cut it to a segment: `derive` keeps the riding
+controls on it by clipping the line's parameter, with the multiplier taken
+from the rows of the controls off their bounds:
+
+```python
+h = Homotopy(examples.two_link_arm_min_time())    # warns, and adds the secondary cost
+r = h.solve([1, 1, 1, 1, 1.5, 1.0, 1.0, 1.5, 0.4], ([-3] * 6, [3] * 6), (1.0, 20.0))
+r.solution.tf     # 4.164857, against 3.634 with loose torques
+r.arcs            # joint 2 rides its upper limit, then both joints their lower ones, overlapping
+```
+
 ### Singular arcs
 
 Where a bang-bang control's switching function `S` vanishes on an interval,
@@ -610,7 +678,7 @@ a speed limit, a singular regulator and Goddard's rocket (singular arcs).
 
 ## Benchmarks against the literature
 
-`benchmarks/` solves twelve canonical problems from scratch and compares each
+`benchmarks/` solves thirteen canonical problems from scratch and compares each
 indirect solution with a published value. Each benchmark gives
 `auto_optimal_control.homotopy` the problem, its parameter values and a box
 (or a function) to draw costates and `t_f` from, and nothing else. No
@@ -625,10 +693,11 @@ never as a starting point.
 | Brachistochrone (3 cases) | `t_f` | matches to 1e-13 | closed-form cycloid | — |
 | Bryson–Denham: a touch point (`l = 0.2`) and a boundary arc (`l = 0.1`) | `∫u²/2` | matches to 1e-15 | closed form (Bryson, Denham & Dreyfus 1963) | — |
 | Velocity-limited move (order 1, 3 cases) | `∫u²/2` | matches to 1e-14 | closed form, `4V²/(3t₁)` | — |
-| Velocity-limited move with a force limit (2 cases) | `∫u²/2` | matches to 1e-13 | closed form (saturated, a ramp, the limit) | — |
+| Velocity-limited move with a force limit (2 cases) | `∫u²/2` | matches to 2e-9 (the cost at the saturation corner) | closed form (saturated, a ramp, the limit) | — |
 | Minimum time with a speed limit (2 cases), bang-bang | `t_f` | matches to 1e-15 | closed form, `D/V + V/u_max` | — |
 | Jerk-limited S-curve (4 regimes: every limit, no cruise, no acceleration arc, none) | `t_f` | matches to 1e-14 | closed form (seven-segment profile) | — |
 | Two-link arm, minimum jerk with torque limits (arcs in sequence, overlapping, nested) | `∫j²/2` | 1840.217, 7464.658, 14418.501 | matches to 1e-6 | independent SciPy simulation of the arm under this jerk |
+| Two-link arm, minimum time with bounded jerks and torque limits (default policy: `+ 0.01 ∫(j/j_max)²/2`; joint 1, joint 2, both overlapping) | `t_f + w∫(j/j_max)²/2` | 3.685578, 3.743091, 4.184111 | matches to 2e-9 | independent SciPy simulation of the arm under this jerk |
 | Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
 | Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
@@ -773,7 +842,13 @@ keeps a one-line summary at the bottom. The rendered videos are in
   are supported when `H` is regular in the controls, as with minimum
   jerk), one limit with more than one bang-bang control (the boundary
   control is solved for every control at once), and a singular arc that
-  ends directly on a boundary arc (the reverse join is supported).
+  ends directly on a boundary arc (the reverse join is supported). Bounded
+  smooth controls on a boundary arc are clipped when riding leaves a line
+  of controls (one more control than limits ridden); with more freedom
+  than that, they are only checked against their bounds.
+- **Degeneracy is read from the structure of the statement.** `analyze`
+  sees decoupled parts and unpriced controls; it cannot see a problem that
+  is coupled but flat in some direction for numerical reasons.
 - **Structure finding is heuristic.** The penalty route reads arcs from a
   regularized solution with fixed thresholds (stretches shorter than 2% of
   the horizon are switches, not singular arcs; limits closer than 2% are
@@ -850,9 +925,10 @@ with PyPI trusted publishing, so no tokens are stored.
 7. Robot motion: ~~a jerk-limited axis with acceleration and speed limits
    (the S-curve), its structure found by tightening the limits; a planar
    two-link arm with jerk control and torque limits, each involving both
-   controls, ridden one at a time, overlapping or nested~~; next,
-   minimum-time and singular arcs on a constrained arm, and learned warm
-   starts to scale to six joints.
+   controls, ridden one at a time, overlapping or nested; non-unique
+   problems detected from the statement, with selectable policies; the arm
+   in minimum time with bounded jerks~~; next, learned warm starts to scale
+   to six joints.
 
 ## License
 

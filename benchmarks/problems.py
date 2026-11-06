@@ -14,6 +14,9 @@ Spacecraft:
 Robotics:
 - **robot_arm**: minimum-time COPS robot arm, bang-bang in three torques
   (Dolan, Moré & Munson, COPS 3.0).
+- **two_link_arm** / **two_link_arm_min_time**: a planar two-link arm with
+  joint torque limits, minimum jerk; then minimum time with bounded jerks
+  (degenerate as stated: the default policy adds a small jerk cost).
 - **cart_pole**: minimum-effort cart-pole swing-up (Kelly 2017, SIAM Review).
   Kelly's direct method is run for comparison only.
 
@@ -420,8 +423,11 @@ def run_velocity_limit(cache_dir=None, seed=0):
         start = time.perf_counter()
         r = h.solve([V, 0.0, umax], ([-20, -20], [20, 20]), seed=seed)
         J, _, s_full = examples.velocity_limited_move_bounded_exact(V, umax)
+        # The cost carries the integration error at the saturation corner (the
+        # restart state comes from the dense output of the step that found it):
+        # about 1e-9, though the unknowns match the closed form to 1e-13.
         rows.append(Result("velocity_limit", f"J (V={V}, |u|<={umax})", r.objective, J,
-                           "closed form (saturated, then a boundary arc)", 1e-10,
+                           "closed form (saturated, then a boundary arc)", 2e-9,
                            time.perf_counter() - start, {**_details(r), "full_force": s_full}))
     return rows
 
@@ -500,6 +506,52 @@ def run_two_link_arm(cache_dir=None, seed=0):
     return rows
 
 
+ARM_MIN_TIME_CASES = ((2.2, 2.0, "joint 1 limited"), (2.5, 0.6, "joint 2 limited"),
+                      (1.5, 0.4, "both, overlapping"))
+ARM_MIN_TIME_BASE = [1.0, 1.0, 1.0, 1.0, 1.5, 1.0, 1.0]   # m1, m2, l1, l2, q1f, q2f, j_max
+ARM_MIN_TIME_WEIGHT = 1e-2                               # the default SecondaryCost weight
+
+
+def simulate_two_link_arm_min_time(r, params, weight=ARM_MIN_TIME_WEIGHT):
+    """``t_f + w int (j / j_max)^2 / 2`` and the final state under the extremal's jerk,
+    simulated with SciPy apart from the package; the peak torques and jerk along it."""
+    from scipy.integrate import solve_ivp
+    from scipy.interpolate import interp1d
+
+    tr = r.shooting.trajectory(r.solution.v, n_points=20001)
+    t, u = tr["t"], tr["u"]
+    keep = np.concatenate([[True], np.diff(t) > 0])
+    jerk = interp1d(t[keep], u[keep], axis=0)
+    tf, jmax = t[-1], params[6]
+    sol = solve_ivp(lambda s, x: np.concatenate([x[2:6], jerk(min(s, tf))]), (0, tf),
+                    np.zeros(6), rtol=1e-10, atol=1e-12, max_step=1e-3)
+    tau1, tau2 = examples.two_link_arm_torques(*params[:4], *tr["z"][:, 1:6].T)
+    cost = tf + weight * float(np.trapezoid(0.5 * ((u[keep] / jmax) ** 2).sum(axis=1), t[keep]))
+    return (cost, sol.y[:, -1], float(np.abs(tau1).max()), float(np.abs(tau2).max()),
+            float(np.abs(u).max()))
+
+
+def run_two_link_arm_min_time(cache_dir=None, seed=0):
+    """The arm in minimum time with bounded jerks and torque limits: degenerate as
+    stated, so the default policy adds the secondary cost ``w int (j / j_max)^2 / 2``."""
+    rows = []
+    h = Homotopy(examples.two_link_arm_min_time(), cache_dir=cache_dir)
+    for t1, t2, how in ARM_MIN_TIME_CASES:
+        start = time.perf_counter()
+        p = ARM_MIN_TIME_BASE + [t1, t2]
+        r = h.solve(p, ([-3] * 6, [3] * 6), (1.0, 20.0), seed=seed)
+        seconds = time.perf_counter() - start
+        cost, xf, tau1, tau2, jerk = simulate_two_link_arm_min_time(r, p)
+        details = {**_details(r), "t_f": r.solution.tf, "max |tau1|": tau1,
+                   "max |tau2|": tau2, "max |j|": jerk,
+                   "final state error": float(np.abs(xf - [p[4], p[5], 0, 0, 0, 0]).max())}
+        rows.append(Result("two_link_arm_min_time", f"t_f + w int j^2 (tau <= {t1}/{t2}, {how})",
+                           r.objective, cost,
+                           "independent SciPy simulation of the arm under this jerk", 1e-6,
+                           seconds, details))
+    return rows
+
+
 GODDARD_REFERENCE = {"free": (1.01283692, 0.19885626), "q": (1.01271727, 0.20407108)}
 GODDARD_SOURCE = "Graichen & Petit (2008), collocation with saturation functions"
 
@@ -544,6 +596,7 @@ ALL = {
     "speed_limit": run_speed_limit,
     "jerk_limited": run_jerk_limited,
     "two_link_arm": run_two_link_arm,
+    "two_link_arm_min_time": run_two_link_arm_min_time,
     "orbit_raising": run_orbit_raising,
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,

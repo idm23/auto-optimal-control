@@ -366,8 +366,9 @@ class MultiArcShooting(SingleShooting):
       unknowns are each arc's ``(t_in, t_out, pi)``, in the order the arcs
       are entered. ``("boundary", c)`` is ``("enter", c), ("exit", c)``.
 
-    At the junctions of an order-1 limit, when ``H`` is regular (unbounded
-    controls, no control sets), the control and the costates are continuous
+    At the junctions of an order-1 limit, when ``H`` is regular (no
+    bang-bang controls) and the free side's controls are strictly inside
+    their bounds there, the control and the costates are continuous
     (Jacobson, Lele & Speyer 1971). There ``H`` continuity is replaced by
     conditions with simple roots: ``dg/dt = 0`` just before the entry (the
     arrival is tangential) and ``mu = 0`` at the exit, which gives exact
@@ -667,18 +668,29 @@ class MultiArcShooting(SingleShooting):
             return next(iter(active))
         return self.kernels.boundary_set(sorted(active))
 
-    def _regular_junction(self, kind, q):
-        """Whether a boundary arc's junctions drop ``H`` continuity: an order-1
-        limit when ``H`` is regular (strictly convex in unbounded controls: no
-        control sets, so the control is interior at the junction). There the
-        control and the costates are
-        continuous (Jacobson, Lele & Speyer 1971): the state arrives
-        tangentially, so ``dg/dt = 0`` at the entry, and ``mu`` vanishes at the
-        exit. Both have simple roots, where ``H`` continuity and ``g = 0`` alone
-        have double ones (Newton then converges only linearly).
-        ``junctions="hamiltonian"`` keeps ``H`` continuity everywhere."""
-        return (kind == "boundary" and q == 1 and self.junctions == "auto"
-                and not self.kernels.N_SWITCHING and not self.kernels.system.problem.control_sets)
+    def _regular_junction(self, kind, q, side, t, z):
+        """Whether a boundary arc's junction drops ``H`` continuity: an order-1
+        limit when ``H`` is regular (strictly convex, or convex with clipped
+        controls: no bang-bang) and the controls on the free side, ``side``,
+        are strictly inside their bounds at ``(t, z)``. There the control and
+        the costates are continuous (Jacobson, Lele & Speyer 1971): the state
+        arrives tangentially, so ``dg/dt = 0`` at the entry, and ``mu``
+        vanishes at the exit. Both have simple roots, where ``H`` continuity
+        and ``g = 0`` alone have double ones (Newton then converges only
+        linearly). A control still at its bound at the junction jumps there
+        instead, and ``H`` continuity is kept. ``junctions="hamiltonian"``
+        keeps it everywhere."""
+        if not (kind == "boundary" and q == 1 and self.junctions == "auto"
+                and not self.kernels.N_SWITCHING):
+            return False
+        k, p = self.kernels, self.params
+        if not k.system.problem.control_sets:
+            return True
+        u = k.control(t, z, p) if side is None else k.boundary_control(side, t, z, p)
+        lo, hi = k.control_bounds(t, z, p)
+        u, lo, hi = (np.asarray(a, dtype=float) for a in (u, lo, hi))
+        margin = 1e-12 * np.maximum(1.0, np.abs(u))
+        return bool(np.all((u - lo > margin) & (hi - u > margin)))
 
     def _rate_of(self, c, arc_id, t, z, flags):
         """``(dg_c/dt, its t-derivative, its z-gradient)`` along the free arc
@@ -765,7 +777,7 @@ class MultiArcShooting(SingleShooting):
             z = r["z"]
             t, dt = t_ev, d_ev
             if ev == "out":
-                if self._regular_junction(kind, q):
+                if self._regular_junction(kind, q, self._arc_id(active - {c}), t, z):
                     # mu_c vanishes at the exit of an order-1 limit when H is
                     # regular: a simple root, where H continuity has a double one.
                     val, Mt, Mz = self._multiplier_of(aid, c, t, z)
@@ -797,7 +809,7 @@ class MultiArcShooting(SingleShooting):
                 Dp[n:, mult_cols] -= Nx[used].T
             if kind == "boundary":
                 after = self._arc_id(active | {c})
-                if self._regular_junction(kind, q):
+                if self._regular_junction(kind, q, aid, t, z):
                     # The arrival is tangential: g peaks there along the arc
                     # before, so dg/dt = 0 (a simple root in t_in, where g = 0
                     # alone has a double one).

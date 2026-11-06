@@ -7,7 +7,7 @@ the package is built on. Each lecture opens with a challenge the previous
 ones cannot meet, tells the story of the people who met it, develops the
 theory with SymPy doing the algebra in view, and then solves real problems
 with the package, showing all of the code and checking the answers
-independently. A reader who works through all eighteen can use every part
+independently. A reader who works through all nineteen can use every part
 of the package; Lecture 17 maps each module to the lectures that teach it.
 
 Diagrams drawn to illustrate an idea, rather than to solve something, have their
@@ -61,6 +61,7 @@ it. Everything else shows its code.
 | # | Lecture | The challenge | New ideas |
 |---|---|---|---|
 | 18 | {doc}`18_minimum_time_several_axes` | the fastest motion of several axes | non-unique optima; vanishing costates and singular Jacobians; a secondary cost, a two-stage solve, a fixed path |
+| 19 | {doc}`19_choosing_among_equal_motions` | a two-link arm in minimum time, with bounded jerks and torque limits | non-uniqueness read from the statement; selectable policies; riding a limit with bounded controls |
 
 To run the notebooks yourself, clone the repository and run
 `uv sync --group docs`, then open them in Jupyter. They need a C compiler,
@@ -89,6 +90,7 @@ takes a few seconds per problem; later runs load them from the cache.
 16_spacecraft
 17_practice
 18_minimum_time_several_axes
+19_choosing_among_equal_motions
 ```
 
 ## Sources
