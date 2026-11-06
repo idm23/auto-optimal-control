@@ -64,6 +64,8 @@ import re
 import sympy as sp
 from sympy.printing.c import C99CodePrinter
 
+from auto_optimal_control.functions import greater, lesser
+
 
 class _Printer(C99CodePrinter):
     """C99 printer that expands small integer and half-integer powers."""
@@ -114,6 +116,19 @@ def c_identifier(name):
 
 def _abs(a):
     return sp.Piecewise((a, a >= 0), (-a, True))
+
+
+def _arc_smooth(expr):
+    """:func:`_smooth` for boundary-arc kernels: Abs as Piecewise, and Min/Max as the
+    unevaluated :mod:`~auto_optimal_control.functions` (clipped riding controls
+    are built with those already; see there for why).
+    """
+    expr = sp.sympify(expr)
+    if expr.has(sp.Abs):
+        expr = expr.replace(sp.Abs, _abs)
+    if expr.has(sp.Min, sp.Max):
+        expr = expr.replace(sp.Min, lesser).replace(sp.Max, greater)
+    return expr
 
 
 def _smooth(expr):
@@ -412,7 +427,7 @@ def generate_c(pmp, name=None):
     riding += [(NC + k, arc, None) for k, (_, arc) in enumerate(pmp.boundary_sets)]
     arc_ids = [c for c, _, _ in riding]
     for c, arc, sc in riding:
-        Fb = [_smooth(e) for e in arc.dynamics]
+        Fb = [_arc_smooth(e) for e in arc.dynamics]
         Fb_c = [e.xreplace(mapping) for e in Fb]
         tag = f"{P}b{c}_"
         f = _Function(f"int {tag}rhs({tzp}, double* dz)", ["t", "z", "p"])
@@ -425,9 +440,9 @@ def generate_c(pmp, name=None):
             for j, zj in enumerate(z_c):
                 f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
         functions.append(f)
-        Hb_c = _smooth(arc.hamiltonian).xreplace(mapping)
+        Hb_c = _arc_smooth(arc.hamiltonian).xreplace(mapping)
         f = _Function(f"int {tag}hamiltonian({tzp}, double* H)", ["t", "z", "p"])
-        f.out("H[0]", _smooth(arc.hamiltonian))
+        f.out("H[0]", _arc_smooth(arc.hamiltonian))
         functions.append(f)
         f = _Function(f"int {tag}hamiltonian_grad({tzp}, double* Ht, double* Hz)",
                       ["t", "z", "p", "Ht", "Hz"])
@@ -437,23 +452,23 @@ def generate_c(pmp, name=None):
             f.out(f"Hz[{j}]", sp.diff(Hb_c, zj))
         functions.append(f)
         f = _Function(f"int {tag}cost_rate({tzp}, double* L)", ["t", "z", "p"])
-        f.out("L[0]", _smooth(arc.running_cost))
+        f.out("L[0]", _arc_smooth(arc.running_cost))
         functions.append(f)
         f = _Function(f"int {tag}control({tzp}, double* u)", ["t", "z", "p", "u"])
         for k, u in enumerate(pmp.controls):
-            f.out(f"u[{k}]", _smooth(arc.control[u]))
+            f.out(f"u[{k}]", _arc_smooth(arc.control[u]))
         functions.append(f)
         mults = arc.multipliers or (arc.multiplier,)
         f = _Function(f"int {tag}multiplier({tzp}, double* mu)", ["t", "z", "p"])
         for i, m in enumerate(mults):
-            f.out(f"mu[{i}]", _smooth(m))
+            f.out(f"mu[{i}]", _arc_smooth(m))
         functions.append(f)
         f = _Function(f"int {tag}multiplier_grad({tzp}, double* Mt, double* Mz)",
                       ["t", "z", "p", "Mt", "Mz"])
         f.zero_fill("Mt", MSET)
         f.zero_fill("Mz", MSET * NZ)
         for i, m in enumerate(mults):
-            m_c = _smooth(m).xreplace(mapping)
+            m_c = _arc_smooth(m).xreplace(mapping)
             f.out(f"Mt[{i}]", sp.diff(m_c, t_sym))
             for j, zj in enumerate(z_c):
                 f.out(f"Mz[{i * NZ + j}]", sp.diff(m_c, zj))

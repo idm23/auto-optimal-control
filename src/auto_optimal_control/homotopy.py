@@ -4,6 +4,13 @@
 solves) takes the problem, its parameter values and a distribution of
 initial costates (and of ``t_f`` when it is free). Everything else is found:
 
+0. **Check the statement.** :func:`~auto_optimal_control.policy.analyze`
+   reads whether the optimal motion is unique (it is not when some
+   controlled part of the problem is in no cost term, as in minimum time
+   on several axes). If it is not, a policy chooses among the equally good
+   motions: by default a small secondary cost, with a warning (see
+   :mod:`~auto_optimal_control.policy` and ``Homotopy(policy=...)``).
+
 1. **Regularize.** :func:`regularize` adds a smoothing term
    ``eps ((u - mid) / half)^2 / 2`` to the running cost for each bang-bang
    control (its law becomes clipped-linear), and for each path constraint
@@ -66,12 +73,14 @@ at once, a structure outside what :class:`MultiArcShooting` represents),
 
 import itertools
 import time
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
 import sympy as sp
 
 from auto_optimal_control.build import build_kernels
+from auto_optimal_control.policy import Lexicographic, SecondaryCost, analyze, resolve
 from auto_optimal_control.pontryagin import derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
 from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting
@@ -182,7 +191,10 @@ class HomotopyResult:
     as :class:`MultiArcShooting` entries (empty: free arcs only, bang-bang
     switches included). ``objective`` is the exact cost ``phi + int L`` of
     an exact solution. ``steps`` logs the continuation, ``tries`` the random
-    draws of the first solve, and ``message`` says how it ended.
+    draws of the first solve, and ``message`` says how it ended. ``policy``
+    describes the policy applied to a degenerate problem (empty: solved as
+    stated); with :class:`~auto_optimal_control.policy.Lexicographic`,
+    ``stages`` holds the minimum-time result of each component.
     """
 
     solution: object
@@ -194,6 +206,8 @@ class HomotopyResult:
     steps: list = field(default_factory=list)
     tries: int = 0
     message: str = ""
+    policy: str = ""
+    stages: list = field(default_factory=list)
 
     @property
     def success(self):
@@ -219,9 +233,33 @@ class Homotopy:
         Integration tolerances of the shooting.
     verbose : bool or int
         Print each step; 2 also prints every solve of the active-set route.
+    policy : str or policy object
+        What to do when the problem's optimal motion is not unique as stated
+        (:mod:`~auto_optimal_control.policy`): ``"auto"`` (a
+        :class:`~auto_optimal_control.policy.SecondaryCost` when needed),
+        ``"as_stated"``, ``"strict"`` (raise), or a ``SecondaryCost`` or
+        ``Lexicographic``. ``analysis`` holds what was found and
+        ``problem`` the problem actually solved.
     """
 
-    def __init__(self, problem, *, cache_dir=None, rtol=1e-12, atol=1e-12, verbose=False):
+    def __init__(self, problem, *, cache_dir=None, rtol=1e-12, atol=1e-12, verbose=False,
+                 policy="auto"):
+        self.stated = problem
+        self.analysis = analyze(problem)
+        self.policy = resolve(policy, self.analysis)
+        self.policy_text = "" if self.policy is None else self.policy.describe(self.analysis)
+        self._stages = None
+        if isinstance(self.policy, SecondaryCost):
+            problem = self.policy.apply(problem, self.analysis)
+        elif isinstance(self.policy, Lexicographic):
+            parts, problem = self.policy.stages(problem, self.analysis)
+            self._stages = [(Homotopy(sub, cache_dir=cache_dir, rtol=rtol, atol=atol,
+                                      verbose=verbose, policy="as_stated"), idx)
+                            for sub, idx in parts]
+        if self.policy is not None and policy == "auto":
+            name = self.stated.name or "problem"
+            warnings.warn(f"{name}: {self.analysis}\nApplied the default policy, "
+                          f"{self.policy_text}. Pass policy= to choose another.", stacklevel=2)
         self.problem = problem
         self.params = None
         self.cache_dir = cache_dir
@@ -1057,9 +1095,52 @@ class Homotopy:
 
     # -- the whole solve --------------------------------------------------------
 
-    def solve(self, params, costates, final_time=None, *, n_tries=200, seed=0, eps0=1.0,
-              s_max=10.0, max_steps=300, n_jitter=6, tol=1e-10):
+    def solve(self, params, costates, final_time=None, **options):
         """From a costate distribution to the exact extremal.
+
+        ``params`` are the values of the stated problem's parameters; the
+        policy, if one applies, is handled here (see :class:`Homotopy`).
+        The options are those of :meth:`_solve`. Returns a
+        :class:`HomotopyResult`.
+        """
+        params = np.asarray(params, dtype=float).reshape(-1)
+        if len(params) != len(self.stated.params):
+            raise ValueError(f"expected {len(self.stated.params)} parameters "
+                             f"{[str(p) for p in self.stated.params]}, got {len(params)}")
+        if self._stages is None:
+            r = self._solve(params, costates, final_time, **options)
+        else:
+            r = self._lexicographic(params, costates, final_time, **options)
+        r.policy = self.policy_text
+        return r
+
+    def _lexicographic(self, params, costates, final_time, **options):
+        """Each component's minimum time, then minimum effort at ``(1 + delta) T*``."""
+        stages, times = [], []
+        for h, idx in self._stages:
+            if callable(costates):
+                part = lambda rng, f=costates, idx=idx: np.asarray(f(rng))[idx]
+            else:
+                part = tuple(np.asarray(b, dtype=float)[idx] for b in costates)
+            r = h.solve(params, part, final_time, **options)
+            stages.append(r)
+            if not r.exact:
+                r0 = HomotopyResult(r.solution, r.shooting, (), False, np.nan, None,
+                                    r.steps, r.tries,
+                                    f"the minimum time of component {len(stages)} was not "
+                                    f"found: {r.message}", stages=stages)
+                return r0
+            times.append(r.solution.tf)
+        tf = (1.0 + self.policy.delta) * max(times)
+        self._say(f"lexicographic: component minimum times {times}, t_f = {tf}")
+        r = self._solve(np.append(params, tf), costates, None, **options)
+        r.stages = stages
+        r.message = (f"t_f = (1 + {self.policy.delta}) * {max(times):.12g}; " + r.message)
+        return r
+
+    def _solve(self, params, costates, final_time=None, *, n_tries=200, seed=0, eps0=1.0,
+               s_max=10.0, max_steps=300, n_jitter=6, tol=1e-10):
+        """The automatic solve of ``self.problem`` (the stated problem with its policy).
 
         ``params`` are the values of ``problem.params``; penalty weights the
         problem defines are not used (:func:`regularize` replaces them), so
@@ -1298,7 +1379,7 @@ def _budget(method, n):
 
 
 def solve(problem, params, costates, final_time=None, *, cache_dir=None, verbose=False,
-          **options):
+          policy="auto", **options):
     """:meth:`Homotopy.solve` in one call: see :class:`Homotopy` and the module docs."""
-    return Homotopy(problem, cache_dir=cache_dir, verbose=verbose).solve(
+    return Homotopy(problem, cache_dir=cache_dir, verbose=verbose, policy=policy).solve(
         params, costates, final_time, **options)
