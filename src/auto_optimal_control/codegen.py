@@ -613,11 +613,14 @@ def generate_c(pmp, name=None):
     if (rc) return rc;
     rc = {P}{group}_jac(c, t, y, p, A);
     if (rc) return rc;
-    for (int i = 0; i < {NZ}; ++i) {{
-        for (int j = 0; j < {NZ}; ++j) {{
-            double s = 0.0;
-            for (int k = 0; k < {NZ}; ++k) s += A[i * {NZ} + k] * Phi[k * {NZ} + j];
-            dPhi[i * {NZ} + j] = s;
+    for (int i = 0; i < {NZ}; ++i) {{  /* A is mostly zeros on the free arcs of a large problem */
+        double* row = dPhi + i * {NZ};
+        for (int j = 0; j < {NZ}; ++j) row[j] = 0.0;
+        for (int k = 0; k < {NZ}; ++k) {{
+            const double a = A[i * {NZ} + k];
+            if (a == 0.0) continue;
+            const double* from = Phi + k * {NZ};
+            for (int j = 0; j < {NZ}; ++j) row[j] += a * from[j];
         }}
     }}
     return 0;
@@ -685,11 +688,14 @@ int {P}stm_rhs(double t, const double* y, const double* p, const int* arc, int w
     if (rc) return rc;
     rc = {P}jac_arc(t, y, p, arc, A);
     if (rc) return rc;
-    for (int i = 0; i < {NZ}; ++i) {{
-        for (int j = 0; j < {NZ}; ++j) {{
-            double s = 0.0;
-            for (int k = 0; k < {NZ}; ++k) s += A[i * {NZ} + k] * Phi[k * {NZ} + j];
-            dPhi[i * {NZ} + j] = s;
+    for (int i = 0; i < {NZ}; ++i) {{  /* A is mostly zeros on the free arcs of a large problem */
+        double* row = dPhi + i * {NZ};
+        for (int j = 0; j < {NZ}; ++j) row[j] = 0.0;
+        for (int k = 0; k < {NZ}; ++k) {{
+            const double a = A[i * {NZ} + k];
+            if (a == 0.0) continue;
+            const double* from = Phi + k * {NZ};
+            for (int j = 0; j < {NZ}; ++j) row[j] += a * from[j];
         }}
     }}
     if (with_p && {NP} > 0) {{

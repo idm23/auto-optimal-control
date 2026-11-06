@@ -86,6 +86,9 @@ from auto_optimal_control.pontryagin import derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
 from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting
 
+# The path of the continuation is followed to 1e-6: a rough Jacobian steers Newton as well.
+PATH_JACOBIAN_RTOL = 1e-7
+
 EPS = "eps_reg"
 RHO = "rho_reg_"
 OFF = "off_reg_"
@@ -415,14 +418,17 @@ class Homotopy:
         n = k.N_STATES
         nu = np.zeros(k.N_MULTIPLIERS)
 
-        def system(lam, tf, free):
+        def system(lam, tf, free, with_jacobian=True):
             lam0 = np.zeros(n)
             lam0[states] = lam
             z0 = np.concatenate([shoot.x0, lam0])
-            r = shoot._propagate(z0, tf, stm=True)
+            r = shoot._propagate(z0, tf, stm=with_jacobian)
             zf, phi = r["z"], r["stm"]
-            jac = k.residual_jacobian(z0, zf, nu, tf, shoot.params)
             psi = k.residual(z0, zf, nu, tf, shoot.params)[n:][rows]
+            if not with_jacobian:
+                H = np.atleast_1d(k.hamiltonian(tf, zf, shoot.params))
+                return np.concatenate([psi, H]) if free else psi
+            jac = k.residual_jacobian(z0, zf, nu, tf, shoot.params)
             Rzf = jac["zf"][n:][rows]
             columns = n + states
             J = Rzf @ phi[:, columns]
@@ -451,7 +457,8 @@ class Homotopy:
         # A guess, not the answer: the whole system's solve polishes it afterwards.
         whole = shoot
         shoot = SingleShooting(shoot.kernels, shoot.params, rtol=1e-8, atol=1e-10)
-        shoot.options["max_nfev"] = 20000  # a bad guess can chatter on a saturation corner
+        shoot.max_nfev = 20000             # a bad guess can chatter on a saturation corner
+        shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
         tol = max(tol, 1e-6)
         k = shoot.kernels
         n = k.N_STATES
@@ -482,7 +489,7 @@ class Homotopy:
                 continue
             system = self._block_system(shoot, states, rows)
             at = [point[1] for point in path if point[0] >= T][-1]
-            lam = _newton(lambda w, tf=T: system(w, tf, False), at, tol)
+            lam = _newton(lambda w, jac, tf=T: system(w, tf, False, jac), at, tol)
             if lam is None:
                 self._say("separate seed: a component did not reach the common time")
                 return None
@@ -524,7 +531,7 @@ class Homotopy:
     def _shrink(self, shoot, system, states, start, tol, floor=0.0):
         """``[(T, lam, H)]`` from a long time down to the component's minimum time, or to
         ``floor`` if that comes first; or None."""
-        lam = _newton(lambda w: system(w, start, False), np.zeros(len(states)), tol)
+        lam = _newton(lambda w, jac: system(w, start, False, jac), np.zeros(len(states)), tol)
         if lam is None:
             return None
         path, T, previous = [], start, None
@@ -550,9 +557,9 @@ class Homotopy:
                 same = lam * previous[1] > 0.0
                 guess = np.where(same, lam * np.abs(lam / np.where(same, previous[1], 1.0)) ** ratio,
                                  lam + (lam - previous[1]) * (to - T) / (T - previous[0]))
-            found = _newton(lambda w, tf=to: system(w, tf, False), guess, tol)
+            found = _newton(lambda w, jac, tf=to: system(w, tf, False, jac), guess, tol)
             if found is None and previous is not None:
-                found = _newton(lambda w, tf=to: system(w, tf, False), lam, tol)
+                found = _newton(lambda w, jac, tf=to: system(w, tf, False, jac), lam, tol)
             if found is None:
                 step *= 0.5
                 continue
@@ -564,7 +571,7 @@ class Homotopy:
             if H < 0.0:
                 # Between T and to: solve for the time as well.
                 w = np.append(found, to)
-                root = _newton(lambda v: system(v[:-1], v[-1], True), w, tol)
+                root = _newton(lambda v, jac: system(v[:-1], v[-1], True, jac), w, tol)
                 if root is not None and root[-1] > 0.0:
                     path.append((float(root[-1]), root[:-1], 0.0))
                     return path
@@ -961,9 +968,11 @@ class Homotopy:
     def _smoothed(self, arcs, eps, off):
         """Shooting on the regularized kernels with exact arcs ``arcs`` and penalties off."""
         p = self.regularized_params(eps, np.zeros(self.nc), off)
-        if not arcs:
-            return SingleShooting(self.kr, p, **self.path_options)
-        return MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, **self.path_options)
+        shoot = (MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, **self.path_options)
+                 if arcs else SingleShooting(self.kr, p, **self.path_options))
+        shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
+        shoot.fast_residuals = True
+        return shoot
 
     def _free_samples(self, shoot, v, n_points=801):
         """``[(t, g, active)]`` sampled on every segment of ``shoot`` at ``v``:
@@ -1467,7 +1476,10 @@ class Homotopy:
                 self._seed = self._separate_seed(shoot, final_time, tol)
             seed_v = self._seed
             if seed_v is not None:
-                candidate = shoot.solve(seed_v, tol=tol, options=_budget("hybr", 80))
+                # To the path's accuracy: the exact solve at the end polishes it.
+                shoot = self._smoothed([], None, zero)
+                shoot.max_nfev = self.attempt_nfev
+                candidate = shoot.solve(seed_v, tol=max(tol, 1e-6), options=_budget("hybr", 80))
                 if candidate.success:
                     sol = candidate
         for e0 in eps_start if sol is None else ():
@@ -1678,10 +1690,13 @@ class Homotopy:
 
 
 def _newton(system, guess, tol, steps=10):
-    """Damped Newton on ``system(v) -> (R, J)``: the root, or None."""
+    """Damped Newton on ``system(v, with_jacobian)``: the root, or None.
+
+    The step length is tried on residuals alone, and the Jacobian found where it lands.
+    """
     v = np.asarray(guess, dtype=float)
     try:
-        R, J = system(v)
+        R = system(v, False)
     except _FAILURES:
         return None
     best = float(np.linalg.norm(R))
@@ -1689,17 +1704,18 @@ def _newton(system, guess, tol, steps=10):
         if best < tol:
             return v
         try:
+            _, J = system(v, True)
             delta = np.linalg.lstsq(J, R, rcond=None)[0]
-        except np.linalg.LinAlgError:
+        except (*_FAILURES, np.linalg.LinAlgError):
             return None
         for scale in (1.0, 0.5, 0.25, 0.125, 0.0625):
             w = v - scale * delta
             try:
-                Rw, Jw = system(w)
+                Rw = system(w, False)
             except _FAILURES:
                 continue
             if np.linalg.norm(Rw) < best:
-                v, R, J, best = w, Rw, Jw, float(np.linalg.norm(Rw))
+                v, R, best = w, Rw, float(np.linalg.norm(Rw))
                 break
         else:
             return None

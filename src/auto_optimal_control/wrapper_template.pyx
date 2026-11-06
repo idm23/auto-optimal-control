@@ -785,6 +785,18 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     return FNI_OK
 
 
+def _tolerances(Py_ssize_t ny, Py_ssize_t n_sens, double rtol, double atol, stm_rtol):
+    """Per-component ``(rtol, atol)``: the sensitivities after ``z`` get their own tolerance.
+
+    Step control then follows ``z``, and the steps fall by a factor of two or three. A Newton
+    iteration needs its Jacobian far less accurately than it needs its residual.
+    """
+    r, a = np.full(ny, rtol), np.full(ny, atol)
+    r[NZ:NZ + n_sens] = stm_rtol
+    a[NZ:NZ + n_sens] = stm_rtol
+    return r, a
+
+
 cdef int _setup_options(fni_options* opt, double rtol, double atol, first_step,
                         double max_step, Py_ssize_t n_interior) except -1:
     if not max_step > 0:
@@ -847,7 +859,7 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
               cost=False, arc=None, method="DOP853", double rtol=1e-10, double atol=1e-12,
               first_step=None, double max_step=np.inf, Py_ssize_t max_switches=10000,
               terminate=False, Py_ssize_t n_interior=4, constraint_events=True, frozen=(),
-              Py_ssize_t max_nfev=0):
+              Py_ssize_t max_nfev=0, stm_rtol=None):
     """Integrate the extremal from ``z0 = [x0, lambda0]`` from ``t0`` to ``t1``.
 
     The integration runs arc by arc and stops at every switch, so each
@@ -920,6 +932,13 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     if max_switches < 0:
         raise ValueError("max_switches must be >= 0")
     _setup_options(&opt, rtol, atol, first_step, max_step, n_interior)
+    cdef double[::1] rvec, avec
+    if stm and stm_rtol is not None:
+        tolerances = _tolerances(_layout(stm, param_sensitivity, cost), _layout(stm, param_sensitivity, False) - NZ,
+                                 rtol, atol, float(stm_rtol))
+        rvec, avec = tolerances
+        opt.rtol_vec = &rvec[0]
+        opt.atol_vec = &avec[0]
     z = _buffer(z0, NZ, "z0")
     p_arr = _params(params)
     arc0 = initial_arc(t0, z[:NZ], p_arr[:NP] if NP else None) if arc is None else _arc(arc)[:NM]
@@ -1372,7 +1391,7 @@ def tangency_gradient(c, double t, z, params=None):
 
 def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, cost=False,
                        method="DOP853", double rtol=1e-10, double atol=1e-12, first_step=None,
-                       double max_step=np.inf, Py_ssize_t max_nfev=0):
+                       double max_step=np.inf, Py_ssize_t max_nfev=0, stm_rtol=None):
     """Integrate along a boundary arc of constraint ``c`` from ``t0`` to ``t1``.
 
     No events are watched: the arc's control holds ``g^(q) = 0``, so ``g``
@@ -1382,11 +1401,12 @@ def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, c
     ``status``.
     """
     return _propagate_on(_exact(c), 0, t0, z0, t1, params, stm, cost, method, rtol, atol,
-                         first_step, max_step, max_nfev)
+                         first_step, max_step, max_nfev, stm_rtol)
 
 
 def _propagate_on(int c, int singular, double t0, z0, double t1, params, stm, cost, method,
-                  double rtol, double atol, first_step, double max_step, Py_ssize_t max_nfev):
+                  double rtol, double atol, first_step, double max_step, Py_ssize_t max_nfev,
+                  stm_rtol=None):
     cdef _b_ctx ctx
     cdef fni_options opt
     cdef fni_stats st
@@ -1400,6 +1420,12 @@ def _propagate_on(int c, int singular, double t0, z0, double t1, params, stm, co
         raise ValueError(f"method must be one of {list(_METHODS)}")
     meth = _METHODS[method]
     _setup_options(&opt, rtol, atol, first_step, max_step, 0)
+    cdef double[::1] rvec, avec
+    if stm and stm_rtol is not None:
+        tolerances = _tolerances(ny, NZ * NZ, rtol, atol, float(stm_rtol))
+        rvec, avec = tolerances
+        opt.rtol_vec = &rvec[0]
+        opt.atol_vec = &avec[0]
     p_arr = _params(params)
     y = _initial_y(_buffer(z0, NZ, "z0")[:NZ], stm, ny)
     y_out = np.zeros(ny)

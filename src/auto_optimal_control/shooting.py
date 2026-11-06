@@ -46,6 +46,8 @@ import numpy as np
 MAX_NFEV = 1000000                 # right-hand-side evaluations per propagation
 
 
+
+
 class ShootingError(FloatingPointError):
     """The extremal could not be propagated from these unknowns."""
 
@@ -131,6 +133,16 @@ class SingleShooting:
         n_terminal = len(k.system.boundary.terminal)
         self._transversality = slice(n + n_terminal, 2 * n + n_terminal)
 
+    # Tolerance of the state transition matrix, when it may be looser than the state's
+    # (None: the same). Steps fall by half or more, but a Jacobian this rough cannot bring
+    # the residual below about this level times the unknowns' size.
+    jacobian_rtol = None
+    max_nfev = MAX_NFEV
+    # Residuals apart from the Jacobians. MINPACK asks for far more of the first, and without
+    # the matrix they cost a small fraction as much. But their steps are longer, and each
+    # saturation corner carries the error of its step, so they reach only about 1e-9.
+    fast_residuals = False
+
     def __repr__(self):
         return (f"<SingleShooting {self.kernels.module.__name__}: {self.n_unknowns} unknowns, "
                 f"params={self.params.tolist()}>")
@@ -178,8 +190,9 @@ class SingleShooting:
         if not tf > self.t0:
             raise ShootingError(f"final time {tf} is not after the initial time {self.t0}")
         # A bound on the work: coincident saturation corners can otherwise never finish.
-        r = self.kernels.propagate(self.t0, z0, tf, self.params, stm=stm,
-                                   **{"max_nfev": MAX_NFEV, **self.options})
+        tolerance = {"stm_rtol": self.jacobian_rtol} if stm else {}
+        r = self.kernels.propagate(self.t0, z0, tf, self.params, stm=stm, **tolerance,
+                                   max_nfev=self.max_nfev, **self.options)
         if r["status"] == self.kernels.STATUS_VIOLATED:
             raise ShootingError(f"path constraint violated at t = {r['t']}")
         if r["status"] != 0:
@@ -239,6 +252,12 @@ class SingleShooting:
             m = len(v)
             return np.full(m, 1e6), np.eye(m)
 
+    def _safe_residual(self, v):
+        try:
+            return self.residual(v)
+        except (ShootingError, RuntimeError, ValueError):
+            return np.full(len(v), 1e6)
+
     def solve(self, guess, method="hybr", tol=1e-10, options=None):
         """Solve ``R(v) = 0`` from ``guess`` with ``scipy.optimize.root``.
 
@@ -255,10 +274,14 @@ class SingleShooting:
                               "pip install auto-optimal-control[shooting]") from exc
         if options is None:
             options = {"xtol": 1e-13} if method == "hybr" else {"xtol": 1e-14, "ftol": 1e-14}
-        sol = root(self._safe, np.asarray(guess, dtype=float), jac=True, method=method,
-                   options=options)
-        R, _ = self._safe(sol.x)
-        err = float(np.linalg.norm(R))
+        if self.fast_residuals:
+            sol = root(self._safe_residual, np.asarray(guess, dtype=float),
+                       jac=lambda v: self._safe(v)[1], method=method, options=options)
+            err = float(np.linalg.norm(self._safe_residual(sol.x)))
+        else:
+            sol = root(self._safe, np.asarray(guess, dtype=float), jac=True, method=method,
+                       options=options)
+            err = float(np.linalg.norm(self._safe(sol.x)[0]))
         x0, lam0, nu, tf = self.unpack(sol.x)
         violation = 0.0
         if err < tol:
@@ -641,16 +664,17 @@ class MultiArcShooting(SingleShooting):
         k, p = self.kernels, self.params
         if not tb > ta:
             raise ShootingError(f"arc times out of order: {ta} then {tb}")
+        tolerance = {"stm_rtol": self.jacobian_rtol} if jac else {}
         try:
             if kind is None:
                 arc = self._free_arc(ta, z, flags)
                 r = k.propagate(ta, z, tb, p, stm=jac, cost=cost, constraint_events=False,
                                 arc=arc, frozen=sorted(flags), max_nfev=self.max_nfev,
-                                **self.options)
+                                **tolerance, **self.options)
                 Fa = k.rhs_arc(ta, z, p, r["arc0"] if k.N_MODES else None)
             elif kind == "boundary":
                 r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost,
-                                         max_nfev=self.max_nfev, **self.options)
+                                         max_nfev=self.max_nfev, **tolerance, **self.options)
                 Fa = k.boundary_rhs(c, ta, z, p)
             else:
                 r = k.propagate_singular(c, ta, z, tb, p, stm=jac, cost=cost,

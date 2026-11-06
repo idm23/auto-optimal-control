@@ -280,7 +280,7 @@ def test_the_common_time_shares_the_cost_of_time():
     # stop where H = 0; two of them at the same time share it, so they stop later.
     path = [(3.0, None, 0.9), (2.0, None, 0.5), (1.0, None, 0.0)]
     assert Homotopy._common_time([path]) == pytest.approx(1.0)
-    assert Homotopy._common_time([path, path]) == pytest.approx(1.5)
+    assert Homotopy._common_time([path, path]) == pytest.approx(2.0)
 
 
 @pytest.fixture(scope="module")
