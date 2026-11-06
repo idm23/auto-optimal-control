@@ -66,9 +66,10 @@ Bang-bang switches need no reading at all: on free arcs they are events of
 the integration. Without bang-bang controls or path constraints the
 regularized problem is the exact one and step 2 is the whole solve.
 
-When no candidate is accepted (a limit of order 3 or more, two limits active
-at once, a structure outside what :class:`MultiArcShooting` represents),
-:func:`solve` returns the last regularized solution with ``exact = False``.
+When no candidate is accepted (a limit of order 3 or more, a structure outside
+what :class:`MultiArcShooting` represents, a search out of time),
+:func:`solve` returns the last regularized solution with ``exact = False``. A
+fixed end state that already violates a limit is reported the same way, at once.
 """
 
 import itertools
@@ -267,12 +268,18 @@ class Homotopy:
         self.verbose = verbose
         self.attempt_evaluations = 60      # MINPACK evaluations per exact attempt
         self.attempt_nfev = 50000          # right-hand-side evaluations per arc
-        self.active_set_seconds = 60.0     # time budget of the active-set route
+        self.active_set_seconds = 60.0     # time budget of the active-set route (see below)
+        self.penalty_seconds = 300.0       # time budget of the penalty route
+        self.path_options = dict(rtol=rtol, atol=atol)    # along the active-set route
         self.bang_bang = bang_bang_controls(problem)
         self.regularized, self.eps_symbol, self.rho_symbols = regularize(problem, self.bang_bang)
         self.kr = build_kernels(derive(self.regularized), cache_dir=cache_dir)
+        if self.kr.system.riding is not None:
+            self.active_set_seconds = 300.0     # many arcs, and no penalty route to fall back on
         self.nc = len(problem.path_constraints)
         self._kx = None
+        self._ends = None
+        self._seed_key = self._seed = None
         t, x, p = problem.time, problem.states, problem.params
         self._terminal = sp.lambdify((t, x, p), problem.terminal_cost, "numpy")
 
@@ -326,26 +333,263 @@ class Homotopy:
             running, xf = float(r["cost"]), r["z"][:shooting.kernels.N_STATES]
         return running + float(self._terminal(tf, list(xf), list(self.params)))
 
+    def _limits_broken_at_the_ends(self):
+        """Path constraints the fixed initial or final state already violates.
+
+        No motion can satisfy them, whatever the search does; finding that
+        out by searching takes minutes on a large problem. Only ends with
+        every state fixed are checked, and only time-invariant limits.
+        """
+        problem, kr = self.problem, self.kr
+        if not self.nc:
+            return []
+        if self._ends is None:
+            t, x, p = problem.time, problem.states, problem.params
+            final = {}
+            for psi in problem.terminal_constraints:
+                involved = [s for s in x if s in psi.free_symbols]
+                if len(involved) == 1 and sp.diff(psi, involved[0]) == 1:
+                    final[involved[0]] = involved[0] - psi
+            at_end = None
+            if len(final) == len(x) and not any(
+                    t in e.free_symbols for e in final.values()):
+                at_end = sp.lambdify([p], [final[s] for s in x], "numpy")
+            start = None
+            if len(problem.initial_state) == len(x):
+                start = sp.lambdify([p], [problem.initial_state[s] for s in x], "numpy")
+            ok = not any(t in c.expr.free_symbols for c in problem.path_constraints)
+            self._ends = (start, at_end) if ok else (None, None)
+        start, at_end = self._ends
+        params = self.regularized_params(1.0 if self.bang_bang else None, np.zeros(self.nc))
+        broken = []
+        for label, end in (("the initial state", start), ("the final state", at_end)):
+            if end is None:
+                continue
+            x = np.asarray(end(list(self.params)), dtype=float)
+            g = np.asarray(kr.constraint(0.0, np.concatenate([x, np.zeros(len(x))]), params))
+            for c in np.flatnonzero(g > 1e-9 * np.maximum(1.0, np.abs(g))):
+                broken.append(f"{label} violates {kr.CONSTRAINT_NAMES[c]} by {g[c]:.6g}")
+        return broken
+
     # -- step 2: sampling -----------------------------------------------------
+
+    def _free_arc_params(self):
+        """Indices of the parameters that matter off the path constraints."""
+        problem = self.problem
+        exprs = [*problem.dynamics, problem.running_cost, problem.terminal_cost,
+                 *problem.terminal_constraints, *problem.initial_state.values(),
+                 problem.initial_time]
+        for cs in problem.control_sets:
+            exprs += [cs.lower, cs.upper] if isinstance(cs, Box) else []
+        used = set().union(*(sp.sympify(e).free_symbols for e in exprs))
+        return [i for i, s_ in enumerate(problem.params) if s_ in used]
+
+    def _separate_blocks(self, shoot):
+        """Per controlled component, its state indices and its terminal rows, or None.
+
+        Only for a free final time with no terminal cost, each component fixing its
+        own final state: then, with the penalties off, a component with the other
+        costates at zero is its own minimum-time problem inside the whole one.
+        """
+        k, problem = shoot.kernels, self.problem
+        parts = self.analysis.controlled
+        if (len(parts) < 2 or not k.FREE_FINAL_TIME or problem.terminal_cost != 0
+                or shoot.n_free or k.N_SWITCHING):
+            return None
+        index = {s: i for i, s in enumerate(problem.states)}
+        terminal = [{index[s] for s in psi.free_symbols if s in index}
+                    for psi in problem.terminal_constraints]
+        blocks, covered = [], set()
+        for part in parts:
+            states = sorted(index[s] for s in part.states)
+            rows = [i for i, involved in enumerate(terminal) if involved & set(states)]
+            if len(rows) != len(states) or any(not terminal[i] <= set(states) for i in rows):
+                return None
+            covered |= set(states)
+            blocks.append((np.array(states), np.array(rows)))
+        return blocks if len(covered) == len(index) else None
+
+    def _block_system(self, shoot, states, rows):
+        """One component's equations ``(R, J)`` in its costates, and ``t_f`` when it is free."""
+        k = shoot.kernels
+        n = k.N_STATES
+        nu = np.zeros(k.N_MULTIPLIERS)
+
+        def system(lam, tf, free):
+            lam0 = np.zeros(n)
+            lam0[states] = lam
+            z0 = np.concatenate([shoot.x0, lam0])
+            r = shoot._propagate(z0, tf, stm=True)
+            zf, phi = r["z"], r["stm"]
+            jac = k.residual_jacobian(z0, zf, nu, tf, shoot.params)
+            psi = k.residual(z0, zf, nu, tf, shoot.params)[n:][rows]
+            Rzf = jac["zf"][n:][rows]
+            columns = n + states
+            J = Rzf @ phi[:, columns]
+            if not free:
+                return psi, J
+            Ht, Hz = k.hamiltonian_gradient(tf, zf, shoot.params)
+            H = np.atleast_1d(k.hamiltonian(tf, zf, shoot.params))
+            top = np.hstack([J, (Rzf @ r["dz_dt1"])[:, None]])
+            bottom = np.concatenate([Hz @ phi[:, columns], [float(Ht) + Hz @ r["dz_dt1"]]])
+            return np.concatenate([psi, H]), np.vstack([top, bottom])
+        return system
+
+    def _separate_seed(self, shoot, final_time, tol):
+        """A first guess from the components solved one at a time: ``v``, or None.
+
+        Random draws must land every component at once, and a nearly bang-bang
+        control gives Newton little to work with. But given plenty of time a
+        component's cost is nearly quadratic and its bounds are idle, so Newton needs no
+        guess there. From that end each component follows its costates as its time
+        shrinks, until ``H`` reaches zero: its own minimum time. The slowest sets
+        ``t_f``, and the others take their costates from their paths at that time.
+        """
+        blocks = self._separate_blocks(shoot)
+        if blocks is None:
+            return None
+        # A guess, not the answer: the whole system's solve polishes it afterwards.
+        whole = shoot
+        shoot = SingleShooting(shoot.kernels, shoot.params, rtol=1e-8, atol=1e-10)
+        shoot.options["max_nfev"] = 20000  # a bad guess can chatter on a saturation corner
+        tol = max(tol, 1e-6)
+        k = shoot.kernels
+        n = k.N_STATES
+        rng = np.random.default_rng(0)
+        start = max(float(_draw(final_time, rng)) for _ in range(8)) if callable(final_time) \
+            else float(np.max(final_time[1]))
+        paths = []
+        for states, rows in blocks:
+            system = self._block_system(shoot, states, rows)
+            if np.max(np.abs(system(np.zeros(len(states)), start, False)[0])) < tol:
+                paths.append(None)         # already there: it never moves
+                continue
+            # A component only has to reach the slowest time found so far.
+            floor = max((p[-1][0] for p in paths if p is not None), default=0.0)
+            path = self._shrink(shoot, system, states, start, tol, floor)
+            if path is None:
+                self._say("separate seed: a component's time did not shrink to its minimum")
+                return None
+            paths.append(path)
+        moving = [p for p in paths if p is not None]
+        if not moving:
+            return None
+        T = self._common_time(moving)
+        self._say(f"separate seed: t_f = {T:.6f}")
+        lam0 = np.zeros(n)
+        for (states, rows), path in zip(blocks, paths):
+            if path is None:
+                continue
+            system = self._block_system(shoot, states, rows)
+            at = [point[1] for point in path if point[0] >= T][-1]
+            lam = _newton(lambda w, tf=T: system(w, tf, False), at, tol)
+            if lam is None:
+                self._say("separate seed: a component did not reach the common time")
+                return None
+            lam0[states] = lam
+        try:
+            r = whole._propagate(np.concatenate([whole.x0, lam0]), T, stm=False)
+        except _FAILURES:
+            return None
+        return whole.pack(lam0, r["z"][n:n + k.N_MULTIPLIERS], T)
+
+    @staticmethod
+    def _common_time(paths):
+        """The ``t_f`` where the components' Hamiltonians add up to zero.
+
+        Each path's ``H`` is one (the cost of time) plus that component's own part, so the
+        sum is one plus the parts. It is positive with time to spare, and each part
+        falls to minus one at the component's own minimum time. Several components that
+        need nearly the same time share the one between them, so ``t_f`` sits above
+        them all, and Newton does not have to find that from a long way off.
+        """
+        grid = np.unique(np.concatenate([[p[0] for p in path] for path in paths]))
+        low = max(path[-1][0] for path in paths)
+        grid = grid[grid >= low]
+
+        def total(time_):
+            value = 1.0
+            for path in paths:
+                times, values = np.array([p[0] for p in path])[::-1], np.array([p[2] for p in path])[::-1]
+                value += float(np.interp(time_, times, values)) - 1.0
+            return value
+
+        values = [total(g) for g in grid]
+        for k in range(len(grid) - 1):
+            if values[k] <= 0.0 < values[k + 1]:
+                share = -values[k] / (values[k + 1] - values[k])
+                return float(grid[k] + share * (grid[k + 1] - grid[k]))
+        return float(low)
+
+    def _shrink(self, shoot, system, states, start, tol, floor=0.0):
+        """``[(T, lam, H)]`` from a long time down to the component's minimum time, or to
+        ``floor`` if that comes first; or None."""
+        lam = _newton(lambda w: system(w, start, False), np.zeros(len(states)), tol)
+        if lam is None:
+            return None
+        path, T, previous = [], start, None
+        step = 0.15
+        k = shoot.kernels
+
+        def hamiltonian(lam_, tf):
+            lam0 = np.zeros(k.N_STATES)
+            lam0[states] = lam_
+            zf = shoot._propagate(np.concatenate([shoot.x0, lam0]), tf, stm=False)["z"]
+            return float(np.atleast_1d(k.hamiltonian(tf, zf, shoot.params))[0])
+
+        H0 = hamiltonian(lam, T)
+        if H0 <= 0.0:                      # already below its minimum time: nothing to follow
+            return None
+        path.append((T, lam, H0))
+        while step > 1e-5:
+            to = max(T * (1.0 - step), floor)
+            guess = lam
+            if previous is not None:
+                # A secant in logarithms: costates grow like powers of 1 / T.
+                ratio = np.log(to / T) / np.log(T / previous[0])
+                same = lam * previous[1] > 0.0
+                guess = np.where(same, lam * np.abs(lam / np.where(same, previous[1], 1.0)) ** ratio,
+                                 lam + (lam - previous[1]) * (to - T) / (T - previous[0]))
+            found = _newton(lambda w, tf=to: system(w, tf, False), guess, tol)
+            if found is None and previous is not None:
+                found = _newton(lambda w, tf=to: system(w, tf, False), lam, tol)
+            if found is None:
+                step *= 0.5
+                continue
+            try:
+                H = hamiltonian(found, to)
+            except _FAILURES:
+                step *= 0.5
+                continue
+            if H < 0.0:
+                # Between T and to: solve for the time as well.
+                w = np.append(found, to)
+                root = _newton(lambda v: system(v[:-1], v[-1], True), w, tol)
+                if root is not None and root[-1] > 0.0:
+                    path.append((float(root[-1]), root[:-1], 0.0))
+                    return path
+                step *= 0.5
+                continue
+            previous = (T, lam)
+            T, lam = to, found
+            path.append((T, lam, H))
+            if T <= floor:
+                return path
+            step = min(step * 1.3, 0.15)
+        return None
 
     def _sampler(self, shoot, costates, final_time):
         n = self.kr.N_STATES
 
-        def draw(spec, rng, what):
-            if callable(spec):
-                return spec(rng)
-            lo, hi = (np.asarray(b, dtype=float) for b in spec)
-            return rng.uniform(lo, hi)
-
         def sample(rng):
-            lam0 = np.asarray(draw(costates, rng, "costates"), dtype=float).reshape(-1)
+            lam0 = np.asarray(_draw(costates, rng), dtype=float).reshape(-1)
             if lam0.shape != (n,):
                 raise ValueError(f"the costate sample must have {n} entries")
             tf = None
             if self.kr.FREE_FINAL_TIME:
                 if final_time is None:
                     raise ValueError("the final time is free: give a final_time distribution")
-                tf = float(draw(final_time, rng, "final_time"))
+                tf = float(_draw(final_time, rng))
             return shoot.guess_multipliers(lam0, tf=tf)
 
         return sample
@@ -718,8 +962,8 @@ class Homotopy:
         """Shooting on the regularized kernels with exact arcs ``arcs`` and penalties off."""
         p = self.regularized_params(eps, np.zeros(self.nc), off)
         if not arcs:
-            return SingleShooting(self.kr, p, **self.options)
-        return MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, **self.options)
+            return SingleShooting(self.kr, p, **self.path_options)
+        return MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, **self.path_options)
 
     def _free_samples(self, shoot, v, n_points=801):
         """``[(t, g, active)]`` sampled on every segment of ``shoot`` at ``v``:
@@ -768,7 +1012,14 @@ class Homotopy:
                     # Widen to the neighbouring samples, where g was still <= 0.
                     ta, tb = t[max(a - 1, 0)], t[min(b + 1, len(t) - 1)]
                     out.append((c, ta, tb, float(g[run, c].max())))
-        return out
+        # One violation can run across a junction of other limits: it is one, not two.
+        merged = []
+        for c, ta, tb, peak in sorted(out, key=lambda v: (v[0], v[1])):
+            if merged and merged[-1][0] == c and ta <= merged[-1][2]:
+                merged[-1] = (c, merged[-1][1], max(tb, merged[-1][2]), max(peak, merged[-1][3]))
+            else:
+                merged.append((c, ta, tb, peak))
+        return merged
 
     def _mas_entries(self, arcs, values, names=False):
         """MultiArcShooting entries for arcs that may overlap: ``(entries, values)``.
@@ -849,7 +1100,27 @@ class Homotopy:
             else:
                 groups.append([set(hits), [(a, b)]])
 
-        def build(split):
+        def overlap(lo, hi):
+            """The span of the arc this one overlaps most, or None."""
+            spans = [span(i) for i, (kind, _) in enumerate(arcs) if kind == "boundary"]
+            best = max(spans, key=lambda y: min(hi, y[1]) - max(lo, y[0]), default=None)
+            return best if best and min(hi, best[1]) > max(lo, best[0]) else None
+
+        def placed(entry_in, exit_in):
+            """The newborn arcs with their ends moved inside the arc they overlap."""
+            out = []
+            for entry, val in born:
+                other = overlap(val[0], val[1]) if entry[0] == "boundary" else None
+                if other is None:
+                    out.append((entry, val))
+                    continue
+                inset = 1e-3 * (other[1] - other[0])
+                lo = max(val[0], other[0] + inset) if entry_in else val[0]
+                hi = min(val[1], other[1] - inset) if exit_in else val[1]
+                out.append((entry, (lo, hi, val[2])))
+            return out
+
+        def build(split, newborn=None):
             out = list(zip(arcs, values))
             for idx, spans in sorted(groups, key=lambda g: -max(g[0])):
                 lo_i, hi_i = min(idx), max(idx)
@@ -874,12 +1145,21 @@ class Homotopy:
                 lo = min([span(i)[0] for i in idx] + [x for x, _ in spans])
                 hi = max([span(i)[1] for i in idx] + [y for _, y in spans])
                 out[lo_i:hi_i + 1] = [(("boundary", c), (lo, hi, pi))]
-            for entry, val in born:
+            for entry, val in (born if newborn is None else newborn):
                 pos = int(np.searchsorted([w[1][0] for w in out], val[0]))
                 out.insert(pos, (entry, val))
             return [a for a, _ in out], [w for _, w in out]
 
-        options = [build(False)]
+        # A limit that comes into play while another is ridden may enter and
+        # leave during that arc, or cross either end. The events' order is
+        # fixed in a solve, and a guess in the wrong order does not converge;
+        # nested is the commonest, as two limits' peaks close in on each other.
+        options = []
+        if any(entry[0] == "boundary" and overlap(val[0], val[1]) for entry, val in born):
+            options += [build(False, placed(True, True)), build(False),
+                        build(False, placed(True, False)), build(False, placed(False, True))]
+        else:
+            options = [build(False)]
         if any(len(g[0]) == 1 and arcs[next(iter(g[0]))][0] == "touch" for g in groups):
             alternative = build(True)
             if alternative[0] != options[0][0]:
@@ -974,12 +1254,21 @@ class Homotopy:
         def settle(sh, r, le, off):
             """Bring in violated limits and retire dead arcs until the solution at
             (le, off) is consistent; ``(shoot, sol)`` or None."""
+            last = None
             for _ in range(2 * self.nc + 4):
                 viol = self._free_violations(sh, r.v, scale)
                 if viol:
-                    if max(peak / scale[c] for c, _, _, peak in viol) > 1e-3:
+                    worst = max(peak / scale[c] for c, _, _, peak in viol)
+                    if worst > 1e-3:
                         self._detail("    violation too large: a shorter step")
                         return None        # too far in: take a shorter step
+                    if last is not None and last[0] == self._arcs_of(sh, r.v)[0] \
+                            and worst < 1e-4 and worst > 0.5 * last[1]:
+                        # The same structure again, and the violation did not
+                        # shrink: it is the path tolerance at a tangential
+                        # junction, not a missing arc. The exact solve judges it.
+                        return sh, r
+                    last = (self._arcs_of(sh, r.v)[0], worst)
                     options = self._activate(sh, r.v, viol)
                 else:
                     dead = self._retire(sh, r.v)
@@ -1160,12 +1449,28 @@ class Homotopy:
         self.params = params
         if self.kr.FREE_FINAL_TIME and final_time is None:
             raise ValueError("the final time is free: give a final_time distribution")
+        broken = self._limits_broken_at_the_ends()
+        if broken:
+            return HomotopyResult(None, None, (), False, np.nan, None, [], 0,
+                                  f"infeasible: {'; '.join(broken)}")
         rng = np.random.default_rng(seed)
         kr = self.kr
         eps_start = [eps0, 10 * eps0, 0.1 * eps0] if self.bang_bang else [None]
         zero = np.zeros(self.nc)
         sol, tries = None, 0
-        for e0 in eps_start:
+        if kr.FREE_FINAL_TIME and not self.bang_bang:
+            shoot = SingleShooting(kr, self.regularized_params(None, zero), **self.options)
+            # With the penalties off the limits do not enter, so their values can change.
+            key = tuple(params[self._free_arc_params()])
+            if key != self._seed_key:
+                self._seed_key = key
+                self._seed = self._separate_seed(shoot, final_time, tol)
+            seed_v = self._seed
+            if seed_v is not None:
+                candidate = shoot.solve(seed_v, tol=tol, options=_budget("hybr", 80))
+                if candidate.success:
+                    sol = candidate
+        for e0 in eps_start if sol is None else ():
             shoot = SingleShooting(kr, self.regularized_params(e0, zero), **self.options)
             sol, n = shoot.multistart(self._sampler(shoot, costates, final_time),
                                       n_tries=n_tries, seed=rng, tol=tol)
@@ -1233,7 +1538,7 @@ class Homotopy:
             """One adaptive step along ``move(state, size) -> (le, m)``: the new
             state, or None when the step falls below its floor."""
             ds = size
-            while ds >= 1e-3:
+            while ds >= 1e-3 and time.perf_counter() < state["deadline"]:
                 le, mm = move(ds)
                 p, _, _ = params_at(le, mm)
                 nxt = SingleShooting(kr, p, **self.options)
@@ -1279,14 +1584,21 @@ class Homotopy:
             out = active_route()
             if out is not None:
                 return out
+            if self.kr.system.riding is not None:
+                # A stiff penalty on limits this large takes minutes per step, and
+                # reads back the structures the active-set route has already tried.
+                return HomotopyResult(sol, shoot, (), False, np.nan, shoot.params, steps, tries,
+                                      "no exact structure: the active-set route stalled")
             self._say("active set: no exact structure; trying the penalty route")
+        state["deadline"] = time.perf_counter() + self.penalty_seconds
         new = activate(shoot, sol.v)
         if new is not False:
             state["m"][new] = m_start
         shoot, accepted = record_and_attempt(state["le"], state["m"], state["v"], state["sol"])
         ds_rho, ds_eps = 0.5, 0.25
         done = np.zeros(self.nc, dtype=bool)
-        while not accepted and len(steps) < max_steps:
+        while not accepted and len(steps) < max_steps and (
+                time.perf_counter() < state["deadline"]):
             best = (shoot, state["sol"])
             ramping = np.isfinite(state["m"]) & (state["m"] < m_max) & ~done
             if ramping.any():
@@ -1363,6 +1675,43 @@ class Homotopy:
             else:
                 out.append(("singular", name, *sides))
         return tuple(out)
+
+
+def _newton(system, guess, tol, steps=10):
+    """Damped Newton on ``system(v) -> (R, J)``: the root, or None."""
+    v = np.asarray(guess, dtype=float)
+    try:
+        R, J = system(v)
+    except _FAILURES:
+        return None
+    best = float(np.linalg.norm(R))
+    for _ in range(steps):
+        if best < tol:
+            return v
+        try:
+            delta = np.linalg.lstsq(J, R, rcond=None)[0]
+        except np.linalg.LinAlgError:
+            return None
+        for scale in (1.0, 0.5, 0.25, 0.125, 0.0625):
+            w = v - scale * delta
+            try:
+                Rw, Jw = system(w)
+            except _FAILURES:
+                continue
+            if np.linalg.norm(Rw) < best:
+                v, R, J, best = w, Rw, Jw, float(np.linalg.norm(Rw))
+                break
+        else:
+            return None
+    return v if best < tol else None
+
+
+def _draw(spec, rng):
+    """One sample of a distribution: a function of ``rng``, or ``(low, high)``."""
+    if callable(spec):
+        return spec(rng)
+    lo, hi = (np.asarray(b, dtype=float) for b in spec)
+    return rng.uniform(lo, hi)
 
 
 def _scaled(tol, v):

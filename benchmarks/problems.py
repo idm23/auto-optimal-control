@@ -17,6 +17,7 @@ Robotics:
 - **two_link_arm** / **two_link_arm_min_time**: a planar two-link arm with
   joint torque limits, minimum jerk; then minimum time with bounded jerks
   (degenerate as stated: the default policy adds a small jerk cost).
+- **six_joint_arm**: six joints under gravity, minimum jerk, with torque limits.
 - **cart_pole**: minimum-effort cart-pole swing-up (Kelly 2017, SIAM Review).
   Kelly's direct method is run for comparison only.
 
@@ -48,6 +49,7 @@ from auto_optimal_control.build import build_kernels
 from auto_optimal_control.pontryagin import derive
 from auto_optimal_control.homotopy import Homotopy
 from auto_optimal_control.problem import Box, OptimalControlProblem, UnitVector
+from auto_optimal_control.robot import GRAVITY, SIX_JOINT_LINKS, joint_torques
 # Re-exported for the animations in visuals/, which import them from here.
 from auto_optimal_control.shooting import (  # noqa: F401
     MultiArcShooting, ShootingError, SingleShooting, continuation, parameter_continuation)
@@ -552,6 +554,71 @@ def run_two_link_arm_min_time(cache_dir=None, seed=0):
     return rows
 
 
+SIX_JOINT_MOVE = (1.0, [1.0, -1.0, 0.8, 1.0, -0.8, 1.0])          # T, qf (from q = 0)
+SIX_JOINT_CASES = ((0.8, 0.8, 0.8, 1.5, 1.5, 1.5, "three joints limited"),
+                   (0.9, 0.9, 0.9, 0.9, 0.9, 0.9, "all six limited"))
+
+
+def _six_joint_torques():
+    q, w, a = (sp.symbols(f"{s}1:7", real=True) for s in "qwa")
+    f = sp.lambdify((q, w, a), joint_torques(SIX_JOINT_LINKS, q, w, a, GRAVITY), "numpy")
+
+    def torques(Q, W, A):
+        return np.array([np.broadcast_to(np.asarray(v, dtype=float), Q.shape[:1])
+                         for v in f(Q.T, W.T, A.T)]).T
+    return torques
+
+
+def run_six_joint_arm(cache_dir=None, seed=0):
+    """Six joints under gravity, minimum jerk. With loose limits the joints follow
+    independent quintics, in closed form. With tight ones, each limit a fraction of the way
+    from the larger end-point torque to the peak of that motion, the reference is an
+    independent replay of the jerk: integrated with SciPy, torques from the recursion."""
+    from scipy.integrate import solve_ivp
+    from scipy.interpolate import interp1d
+
+    T, qf = SIX_JOINT_MOVE
+    qf = np.array(qf)
+    torques = _six_joint_torques()
+    s = np.linspace(0, 1, 801)[:, None]
+    tau = torques(qf * (10 * s ** 3 - 15 * s ** 4 + 6 * s ** 5),
+                  qf * (30 * s ** 2 - 60 * s ** 3 + 30 * s ** 4) / T,
+                  qf * (60 * s - 180 * s ** 2 + 120 * s ** 3) / T ** 2)
+    peak = np.abs(tau).max(axis=0)
+    ends = np.maximum(np.abs(tau[0]), np.abs(tau[-1]))
+    h = Homotopy(examples.six_joint_arm(), cache_dir=cache_dir)
+    box = ([-50] * 18, [50] * 18)
+    rows = []
+
+    start = time.perf_counter()
+    r = h.solve([T, *np.zeros(6), *qf, *(1.5 * peak)], box, seed=seed)
+    rows.append(Result("six_joint_arm", "J (limits loose: six quintics)", r.objective,
+                       360.0 * float(qf @ qf) / T ** 5, "closed form (minimum-jerk quintics)",
+                       1e-10, time.perf_counter() - start, _details(r)))
+
+    for *fractions, how in SIX_JOINT_CASES:
+        start = time.perf_counter()
+        limits = ends + (peak - ends) * np.array(fractions)
+        r = h.solve([T, *np.zeros(6), *qf, *limits], box, seed=seed)
+        seconds = time.perf_counter() - start
+        tr = r.shooting.trajectory(r.solution.v, n_points=40001)
+        t, u = tr["t"], tr["u"]
+        keep = np.concatenate([[True], np.diff(t) > 0])
+        jerk = interp1d(t[keep], u[keep], axis=0)
+        sol = solve_ivp(lambda ti, x: np.concatenate([x[6:], jerk(min(ti, t[-1]))]), (0, t[-1]),
+                        np.zeros(18), rtol=1e-10, atol=1e-12, max_step=1e-3,
+                        t_eval=np.linspace(0, t[-1], 4001))
+        over = np.abs(torques(sol.y[:6].T, sol.y[6:12].T, sol.y[12:].T)) - limits
+        cost = float(np.trapezoid(0.5 * (u[keep] ** 2).sum(axis=1), t[keep]))
+        details = {**_details(r), "final state error":
+                   float(np.abs(sol.y[:, -1] - np.concatenate([qf, np.zeros(12)])).max()),
+                   "largest torque over its limit": float(over.max())}
+        rows.append(Result("six_joint_arm", f"J ({how})", r.objective, cost,
+                           "independent SciPy replay of the arm under this jerk", 1e-6, seconds,
+                           details))
+    return rows
+
+
 GODDARD_REFERENCE = {"free": (1.01283692, 0.19885626), "q": (1.01271727, 0.20407108)}
 GODDARD_SOURCE = "Graichen & Petit (2008), collocation with saturation functions"
 
@@ -597,6 +664,7 @@ ALL = {
     "jerk_limited": run_jerk_limited,
     "two_link_arm": run_two_link_arm,
     "two_link_arm_min_time": run_two_link_arm_min_time,
+    "six_joint_arm": run_six_joint_arm,
     "orbit_raising": run_orbit_raising,
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,

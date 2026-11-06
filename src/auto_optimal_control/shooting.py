@@ -43,6 +43,9 @@ from dataclasses import dataclass
 import numpy as np
 
 
+MAX_NFEV = 1000000                 # right-hand-side evaluations per propagation
+
+
 class ShootingError(FloatingPointError):
     """The extremal could not be propagated from these unknowns."""
 
@@ -174,7 +177,9 @@ class SingleShooting:
     def _propagate(self, z0, tf, stm):
         if not tf > self.t0:
             raise ShootingError(f"final time {tf} is not after the initial time {self.t0}")
-        r = self.kernels.propagate(self.t0, z0, tf, self.params, stm=stm, **self.options)
+        # A bound on the work: coincident saturation corners can otherwise never finish.
+        r = self.kernels.propagate(self.t0, z0, tf, self.params, stm=stm,
+                                   **{"max_nfev": MAX_NFEV, **self.options})
         if r["status"] == self.kernels.STATUS_VIOLATED:
             raise ShootingError(f"path constraint violated at t = {r['t']}")
         if r["status"] != 0:

@@ -17,8 +17,9 @@ The kernels are compiled when you first build them, so you need a C compiler
 
 ## Where to start
 
-- **{doc}`notebooks/index`**: a nineteen-lecture course on optimal control
-  by the indirect method, in six parts. It goes from the brachistochrone and
+- **{doc}`notebooks/index`**: a twenty-lecture course on optimal control
+  by the indirect method, in six parts, with a prerequisite lecture on
+  Jacobians, Hessians and Newton's method before them. It goes from the brachistochrone and
   the calculus of variations through the minimum principle, dynamic
   programming, compiled kernels, shooting and continuation, to bang-bang and
   singular control, state constraints, the automatic homotopy, spacecraft

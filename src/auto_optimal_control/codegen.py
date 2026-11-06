@@ -65,6 +65,8 @@ import sympy as sp
 from sympy.printing.c import C99CodePrinter
 
 from auto_optimal_control.functions import greater, lesser
+from auto_optimal_control.riding import riding_kernels
+from auto_optimal_control.tape import OUTLINED_PREFIX, Outlined
 
 
 class _Printer(C99CodePrinter):
@@ -148,12 +150,14 @@ def _smooth(expr):
 class _Function:
     """One generated C function: outputs computed through common subexpressions."""
 
-    def __init__(self, signature, args):
+    def __init__(self, signature, args, mapping=None):
         self.signature = signature
         self.args = args
         self.pre = []
         self.zero = []
         self.outputs = []
+        self.mapping = mapping
+        self.helpers = []
 
     def zero_fill(self, array, size):
         if size:
@@ -163,6 +167,7 @@ class _Function:
         self.outputs.append((lhs, expr))
 
     def render(self, mapping):
+        mapping = self.mapping or mapping
         lines = [self.signature + " {"]
         lines += [f"    (void){a};" for a in self.args]
         lines += self.pre
@@ -171,13 +176,40 @@ class _Function:
         keep = [(lhs, e) for lhs, e in keep if not (self.zero and e == 0)]
         if keep:
             repl, reduced = sp.cse([e for _, e in keep], symbols=sp.numbered_symbols("cse"))
+            lines += self._outlined_lines([e for _, e in repl] + list(reduced))
             for s, e in repl:
                 lines.append(f"    const double {s} = {_c(e)};")
             for (lhs, _), e in zip(keep, reduced):
                 lines.append(f"    {lhs} = {_c(e)};")
         lines.append("    return 0;")
         lines.append("}")
-        return "\n".join(lines)
+        return "\n".join(self.helpers + ["\n".join(lines)])
+
+    def _outlined_lines(self, exprs):
+        """Statements computing the :class:`~auto_optimal_control.tape.Outlined` steps used.
+
+        What each input of the tape is called here comes from the functions' own
+        arguments. The boundary residuals work on ``tf`` and ``zf``, which go by
+        ``t`` and ``z`` in these statements, as they do everywhere else.
+        """
+        nodes = [node for e in exprs for node in sp.sympify(e).atoms(Outlined)]
+        if not nodes:
+            return []
+        tape = nodes[0].tape
+        names = {}
+        for node in nodes:
+            names.update(zip(tape.input_names(int(node.args[0])), map(str, node.args[1:])))
+        boundary = any(text == "tf" or text.startswith("zf[") for text in names.values())
+        if boundary:
+            names = {name: "t" if text == "tf" else text.replace("zf[", "z[")
+                     for name, text in names.items()}
+        steps = sorted({int(node.args[0]) for node in nodes})
+        prefix = "h_" + re.sub(r"\W", "_", self.signature.split("(")[0].split()[-1])
+        helpers, body, operand = tape.c_block(steps, names, prefix, args="t, z, p, 0, 0")
+        self.helpers = helpers
+        head = ["    const double t = tf; const double* z = zf; (void)t; (void)z;"] if boundary else []
+        return head + body + [f"    const double {OUTLINED_PREFIX}{k} = {operand(k)}; "
+                              f"(void){OUTLINED_PREFIX}{k};" for k in steps]
 
 
 def _arc_dynamics(pmp, flags):
@@ -426,53 +458,59 @@ def generate_c(pmp, name=None):
               if sc.boundary is not None]
     riding += [(NC + k, arc, None) for k, (_, arc) in enumerate(pmp.boundary_sets)]
     arc_ids = [c for c, _, _ in riding]
+    numeric = pmp.riding is not None
+    riding_tape, riding_text = "", ""
+    if numeric:
+        small, riding_tape, riding_text = riding_kernels(pmp, P, _Function, mapping)
+        functions += small
     for c, arc, sc in riding:
-        Fb = [_arc_smooth(e) for e in arc.dynamics]
-        Fb_c = [e.xreplace(mapping) for e in Fb]
         tag = f"{P}b{c}_"
-        f = _Function(f"int {tag}rhs({tzp}, double* dz)", ["t", "z", "p"])
-        for i, e in enumerate(Fb):
-            f.out(f"dz[{i}]", e)
-        functions.append(f)
-        f = _Function(f"int {tag}jac({tzp}, double* A)", ["t", "z", "p", "A"])
-        f.zero_fill("A", NZ * NZ)
-        for i, e in enumerate(Fb_c):
+        if not numeric:
+            Fb = [_arc_smooth(e) for e in arc.dynamics]
+            Fb_c = [e.xreplace(mapping) for e in Fb]
+            f = _Function(f"int {tag}rhs({tzp}, double* dz)", ["t", "z", "p"])
+            for i, e in enumerate(Fb):
+                f.out(f"dz[{i}]", e)
+            functions.append(f)
+            f = _Function(f"int {tag}jac({tzp}, double* A)", ["t", "z", "p", "A"])
+            f.zero_fill("A", NZ * NZ)
+            for i, e in enumerate(Fb_c):
+                for j, zj in enumerate(z_c):
+                    f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
+            functions.append(f)
+            Hb_c = _arc_smooth(arc.hamiltonian).xreplace(mapping)
+            f = _Function(f"int {tag}hamiltonian({tzp}, double* H)", ["t", "z", "p"])
+            f.out("H[0]", _arc_smooth(arc.hamiltonian))
+            functions.append(f)
+            f = _Function(f"int {tag}hamiltonian_grad({tzp}, double* Ht, double* Hz)",
+                          ["t", "z", "p", "Ht", "Hz"])
+            f.zero_fill("Hz", NZ)
+            f.out("Ht[0]", sp.diff(Hb_c, t_sym))
             for j, zj in enumerate(z_c):
-                f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
-        functions.append(f)
-        Hb_c = _arc_smooth(arc.hamiltonian).xreplace(mapping)
-        f = _Function(f"int {tag}hamiltonian({tzp}, double* H)", ["t", "z", "p"])
-        f.out("H[0]", _arc_smooth(arc.hamiltonian))
-        functions.append(f)
-        f = _Function(f"int {tag}hamiltonian_grad({tzp}, double* Ht, double* Hz)",
-                      ["t", "z", "p", "Ht", "Hz"])
-        f.zero_fill("Hz", NZ)
-        f.out("Ht[0]", sp.diff(Hb_c, t_sym))
-        for j, zj in enumerate(z_c):
-            f.out(f"Hz[{j}]", sp.diff(Hb_c, zj))
-        functions.append(f)
-        f = _Function(f"int {tag}cost_rate({tzp}, double* L)", ["t", "z", "p"])
-        f.out("L[0]", _arc_smooth(arc.running_cost))
-        functions.append(f)
-        f = _Function(f"int {tag}control({tzp}, double* u)", ["t", "z", "p", "u"])
-        for k, u in enumerate(pmp.controls):
-            f.out(f"u[{k}]", _arc_smooth(arc.control[u]))
-        functions.append(f)
-        mults = arc.multipliers or (arc.multiplier,)
-        f = _Function(f"int {tag}multiplier({tzp}, double* mu)", ["t", "z", "p"])
-        for i, m in enumerate(mults):
-            f.out(f"mu[{i}]", _arc_smooth(m))
-        functions.append(f)
-        f = _Function(f"int {tag}multiplier_grad({tzp}, double* Mt, double* Mz)",
-                      ["t", "z", "p", "Mt", "Mz"])
-        f.zero_fill("Mt", MSET)
-        f.zero_fill("Mz", MSET * NZ)
-        for i, m in enumerate(mults):
-            m_c = _arc_smooth(m).xreplace(mapping)
-            f.out(f"Mt[{i}]", sp.diff(m_c, t_sym))
-            for j, zj in enumerate(z_c):
-                f.out(f"Mz[{i * NZ + j}]", sp.diff(m_c, zj))
-        functions.append(f)
+                f.out(f"Hz[{j}]", sp.diff(Hb_c, zj))
+            functions.append(f)
+            f = _Function(f"int {tag}cost_rate({tzp}, double* L)", ["t", "z", "p"])
+            f.out("L[0]", _arc_smooth(arc.running_cost))
+            functions.append(f)
+            f = _Function(f"int {tag}control({tzp}, double* u)", ["t", "z", "p", "u"])
+            for k, u in enumerate(pmp.controls):
+                f.out(f"u[{k}]", _arc_smooth(arc.control[u]))
+            functions.append(f)
+            mults = arc.multipliers or (arc.multiplier,)
+            f = _Function(f"int {tag}multiplier({tzp}, double* mu)", ["t", "z", "p"])
+            for i, m in enumerate(mults):
+                f.out(f"mu[{i}]", _arc_smooth(m))
+            functions.append(f)
+            f = _Function(f"int {tag}multiplier_grad({tzp}, double* Mt, double* Mz)",
+                          ["t", "z", "p", "Mt", "Mz"])
+            f.zero_fill("Mt", MSET)
+            f.zero_fill("Mz", MSET * NZ)
+            for i, m in enumerate(mults):
+                m_c = _arc_smooth(m).xreplace(mapping)
+                f.out(f"Mt[{i}]", sp.diff(m_c, t_sym))
+                for j, zj in enumerate(z_c):
+                    f.out(f"Mz[{i * NZ + j}]", sp.diff(m_c, zj))
+            functions.append(f)
         if sc is None:
             continue
         exact.append(c)
@@ -556,6 +594,9 @@ def generate_c(pmp, name=None):
         for name, outs, out_args in specs:
             sig = f"int {P}{group}_{name}(int c, {tzp}, {outs})"
             sigs.append(sig)
+            if numeric and group == "boundary" and not name.startswith("tangency"):
+                out.append(f"{sig} {{\n    return {P}riding_{name}(c, t, z, p, {out_args});\n}}\n")
+                continue
             cases = "".join(f"    case {c}: return {P}{letter}{c}_{name}(t, z, p, {out_args});\n"
                             for c in ids)
             voids = "".join(f" (void){a.strip()};" for a in out_args.split(","))
@@ -610,6 +651,7 @@ def generate_c(pmp, name=None):
 
     body = "\n\n".join(fn.render(mapping if not fn.signature.startswith(f"int {P}residual")
                                  else bc_map) for fn in functions)
+    body = "\n\n".join([riding_tape, body, riding_text]) if numeric else body
 
     NSET = len(pmp.boundary_sets)
     macros = dict(NZ=NZ, NP=NP, NSW=NSW, NC=NC, NM=NM, NK=NK, NU=NU, NNU=NNU, NR=NR, QMAX=QMAX,

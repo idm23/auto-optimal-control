@@ -8,6 +8,7 @@ import numpy as np
 import sympy as sp
 
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint, UnitVector
+from auto_optimal_control.robot import SIX_JOINT_LINKS, jerk_controlled_arm, jerk_limited_arm
 
 
 def zermelo():
@@ -419,6 +420,28 @@ def two_axes_min_time():
         params=[J, D1, D2], dynamics=[v1, a1, j1, v2, a2, j2], running_cost=1,
         initial_state=[0] * 6, final_state={x1: D1, v1: 0, a1: 0, x2: D2, v2: 0, a2: 0},
         control_sets=[Box(j1, -J, J), Box(j2, -J, J)])
+
+
+def six_joint_arm():
+    """A six-joint arm under gravity, jerk-controlled, minimum jerk, with torque limits.
+
+    See :func:`~auto_optimal_control.robot.jerk_controlled_arm`. Not in
+    :func:`all_examples`: its kernels take a minute to compile, against
+    seconds for the others.
+
+    params: ``T``, ``q0_1..6``, ``qf_1..6``, ``tau_max1..6``.
+    """
+    return jerk_controlled_arm(SIX_JOINT_LINKS, name="six_joint_arm")
+
+
+def six_joint_arm_min_time():
+    """:func:`six_joint_arm` in minimum time with bounded jerks, torque limits as before.
+
+    See :func:`~auto_optimal_control.robot.jerk_limited_arm`.
+
+    params: ``q0_1..6``, ``qf_1..6``, ``j_max1..6``, ``tau_max1..6``.
+    """
+    return jerk_limited_arm(SIX_JOINT_LINKS, name="six_joint_arm_min_time")
 
 
 def goddard(dynamic_pressure=False):
