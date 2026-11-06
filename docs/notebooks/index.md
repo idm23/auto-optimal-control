@@ -71,7 +71,7 @@ if gradients, Jacobians and Hessians are familiar.
 |---|---|---|---|
 | 18 | {doc}`18_minimum_time_several_axes` | the fastest motion of several axes | non-unique optima; vanishing costates and singular Jacobians; a secondary cost, a two-stage solve, a fixed path |
 | 19 | {doc}`19_choosing_among_equal_motions` | a two-link arm in minimum time, with bounded jerks and torque limits | non-uniqueness read from the statement; selectable policies; riding a limit with bounded controls |
-| 20 | {doc}`20_six_joints` | what breaks at six joints? | the bottlenecks, measured; the recursive Newton–Euler algorithm; tapes; arcs solved at run time; a survey of random motions |
+| 20 | {doc}`20_six_joints` | what breaks at six joints? | the bottlenecks, measured; the recursive Newton–Euler algorithm; tapes; arcs solved at run time; a survey of random motions; minimum time with bounded jerks, and where the time goes; why a limit on a control's rate must make that control a state |
 
 To run the notebooks yourself, clone the repository and run
 `uv sync --group docs`, then open them in Jupyter. They need a C compiler,

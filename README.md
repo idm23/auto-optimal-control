@@ -532,16 +532,40 @@ steps. And its boundary arcs are **solved at run time** (`riding.py`): one kerne
 the linear conditions for whichever limits are ridden, instead of one symbolic
 kernel per set. There are 728 sets.
 
-On random motions (`T` in 0.8 to 1.5, goals within 1.5 rad), 87 of 96 solved exactly
-with joints 1 to 3 limited, with a median of 3 s. With the wrist limited as well, 49 of
-93 did within a 60 s budget, with a median of 32 s; a sample of the failures suggests that the
-default 300 s recovers about half of the rest. What fails reports `exact = False`.
+On random motions (`T` in 0.8 to 1.5, goals within 1.5 rad), 40 of 48 solved exactly with
+joints 1 to 3 limited, with a median of 2.5 s. With the wrist limited as well, 32 of 48 did,
+with a median of 13 s. What fails reports `exact = False`.
 
 A limit the fixed end states already violate is reported as infeasible at once. Gravity
 makes that easy to hit: joint 2 holds 54 N·m just standing at `q = 0`.
 
-**Not yet supported at this size:** bounded controls, so minimum time on six joints
-is reported as unsupported, and limits of order 2 or higher.
+**In minimum time,** `examples.six_joint_arm_min_time()` adds bounded jerks, and the riding
+kernel solves a small quadratic program at run time. The first guess needs no draws: each
+joint alone follows its costates from a long time down to its minimum time, because
+the free arcs do not couple them. The default policy adds its small jerk cost.
+
+```python
+h = Homotopy(examples.six_joint_arm_min_time())
+q0, qf, j_max = [0] * 6, [1.0, -0.9, 0.8, 1.1, -0.7, 0.6], [30.0] * 6
+r = h.solve([*q0, *qf, *j_max, *limits], ([-0.5] * 18, [0.5] * 18), (0.3, 5.0))
+```
+
+Tightening all six limits together on ten random goals, at `j_max = 30`, with the
+first guess taking about 38 s:
+
+| Limits at | Solved exactly | Median search | Largest rise in `t_f` |
+|---|---|---|---|
+| 95% | 8 of 10 | 42 s | 0.0006 s |
+| 90% | 5 of 10 | 52 s | 0.0001 s |
+| 80% | 3 of 10 | 57 s | 0.012 s |
+| 70% | 2 of 10 | 239 s | 0.040 s |
+
+So this is reliable where the limits barely bind and weak where they set the time: the search
+often stalls as a new limit comes into play, and that is the main open problem at this size.
+Solutions pass an independent replay of the jerks, to about 5e-11 in cost. They satisfy
+the necessary conditions; a six-joint arm can have several such motions.
+
+**Not yet supported at this size:** limits of order 2 or higher.
 
 ### Singular arcs
 
@@ -719,7 +743,7 @@ a speed limit, a singular regulator and Goddard's rocket (singular arcs).
 
 ## Benchmarks against the literature
 
-`benchmarks/` solves fourteen canonical problems from scratch and compares each
+`benchmarks/` solves fifteen canonical problems from scratch and compares each
 indirect solution with a published value. Each benchmark gives
 `auto_optimal_control.homotopy` the problem, its parameter values and a box
 (or a function) to draw costates and `t_f` from, and nothing else. No
@@ -740,6 +764,7 @@ never as a starting point.
 | Two-link arm, minimum jerk with torque limits (arcs in sequence, overlapping, nested) | `∫j²/2` | 1840.217, 7464.658, 14418.501 | matches to 1e-6 | independent SciPy simulation of the arm under this jerk |
 | Two-link arm, minimum time with bounded jerks and torque limits (default policy: `+ 0.01 ∫(j/j_max)²/2`; joint 1, joint 2, both overlapping) | `t_f + w∫(j/j_max)²/2` | 3.685578, 3.743091, 4.184111 | matches to 2e-9 | independent SciPy simulation of the arm under this jerk |
 | Six joints under gravity, minimum jerk (limits loose; three joints limited; all six limited) | `∫Σj²/2` | 1900.8, 1940.4491, 1923.8469 | matches to 1e-8 | closed form (six quintics); independent SciPy replay of the jerk |
+| Six joints in minimum time with bounded jerks (default policy: `+ 0.01 ∫Σ(j/j_max)²/2`; limits loose, then all six at 95% and 90%) | `t_f + w∫Σ(j/j_max)²/2` | 1.054758, 1.070666, 1.070901 | `t_f` to 3e-5 of the slowest joint's closed form; the others to 5e-11 | closed form; independent SciPy replay of the jerk |
 | Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
 | Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
@@ -888,12 +913,13 @@ keeps a one-line summary at the bottom. The rendered videos are in
   smooth controls on a boundary arc are clipped when riding leaves a line
   of controls (one more control than limits ridden); with more freedom
   than that, they are only checked against their bounds.
-- **Arcs solved at run time are narrower.** They need limits of order 1, no
-  control sets, autonomous dynamics affine in the controls, and a cost
-  quadratic and strictly convex in them (`derive` reports the reason otherwise,
-  on `path_constraints[c].unsupported`). `NumericSystem` does not take limits on
-  a tape, and the search on many short arcs is the weakest part: about half of
-  the wrist-limited motions surveyed take over a minute or fail.
+- **Arcs solved at run time are narrower.** They need limits of order 1, control sets that
+  are boxes with bounds free of the state, autonomous dynamics affine in the controls, and a
+  cost quadratic and strictly convex in them (`derive` reports the reason otherwise, on
+  `path_constraints[c].unsupported`). `NumericSystem` does not take limits on a tape.
+- **The search on six joints is its weakest part.** See "Six joints": motions with many short
+  arcs, and minimum-time motions where torque limits set the time, often stall as a new limit
+  comes into play. They end as `exact = False`.
 - **Degeneracy is read from the structure of the statement.** `analyze`
   sees decoupled parts and unpriced controls; it cannot see a problem that
   is coupled but flat in some direction for numerical reasons.
@@ -976,9 +1002,10 @@ with PyPI trusted publishing, so no tokens are stored.
    controls, ridden one at a time, overlapping or nested; non-unique
    problems detected from the statement, with selectable policies; the arm
    in minimum time with bounded jerks; six joints under gravity with torque
-   limits, from a link table, through tapes and arcs solved at run time~~; next,
-   bounded jerks and order-2 limits at that size, and a better search for many
-   short arcs. Learned warm starts remain a possible last optimization.
+   limits, from a link table, through tapes and arcs solved at run time; the same arm in
+   minimum time with bounded jerks~~; next, a more reliable search when torque limits
+   set the time, order-2 limits at that size, and a better search for many short arcs.
+   Learned warm starts remain a possible last optimization.
 
 ## License
 
