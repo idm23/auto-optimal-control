@@ -357,6 +357,22 @@ class MultiArcShooting(SingleShooting):
       held on the last free arc before.
     - ``("switch", u)``: a bang-bang switch of a control that has a
       singular arc. Unknown: the switch time. Condition: ``S = 0`` there.
+    - ``("enter", c)`` and ``("exit", c)``: a boundary arc given by its two
+      junctions, so that arcs of different limits can overlap or nest:
+      ``[("enter", a), ("enter", b), ("exit", a), ("exit", b)]`` rides ``a``,
+      then ``a`` and ``b`` together, then ``b``. While several limits are
+      ridden the segment follows their set's kernels
+      (``derive(problem, simultaneous=...)``; ``kernels.boundary_set``). The
+      unknowns are each arc's ``(t_in, t_out, pi)``, in the order the arcs
+      are entered. ``("boundary", c)`` is ``("enter", c), ("exit", c)``.
+
+    At the junctions of an order-1 limit, when ``H`` is regular (unbounded
+    controls, no control sets), the control and the costates are continuous
+    (Jacobson, Lele & Speyer 1971). There ``H`` continuity is replaced by
+    conditions with simple roots: ``dg/dt = 0`` just before the entry (the
+    arrival is tangential) and ``mu = 0`` at the exit, which gives exact
+    junction times where ``H`` continuity converges only linearly.
+    ``junctions="hamiltonian"`` keeps ``H`` continuity everywhere.
 
     ``c`` is a constraint index or name, ``u`` a switching-function index or
     the control's name. ``max_nfev`` caps the right-hand-side evaluations
@@ -397,14 +413,39 @@ class MultiArcShooting(SingleShooting):
     _SIZES = {"touch": 2, "singular": 2, "singular_joined": 1, "switch": 1}
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
-                 atol=1e-12, max_nfev=200000):
+                 atol=1e-12, max_nfev=200000, junctions="auto"):
         super().__init__(kernels, params, x0=x0, method=method, rtol=rtol, atol=atol,
                          n_interior=0)
+        if junctions not in ("auto", "hamiltonian"):
+            raise ValueError("junctions must be 'auto' or 'hamiltonian'")
+        self.junctions = junctions
         k = kernels
         self.arcs = []
+        self.events = []                 # ("in" | "out" | "touch" | "legacy", arc index)
+        open_arcs = {}                   # constraint -> index of its arc entered, not yet left
         sides = {}                       # singular control -> [(before, after)] in order
         for item in arcs:
             kind, c, *rest = item
+            if kind in ("enter", "exit"):
+                if rest:
+                    raise ValueError(f"an {kind} entry is ({kind!r}, constraint)")
+                if isinstance(c, str):
+                    c = list(k.CONSTRAINT_NAMES).index(c)
+                c = int(c)
+                if kind == "enter":
+                    if c in open_arcs:
+                        raise ValueError(f"{k.CONSTRAINT_NAMES[c]!r} is entered twice without an exit")
+                    if not k.EXACT_ARCS[c]:
+                        why = k.system.path_constraints[c].unsupported
+                        raise ValueError(f"path constraint {k.CONSTRAINT_NAMES[c]!r}: {why}")
+                    open_arcs[c] = len(self.arcs)
+                    self.events.append(("in", len(self.arcs)))
+                    self.arcs.append(("boundary", c, k.CONSTRAINT_ORDERS[c]))
+                else:
+                    if c not in open_arcs:
+                        raise ValueError(f"{k.CONSTRAINT_NAMES[c]!r} is left without being entered")
+                    self.events.append(("out", open_arcs.pop(c)))
+                continue
             if kind in ("boundary", "touch"):
                 if rest:
                     raise ValueError(f"a {kind} entry is ({kind!r}, constraint)")
@@ -416,6 +457,10 @@ class MultiArcShooting(SingleShooting):
                 q = k.CONSTRAINT_ORDERS[c]
                 if kind == "touch" and q != 2:
                     raise ValueError("touch points are supported for order-2 constraints")
+                if kind == "boundary":
+                    self.events += [("in", len(self.arcs)), ("out", len(self.arcs))]
+                else:
+                    self.events.append(("touch", len(self.arcs)))
                 self.arcs.append((kind, int(c), q))
             elif kind in ("singular", "switch"):
                 c = self._switching_index(c)
@@ -436,10 +481,23 @@ class MultiArcShooting(SingleShooting):
                     sides.setdefault(c, []).append(tuple(int(r == "upper") for r in rest))
                 elif rest:
                     raise ValueError("a switch entry is ('switch', control)")
+                self.events.append(("legacy", len(self.arcs)))
                 self.arcs.append((kind, c, tuple(int(r == "upper") for r in rest)))
             else:
-                raise ValueError("arc kind must be 'boundary', 'touch', 'singular' or 'switch', "
-                                 f"got {kind!r}")
+                raise ValueError("arc kind must be 'boundary', 'touch', 'singular', 'switch', "
+                                 f"'enter' or 'exit', got {kind!r}")
+        if open_arcs:
+            raise ValueError(f"{[k.CONSTRAINT_NAMES[c] for c in open_arcs]} entered but never left")
+        self._legacy = any(e[0] == "legacy" for e in self.events)
+        # Overlapping: an entry or a touch while another limit is ridden.
+        nested, depth = False, 0
+        for e in self.events:
+            if e[0] != "out" and depth > 0:
+                nested = True
+            depth += 1 if e[0] == "in" else -1 if e[0] == "out" else 0
+        if self._legacy and nested:
+            raise ValueError("overlapping boundary arcs are not supported with singular arcs")
+        self._nested = nested
         # The bound each control with a singular arc holds on the first free
         # arc: walk back from its first singular arc over its switches.
         self.frozen = {}
@@ -601,7 +659,180 @@ class MultiArcShooting(SingleShooting):
             D = Phi @ D + np.outer(r["dz_dt1"], dtb) - np.outer(Phi @ Fa, dta)
         return r, D
 
+    def _arc_id(self, active):
+        """The kernels' arc id for the set of constraints ``active`` (None: free)."""
+        if not active:
+            return None
+        if len(active) == 1:
+            return next(iter(active))
+        return self.kernels.boundary_set(sorted(active))
+
+    def _regular_junction(self, kind, q):
+        """Whether a boundary arc's junctions drop ``H`` continuity: an order-1
+        limit when ``H`` is regular (strictly convex in unbounded controls: no
+        control sets, so the control is interior at the junction). There the
+        control and the costates are
+        continuous (Jacobson, Lele & Speyer 1971): the state arrives
+        tangentially, so ``dg/dt = 0`` at the entry, and ``mu`` vanishes at the
+        exit. Both have simple roots, where ``H`` continuity and ``g = 0`` alone
+        have double ones (Newton then converges only linearly).
+        ``junctions="hamiltonian"`` keeps ``H`` continuity everywhere."""
+        return (kind == "boundary" and q == 1 and self.junctions == "auto"
+                and not self.kernels.N_SWITCHING and not self.kernels.system.problem.control_sets)
+
+    def _rate_of(self, c, arc_id, t, z, flags):
+        """``(dg_c/dt, its t-derivative, its z-gradient)`` along the free arc
+        (``arc_id`` None) or a boundary arc, for a time-invariant limit."""
+        k, p = self.kernels, self.params
+        n = k.N_STATES
+        _, Nx, Nxx, _ = k.tangency_gradient(c, t, z, p)
+
+        def flow(tt):
+            if arc_id is None:
+                arc = self._free_arc(tt, z, flags)
+                return k.rhs_arc(tt, z, p, arc) if k.N_MODES else k.rhs(tt, z, p)
+            return k.boundary_rhs(arc_id, tt, z, p)
+
+        F = flow(t)
+        if arc_id is None:
+            A = (k.jacobian(t, z, p, arc=self._free_arc(t, z, flags)) if k.N_MODES
+                 else k.jacobian(t, z, p))
+        else:
+            A = k.boundary_jacobian(arc_id, t, z, p)
+        gx = Nx[0]
+        val = float(gx @ F[:n])
+        gz = gx @ A[:n]
+        gz[:n] += Nxx[0] @ F[:n]
+        h = 1e-7 * max(1.0, abs(t))
+        gt = float(gx @ (flow(t + h)[:n] - flow(t - h)[:n])) / (2 * h)
+        return val, gt, gz
+
+    def _multiplier_of(self, arc_id, c, t, z):
+        """``(mu_c, dmu_c/dt, dmu_c/dz)`` of constraint ``c`` on arc ``arc_id``."""
+        k, p = self.kernels, self.params
+        mu = np.atleast_1d(k.boundary_multiplier(arc_id, t, z, p))
+        Mt, Mz = k.boundary_multiplier_gradient(arc_id, t, z, p)
+        i = list(k.arc_constraints(arc_id)).index(c)
+        return float(mu[i]), float(Mt[i]), Mz[i]
+
+    def _set_hamiltonian(self, arc_id, t, z, flags):
+        """``(H, dH/dt, dH/dz)`` on the free arc (``arc_id`` None) or a boundary arc."""
+        k, p = self.kernels, self.params
+        if arc_id is None:
+            return self._free_hamiltonian(t, z, flags)
+        Ht, Hz = k.hamiltonian_gradient(t, z, p, boundary=arc_id)
+        return k.boundary_hamiltonian(arc_id, t, z, p), Ht, Hz
+
+    def _evaluate_events(self, v, jac, record=False):
+        """The residual over boundary arcs and touch points that may overlap.
+
+        Between consecutive events the active limits are fixed and the
+        segment follows their kernels (free, one limit, or a set ridden at
+        once). Entering a limit adds its tangency conditions, the costate
+        jump ``-dN/dx^T pi`` and ``H`` continuity; leaving one adds ``H``
+        continuity; a touch point adds ``g = g' = 0`` and its jump.
+        """
+        k, p = self.kernels, self.params
+        n, N = k.N_STATES, self.n_unknowns
+        x0, lam0, nu, tf = self.unpack(v)
+        z0 = np.concatenate([x0, lam0])
+        m = self.n_free
+        D0 = np.zeros((2 * n, N))
+        D0[self.free_states, np.arange(m)] = 1.0
+        D0[n + np.arange(n), m + np.arange(n)] = 1.0
+
+        def unit(j):
+            e = np.zeros(N)
+            e[j] = 1.0
+            return e
+
+        rows, grads, segments = [], [], []
+        z, D, t, dt = z0, D0, self.t0, np.zeros(N)
+        flags = dict(self.frozen)
+        active = set()
+        for ev, i in self.events:
+            kind, c, q = self.arcs[i]
+            sl = self._arc_slices[i]
+            w = v[sl]
+            if ev == "out":
+                t_ev, d_ev = w[1], unit(sl.start + 1)
+            else:
+                t_ev, d_ev = w[0], unit(sl.start)
+            aid = self._arc_id(active)
+            seg = None if aid is None else "boundary"
+            r, D = self._segment(seg, aid, t, dt, z, D, t_ev, d_ev, jac, record, flags)
+            segments.append((seg, aid, t, t_ev, z, dict(flags) if aid is None else None, r))
+            z = r["z"]
+            t, dt = t_ev, d_ev
+            if ev == "out":
+                if self._regular_junction(kind, q):
+                    # mu_c vanishes at the exit of an order-1 limit when H is
+                    # regular: a simple root, where H continuity has a double one.
+                    val, Mt, Mz = self._multiplier_of(aid, c, t, z)
+                    rows.append(val)
+                    grads.append(Mt * d_ev + Mz @ D if jac else None)
+                else:
+                    after = self._arc_id(active - {c})
+                    H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags)
+                    H2, H2t, H2z = self._set_hamiltonian(after, t, z, flags)
+                    rows.append(H1 - H2)
+                    grads.append((H1t - H2t) * d_ev + (H1z - H2z) @ D if jac else None)
+                active.discard(c)
+                continue
+            Nv = k.tangency(c, t, z, p)
+            Nt, Nx, Nxx, Nxt = k.tangency_gradient(c, t, z, p)
+            for r_ in range(2 if kind == "touch" else q):
+                rows.append(Nv[r_])
+                grads.append(Nt[r_] * d_ev + Nx[r_] @ D[:n] if jac else None)
+            used = slice(0, 1) if kind == "touch" else slice(0, q)
+            mult = w[1:2] if kind == "touch" else w[2:]
+            mult_cols = [sl.start + 1] if kind == "touch" else list(range(sl.start + 2, sl.stop))
+            zp = z.copy()
+            zp[n:] -= Nx[used].T @ mult
+            Dp = None
+            if jac:
+                Dp = D.copy()
+                for r_, mu in enumerate(mult):
+                    Dp[n:] -= mu * (Nxx[r_] @ D[:n] + np.outer(Nxt[r_], d_ev))
+                Dp[n:, mult_cols] -= Nx[used].T
+            if kind == "boundary":
+                after = self._arc_id(active | {c})
+                if self._regular_junction(kind, q):
+                    # The arrival is tangential: g peaks there along the arc
+                    # before, so dg/dt = 0 (a simple root in t_in, where g = 0
+                    # alone has a double one).
+                    val, gt, gz = self._rate_of(c, aid, t, z, flags)
+                    rows.append(val)
+                    grads.append(gt * d_ev + gz @ D if jac else None)
+                else:
+                    # H continuous at the entry: H(before, z-) = H(after, z+).
+                    H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags)
+                    H2, H2t, H2z = self._set_hamiltonian(after, t, zp, flags)
+                    rows.append(H1 - H2)
+                    grads.append((H1t - H2t) * d_ev + H1z @ D - H2z @ Dp if jac else None)
+                active.add(c)
+            z = zp
+            if jac:
+                D = Dp
+        d_tf = unit(m + n + k.N_MULTIPLIERS) if k.FREE_FINAL_TIME else np.zeros(N)
+        r, D = self._segment(None, None, t, dt, z, D, tf, d_tf, jac, record, flags)
+        segments.append((None, None, t, tf, z, dict(flags), r))
+        zf = r["z"]
+        R = np.concatenate([k.residual(z0, zf, nu, tf, p)[self._rows], rows])
+        if not jac:
+            return R, None, segments
+        Jb = k.residual_jacobian(z0, zf, nu, tf, p)
+        Jbase = Jb["z0"][self._rows] @ D0 + Jb["zf"][self._rows] @ D
+        if k.N_MULTIPLIERS:
+            Jbase[:, m + n:m + n + k.N_MULTIPLIERS] += Jb["nu"][self._rows]
+        if k.FREE_FINAL_TIME:
+            Jbase += np.outer(Jb["tf"][self._rows], d_tf)
+        J = np.vstack([Jbase] + [g[None, :] for g in grads]) if grads else Jbase
+        return R, J, segments
+
     def _evaluate(self, v, jac, record=False):
+        if not self._legacy:
+            return self._evaluate_events(v, jac, record)
         k, p = self.kernels, self.params
         n, N = k.N_STATES, self.n_unknowns
         x0, lam0, nu, tf = self.unpack(v)
@@ -735,13 +966,14 @@ class MultiArcShooting(SingleShooting):
         or ``"lm"`` with bang-bang controls: there the control jumps at a
         junction, ``H`` continuity reads ``|S| = 0`` (a kink at the root) and
         the Broyden updates of ``"hybr"`` stall on it, while ``"lm"`` takes the
-        exact Jacobian at every step. If MINPACK still stops short of ``tol``
-        there, plain Newton steps finish the solve: the exact Jacobian carries
-        the sign of ``S``, so each is Newton's step on the smooth ``S``."""
+        exact Jacobian at every step. If MINPACK stops close to but short of
+        ``tol`` (within 1e-3), plain Newton steps with the exact Jacobian finish
+        the solve; with bang-bang controls the Jacobian carries the sign of
+        ``S``, so each is Newton's step on the smooth ``S``."""
         if method is None:
             method = "lm" if self.kernels.N_SWITCHING else "hybr"
         sol = super().solve(guess, method=method, tol=tol, options=options)
-        if sol.success or not self.kernels.N_SWITCHING:
+        if sol.success or not np.isfinite(sol.residual_norm) or sol.residual_norm > 1e-3:
             return sol
         v, best, steps = sol.v, sol.residual_norm, 0
         for steps in range(1, 21):
@@ -781,7 +1013,9 @@ class MultiArcShooting(SingleShooting):
         """The extremal at ``v``, sampled on every arc.
 
         Returns a dict with ``t``, ``z``, ``u``, ``g`` (every path constraint),
-        ``arc`` (the active constraint on boundary arcs, else -1),
+        ``arc`` (on boundary arcs the kernels' arc id: the constraint, or
+        ``N_CONSTRAINTS + k`` for set ``k`` of limits ridden at once; else -1),
+        ``active`` (len, NC): which limits are ridden at each sample,
         ``singular`` (the switching function on singular arcs, else -1) and
         ``held`` (len, NSW): on free arcs, the bound (1 upper, 0 lower) each
         control with a singular arc holds, else -1. Plus ``junctions`` (the
@@ -829,8 +1063,12 @@ class MultiArcShooting(SingleShooting):
                 Hd.append(held)
         T, Z = np.array(T), np.array(Z)
         G = np.array([k.constraint(ti, zi, p) for ti, zi in zip(T, Z)]).reshape(len(T), -1)
+        A = np.array(A)
+        active = np.zeros((len(T), k.N_CONSTRAINTS), dtype=bool)
+        for aid in set(A.tolist()) - {-1}:
+            active[np.ix_(A == aid, list(k.arc_constraints(aid)))] = True
         return {"t": T, "z": Z, "u": np.array(U).reshape(len(T), -1), "g": G,
-                "arc": np.array(A), "singular": np.array(Sg),
+                "arc": A, "active": active, "singular": np.array(Sg),
                 "held": np.array(Hd).reshape(len(T), k.N_SWITCHING),
                 "junctions": np.array([s[2] for s in segs[1:]])}
 
@@ -861,16 +1099,20 @@ class MultiArcShooting(SingleShooting):
                 for kind, c, _ in self.arcs if kind.startswith("singular")]
 
     def _violations(self, tr):
+        """Per constraint, the largest ``max(0, g)`` where it is not ridden (free
+        arcs and other limits' arcs), raised to the bound violation of the
+        controls where it is; and per boundary arc that bound violation."""
         k = self.kernels
-        free = tr["arc"] < 0
         out = np.zeros(k.N_CONSTRAINTS)
-        if free.any() and k.N_CONSTRAINTS:
-            out = np.maximum(tr["g"][free].max(axis=0), 0.0)
+        for c in range(k.N_CONSTRAINTS):
+            off = ~tr["active"][:, c]
+            if off.any():
+                out[c] = max(float(tr["g"][off, c].max()), 0.0)
         bound = []
         for kind, c, _ in self.arcs:
             if kind != "boundary":
                 continue
-            worst = self._bound_violation(tr, tr["arc"] == c)
+            worst = self._bound_violation(tr, tr["active"][:, c])
             bound.append(worst)
             out[c] = max(out[c], worst)
         return out, bound
@@ -878,7 +1120,8 @@ class MultiArcShooting(SingleShooting):
     def diagnostics(self, v, n_points=401):
         """Checks of a solution beyond the residual.
 
-        Returns a dict with ``free_arc_violation`` (per constraint), ``touch_nu``
+        Returns a dict with ``free_arc_violation`` (per constraint, wherever it
+        is not ridden: free arcs and other limits' arcs), ``touch_nu``
         (should be >= 0), ``boundary_pi``, and per boundary arc the range of
         its multiplier ``mu`` (should be >= 0) and of its controls along the
         arc, and ``boundary_bound_violation``: how far those controls leave
@@ -896,11 +1139,13 @@ class MultiArcShooting(SingleShooting):
         k, p = self.kernels, self.params
         tr = self.trajectory(v, n_points)
         arcs = self.unpack_arcs(v)
-        free = tr["arc"] < 0
+        free = np.zeros(k.N_CONSTRAINTS)
+        for c in range(k.N_CONSTRAINTS):
+            off = ~tr["active"][:, c]
+            if off.any():
+                free[c] = max(float(tr["g"][off, c].max()), 0.0)
         _, bound = self._violations(tr)
-        out = {"free_arc_violation": (np.maximum(tr["g"][free].max(axis=0), 0.0)
-                                      if free.any() and k.N_CONSTRAINTS
-                                      else np.zeros(k.N_CONSTRAINTS)),
+        out = {"free_arc_violation": free,
                "boundary_bound_violation": bound,
                "touch_nu": [a[1] for (kind, *_), a in zip(self.arcs, arcs) if kind == "touch"],
                "boundary_pi": [a[2] for (kind, *_), a in zip(self.arcs, arcs)
@@ -911,9 +1156,12 @@ class MultiArcShooting(SingleShooting):
                "held_sign_violation": {}}
         for kind, c, _ in self.arcs:
             if kind == "boundary":
-                on = tr["arc"] == c
-                mu = [k.boundary_multiplier(c, ti, zi, p)
-                      for ti, zi in zip(tr["t"][on], tr["z"][on])]
+                on = tr["active"][:, c]
+                mu = []
+                for ti, zi, aid in zip(tr["t"][on], tr["z"][on], tr["arc"][on]):
+                    m_ = k.boundary_multiplier(aid, ti, zi, p)
+                    mu.append(m_ if aid < k.N_CONSTRAINTS
+                              else m_[list(k.arc_constraints(aid)).index(c)])
                 out["boundary_mu"].append((min(mu), max(mu)))
                 out["boundary_u"].append((tr["u"][on].min(axis=0), tr["u"][on].max(axis=0)))
             elif kind.startswith("singular"):

@@ -11,6 +11,9 @@ into a :class:`PontryaginSystem`, which holds every expression an indirect
   ``x' = dH/dlambda``, ``lambda' = -dH/dx``, evaluated at ``u*``;
 - for each path constraint ``g <= 0``, its order and time derivatives, and
   the exterior penalty it adds to the running cost, if it has a weight;
+- the boundary arcs that ride one limit, or several at once
+  (``boundary_sets``: up to ``simultaneous`` limits, at most one per
+  control), with their controls, multipliers and dynamics;
 - the boundary-condition residuals: fixed initial states (or
   ``lambda_i(t_0) = 0`` for free ones), terminal constraints, transversality
   ``lambda(t_f) = dPhi/dx`` with ``Phi = phi + nu . psi``, and, for a free
@@ -40,6 +43,7 @@ quantities (masses, thrust, exhaust speed) with ``positive=True`` so SymPy can
 simplify the same way.
 """
 
+import itertools
 import warnings
 from dataclasses import dataclass
 
@@ -133,6 +137,11 @@ class BoundaryArc:
     is then the control that rides the limit, which must lie within its
     bounds along the arc. ``bounds`` maps each bounded control to its
     ``(lower, upper)``; shooting reports how far ``u_b`` leaves them.
+
+    An arc that rides several limits at once (:attr:`PontryaginSystem.boundary_sets`)
+    adjoins each with its own multiplier: the controls and ``mu_i`` solve
+    ``dH/du + sum mu_i dg_i^(q)/du = 0`` and every ``g_i^(q) = 0``;
+    ``constraints`` lists the limits and ``multipliers`` their ``mu_i``.
     """
 
     control: dict
@@ -141,6 +150,8 @@ class BoundaryArc:
     hamiltonian: sp.Expr
     running_cost: sp.Expr
     bounds: dict = None
+    constraints: tuple = ()        # for an arc riding several limits: their indices
+    multipliers: tuple = ()        # and one mu per limit (``multiplier`` is the first)
 
 
 @dataclass(frozen=True)
@@ -200,6 +211,7 @@ class PontryaginSystem:
     penalty: sp.Expr = sp.S.Zero   # sum of the exterior penalties, part of L and H above
     singular_arcs: tuple = ()      # per switching function: SingularArc, or None
     singular_unsupported: tuple = ()   # per switching function: why not, when None
+    boundary_sets: tuple = ()      # ((constraint indices, BoundaryArc), ...): limits ridden at once
 
     @property
     def z(self):
@@ -425,6 +437,38 @@ def constraint_derivatives(problem, expr):
                      f"of the path constraint {expr} <= 0: the controls cannot influence it")
 
 
+# simplify() is kept for small expressions, where it reads best; on larger
+# ones it can take minutes (trigsimp on a two-link arm's boundary arcs), and
+# code generation shares their common subexpressions anyway.
+SIMPLIFY_MAX_OPS = 40
+
+
+def _tidy(expr):
+    """``simplify(expr)`` when it is small, else ``expr`` as it is."""
+    if sp.count_ops(expr) <= SIMPLIFY_MAX_OPS:
+        return sp.simplify(expr)
+    return expr
+
+
+def _solve_linear(eqs, unknowns):
+    """The unique solution of equations linear in ``unknowns``, or None.
+
+    None when they are not linear (the caller falls back to ``sp.solve``) or
+    have no unique solution.
+    """
+    try:
+        A, b = sp.linear_eq_to_matrix(eqs, unknowns)
+    except (sp.polys.polyerrors.PolyNonlinearError, ValueError):
+        return None
+    if A.shape[0] != A.shape[1]:
+        return None
+    det = sp.cancel(A.det())
+    if det == 0:
+        return None
+    x = A.LUsolve(b)
+    return dict(zip(unknowns, x))
+
+
 def _boundary_arc(problem, H, costates, derivatives):
     """The :class:`BoundaryArc` of a constraint with ``g^(q) = derivatives[-1]``,
     or ``(None, reason)``."""
@@ -436,25 +480,72 @@ def _boundary_arc(problem, H, costates, derivatives):
     if any(problem.time in e.free_symbols for e in derivatives[:order]):
         # At the entry H then jumps by pi . dN/dt, which shooting does not model.
         return None, "g, ..., g^(q-1) depend on time: exact arcs need a time-invariant limit"
-    gq = derivatives[-1]
-    mu = sp.Symbol("mu_b")
-    lagrangian = H + mu * gq
-    eqs = [sp.diff(lagrangian, u) for u in problem.controls] + [gq]
-    try:
-        sols = sp.solve(eqs, [*problem.controls, mu], dict=True)
-    except NotImplementedError:
-        sols = []
-    if len(sols) != 1 or any(u not in sols[0] for u in (*problem.controls, mu)):
+    arc = _riding(problem, H, [derivatives[-1]])
+    if arc is None:
         return None, "g^(q) = 0 and dH/du + mu dg^(q)/du = 0 have no unique solution for u, mu"
-    sol = {k: sp.simplify(v) for k, v in sols[0].items()}
+    return arc, ""
+
+
+def _riding(problem, H, gqs, constraints=()):
+    """The :class:`BoundaryArc` that rides every limit whose top derivative is in
+    ``gqs`` at once, or None when the controls and multipliers are not unique.
+
+    The controls and the multipliers ``mu`` solve ``dH/du + sum mu_i dg_i^(q)/du = 0``
+    and ``g_i^(q) = 0``; the costates follow ``-d(H + sum mu_i g_i^(q))/dx``.
+    """
+    mus = [sp.Symbol(f"mu_b{i}" if len(gqs) > 1 else "mu_b") for i in range(len(gqs))]
+    lagrangian = H + sp.Add(*[m * g for m, g in zip(mus, gqs)])
+    unknowns = [*problem.controls, *mus]
+    eqs = [sp.diff(lagrangian, u) for u in problem.controls] + list(gqs)
+    sol = _solve_linear(eqs, unknowns)
+    if sol is None:
+        if len(gqs) > 1:
+            return None
+        try:
+            sols = sp.solve(eqs, unknowns, dict=True)
+        except NotImplementedError:
+            sols = []
+        if len(sols) != 1 or any(u not in sols[0] for u in unknowns):
+            return None
+        sol = sols[0]
+    sol = {k: _tidy(v) for k, v in sol.items()}
     law = {u: sol[u] for u in problem.controls}
-    xdot = tuple(sp.simplify(f.subs(law)) for f in problem.dynamics)
-    lamdot = tuple(sp.simplify(-sp.diff(lagrangian, x).subs(sol)) for x in problem.states)
+    xdot = tuple(_tidy(f.subs(law)) for f in problem.dynamics)
+    lamdot = tuple(_tidy(-sp.diff(lagrangian, x).subs(sol)) for x in problem.states)
     bounds = {cs.control: (cs.lower, cs.upper) for cs in problem.control_sets}
-    return BoundaryArc(control=law, multiplier=sol[mu], dynamics=xdot + lamdot,
-                       hamiltonian=sp.simplify(H.subs(law)),
-                       running_cost=sp.simplify(problem.running_cost.subs(law)),
-                       bounds=bounds), ""
+    multipliers = tuple(sol[m] for m in mus)
+    return BoundaryArc(control=law, multiplier=multipliers[0], dynamics=xdot + lamdot,
+                       hamiltonian=_tidy(H.subs(law)),
+                       running_cost=_tidy(problem.running_cost.subs(law)),
+                       bounds=bounds, constraints=tuple(constraints), multipliers=multipliers)
+
+
+def _exclusive(problem, a, b):
+    """Whether limits ``a`` and ``b`` can never be active together: ``g_a + g_b``
+    does not depend on the states (a lower and an upper bound on one quantity)."""
+    total = sp.simplify(a.expr + b.expr)
+    return not (total.free_symbols & set(problem.states)) and total != 0
+
+
+def _boundary_sets(problem, H, constraints, simultaneous):
+    """Boundary arcs riding several limits at once: ``((indices, BoundaryArc), ...)``.
+
+    Every set of up to ``simultaneous`` limits with exact arcs (and at most one
+    per control) whose riding controls and multipliers are unique, leaving
+    out pairs that exclude each other.
+    """
+    exact = [i for i, c in enumerate(constraints) if c.boundary is not None]
+    largest = min(int(simultaneous), len(problem.controls), len(exact))
+    out = []
+    for size in range(2, largest + 1):
+        for idx in itertools.combinations(exact, size):
+            if any(_exclusive(problem, constraints[a], constraints[b])
+                   for a, b in itertools.combinations(idx, 2)):
+                continue
+            arc = _riding(problem, H, [constraints[i].derivatives[-1] for i in idx], idx)
+            if arc is not None:
+                out.append((idx, arc))
+    return tuple(out)
 
 
 def _state_constraints(problem, H=None, costates=()):
@@ -518,12 +609,14 @@ def _singular_arc(problem, H, law, costates, sw):
                        upper=sw.upper), ""
 
 
-def derive(problem, singular=False):
+def derive(problem, singular=False, simultaneous=2):
     """Derive the first-order necessary conditions of ``problem``.
 
     With ``singular=True``, also derive the singular arc of each bang-bang
     control (:class:`SingularArc`), for exact shooting over structures with
-    singular arcs. Returns a :class:`PontryaginSystem`.
+    singular arcs. ``simultaneous`` is the largest number of path
+    constraints an exact arc may ride at once (:attr:`PontryaginSystem.boundary_sets`);
+    1 derives single limits only. Returns a :class:`PontryaginSystem`.
     """
     taken = {s.name for s in (problem.time, *problem.states, *problem.controls, *problem.params)}
     costates = tuple(_new_symbol(f"lam_{s.name}", taken, real=True) for s in problem.states)
@@ -554,6 +647,7 @@ def derive(problem, singular=False):
         singular_arcs.append(arc)
         singular_unsupported.append(why)
 
+    sets = _boundary_sets(problem, H, constraints, simultaneous) if simultaneous > 1 else ()
     boundary = _boundary_conditions(problem, H_star + penalty, costates, taken)
     return PontryaginSystem(
         problem=problem, time=problem.time, states=problem.states, costates=costates,
@@ -562,4 +656,4 @@ def derive(problem, singular=False):
         running_cost=sp.simplify(problem.running_cost.subs(law)) + penalty,
         state_dynamics=state_dynamics, costate_dynamics=costate_dynamics, boundary=boundary,
         path_constraints=constraints, penalty=penalty, singular_arcs=tuple(singular_arcs),
-        singular_unsupported=tuple(singular_unsupported))
+        singular_unsupported=tuple(singular_unsupported), boundary_sets=sets)

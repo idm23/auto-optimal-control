@@ -36,6 +36,7 @@ cdef extern from "{{header}}" nogil:
     int P_b_cost_rate "{{P}}boundary_cost_rate"(int c, double t, const double* z, const double* p, double* L)
     int P_b_control "{{P}}boundary_control"(int c, double t, const double* z, const double* p, double* u)
     int P_b_multiplier "{{P}}boundary_multiplier"(int c, double t, const double* z, const double* p, double* mu)
+    int P_b_multiplier_grad "{{P}}boundary_multiplier_grad"(int c, double t, const double* z, const double* p, double* Mt, double* Mz)
     int P_b_tangency "{{P}}boundary_tangency"(int c, double t, const double* z, const double* p, double* N)
     int P_b_tangency_grad "{{P}}boundary_tangency_grad"(int c, double t, const double* z, const double* p, double* Nt, double* Nx)
     int P_b_tangency_hess "{{P}}boundary_tangency_hess"(int c, double t, const double* z, const double* p, double* Nxx, double* Nxt)
@@ -72,6 +73,8 @@ cdef enum:
     NC1 = {{NC1}}
     NM1 = {{NM1}}
     QMAX = {{QMAX}}
+    NSET = {{NSET}}
+    MSET = {{MSET}}
     # FNI events: the NM mode guards, one peak guard per constraint, then the NK
     # saturation guards
     NE = {{NM}} + {{NC}} + {{NK}}
@@ -89,6 +92,9 @@ CONSTRAINT_NAMES = {{constraint_names}}
 CONSTRAINT_ORDERS = {{constraint_orders}}
 EXACT_ARCS = {{exact_arcs}}     # per constraint: boundary-arc kernels generated
 SINGULAR_ARCS = {{singular_arcs}}   # per switching function: singular-arc kernels generated
+# Sets of limits ridden at once, as constraint indices: the boundary-arc
+# kernels of set k have id N_CONSTRAINTS + k (ids below that are single limits).
+BOUNDARY_SETS = {{boundary_sets}}
 N_CONTROLS = NU
 N_MULTIPLIERS = NNU
 N_RESIDUALS = NR
@@ -1137,15 +1143,46 @@ def propagate_batch(t0, z0, t1, params=None, *, stm=False, param_sensitivity=Fal
 # -----------------------------------------------------------------------------
 
 def _exact(c):
+    """The arc id of a constraint (index or name) or of a set of limits (id >= NC)."""
     if isinstance(c, str):
         c = CONSTRAINT_NAMES.index(c)
     c = int(c)
+    if NC <= c < NC + NSET:
+        return c
     if not 0 <= c < NC:
-        raise ValueError(f"path constraint index {c} out of range ({NC} constraints)")
+        raise ValueError(f"path constraint index {c} out of range ({NC} constraints, "
+                         f"{NSET} sets of limits)")
     if not EXACT_ARCS[c]:
         raise ValueError(f"path constraint {CONSTRAINT_NAMES[c]!r} has no exact boundary arc "
                          "(see PontryaginSystem.path_constraints[c].unsupported)")
     return c
+
+
+def _single(c):
+    """A single constraint's arc id (tangency is per constraint)."""
+    k = _exact(c)
+    if k >= NC:
+        raise ValueError(f"arc id {k} rides a set of limits; tangency is per constraint")
+    return k
+
+
+def arc_constraints(c):
+    """The constraint indices a boundary arc id rides: ``(c,)`` or a set."""
+    k = _exact(c)
+    return (k,) if k < NC else tuple(BOUNDARY_SETS[k - NC])
+
+
+def boundary_set(constraints):
+    """The arc id that rides exactly ``constraints`` (indices or names) at once."""
+    idx = tuple(sorted(CONSTRAINT_NAMES.index(c) if isinstance(c, str) else int(c)
+                       for c in constraints))
+    if len(idx) == 1:
+        return _exact(idx[0])
+    for k, s in enumerate(BOUNDARY_SETS):
+        if tuple(s) == idx:
+            return NC + k
+    raise ValueError(f"no exact arc rides {[CONSTRAINT_NAMES[i] for i in idx]} at once "
+                     "(derive(problem, simultaneous=...) lists the sets in boundary_sets)")
 
 
 cdef struct _b_ctx:
@@ -1246,13 +1283,33 @@ def boundary_control(c, double t, z, params=None):
 
 
 def boundary_multiplier(c, double t, z, params=None):
-    """``mu`` of ``H + mu g^(q)`` on a boundary arc of constraint ``c``."""
+    """``mu`` of ``H + mu g^(q)`` on a boundary arc of constraint ``c``; for an arc
+    that rides a set of limits, the array of their ``mu`` (in ``arc_constraints`` order)."""
     cdef int k = _exact(c)
     cdef double[::1] zv = _buffer(z, NZ, "z")
     cdef double[::1] pv = _params(params)
-    cdef double mu = 0.0
-    _check(P_b_multiplier(k, t, &zv[0], &pv[0], &mu), "boundary_multiplier")
-    return mu
+    cdef double mu[MSET]
+    for i in range(MSET):
+        mu[i] = 0.0
+    _check(P_b_multiplier(k, t, &zv[0], &pv[0], &mu[0]), "boundary_multiplier")
+    if k < NC:
+        return mu[0]
+    return np.array([mu[i] for i in range(len(BOUNDARY_SETS[k - NC]))])
+
+
+def boundary_multiplier_gradient(c, double t, z, params=None):
+    """``(dmu/dt, dmu/dz)`` on a boundary arc: shapes ``(m,)`` and ``(m, NZ)``, with ``m``
+    the number of limits it rides (``arc_constraints`` order)."""
+    cdef int k = _exact(c)
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    Mt = np.zeros(MSET)
+    Mz = np.zeros(MSET * NZ)
+    cdef double[::1] tv = Mt
+    cdef double[::1] wv = Mz
+    _check(P_b_multiplier_grad(k, t, &zv[0], &pv[0], &tv[0], &wv[0]), "boundary_multiplier_gradient")
+    m = 1 if k < NC else len(BOUNDARY_SETS[k - NC])
+    return Mt[:m].copy(), Mz.reshape(MSET, NZ)[:m].copy()
 
 
 def hamiltonian_gradient(double t, z, params=None, boundary=None):
@@ -1283,7 +1340,7 @@ def boundary_hamiltonian(c, double t, z, params=None):
 
 def tangency(c, double t, z, params=None):
     """``N = (g, ..., g^(q-1))`` (q,) for constraint ``c`` of order ``q``."""
-    cdef int k = _exact(c)
+    cdef int k = _single(c)
     cdef double[::1] zv = _buffer(z, NZ, "z")
     cdef double[::1] pv = _params(params)
     out = np.zeros(QMAX)
@@ -1294,7 +1351,7 @@ def tangency(c, double t, z, params=None):
 
 def tangency_gradient(c, double t, z, params=None):
     """``(dN/dt (q,), dN/dx (q, n), d2N/dx2 (q, n, n), d2N/dxdt (q, n))``."""
-    cdef int k = _exact(c)
+    cdef int k = _single(c)
     cdef int q = CONSTRAINT_ORDERS[k]
     cdef int n = NZ // 2
     cdef double[::1] zv = _buffer(z, NZ, "z")

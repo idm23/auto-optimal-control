@@ -217,8 +217,8 @@ class Homotopy:
         Where the compiled kernels are cached.
     rtol, atol : float
         Integration tolerances of the shooting.
-    verbose : bool
-        Print each step.
+    verbose : bool or int
+        Print each step; 2 also prints every solve of the active-set route.
     """
 
     def __init__(self, problem, *, cache_dir=None, rtol=1e-12, atol=1e-12, verbose=False):
@@ -240,6 +240,10 @@ class Homotopy:
 
     def _say(self, *args):
         if self.verbose:
+            print(*args)
+
+    def _detail(self, *args):
+        if self.verbose and self.verbose > 1:
             print(*args)
 
     # -- kernels and parameters ---------------------------------------------
@@ -656,12 +660,12 @@ class Homotopy:
                             shoot = SingleShooting(kx, px, **self.options)
                             guess = np.asarray(base, dtype=float)
                             method = "hybr"
-                        sol = shoot.solve(guess, method=method, tol=tol,
+                        sol = shoot.solve(guess, method=method, tol=_scaled(tol, guess),
                                           options=_budget(method, self.attempt_evaluations))
                     except _FAILURES:
                         continue
                     tried += 1
-                    if self._accept(shoot, sol, tol):
+                    if self._accept(shoot, sol, _scaled(tol, guess)):
                         try:
                             J = self.objective(shoot, sol.v)
                         except _FAILURES:
@@ -680,31 +684,43 @@ class Homotopy:
         return MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, **self.options)
 
     def _free_samples(self, shoot, v, n_points=801):
-        """``(t, g)`` sampled on the free arcs of ``shoot`` at ``v``."""
+        """``[(t, g, active)]`` sampled on every segment of ``shoot`` at ``v``:
+        free arcs (``active`` empty) and boundary arcs (the limits ridden)."""
+        from fast_numerical_integration.integrators import solve_ivp
+
         k = shoot.kernels
         if not isinstance(shoot, MultiArcShooting):
             x0, lam0, _, tf = shoot.unpack(v)
             tr = k.trajectory(shoot.t0, np.concatenate([x0, lam0]), tf, shoot.params,
                               n_points=n_points, constraint_events=False, **self.options)
-            return [(tr["t"], tr["g"])]
+            return [(tr["t"], tr["g"], ())]
         _, _, segs = shoot._evaluate(np.asarray(v, dtype=float), jac=False)
         span = segs[-1][3] - shoot.t0
         out = []
-        for kind, _, ta, tb, za, flags, _ in segs:
-            if kind is not None:
-                continue
+        for kind, aid, ta, tb, za, flags, _ in segs:
             m = max(int(n_points * (tb - ta) / span), 3)
-            tr = k.trajectory(ta, za, tb, shoot.params, n_points=m, constraint_events=False,
-                              arc=shoot._free_arc(ta, za, flags), frozen=sorted(flags),
-                              **self.options)
-            out.append((tr["t"], tr["g"]))
+            if kind is None:
+                tr = k.trajectory(ta, za, tb, shoot.params, n_points=m, constraint_events=False,
+                                  arc=shoot._free_arc(ta, za, flags), frozen=sorted(flags),
+                                  **self.options)
+                out.append((tr["t"], tr["g"], ()))
+            elif kind == "boundary":
+                te = np.linspace(ta, tb, m)
+                sol = solve_ivp(k.BoundaryDynamics(aid, shoot.params), (ta, tb), za,
+                                method="DOP853", t_eval=te, rtol=self.options["rtol"],
+                                atol=self.options["atol"])
+                g = np.array([k.constraint(ti, zi, shoot.params)
+                              for ti, zi in zip(sol.t, sol.y.T)]).reshape(len(sol.t), -1)
+                out.append((sol.t, g, tuple(k.arc_constraints(aid))))
         return out
 
     def _free_violations(self, shoot, v, scale):
-        """``[(c, start, end, peak)]``: where each limit is violated on a free arc."""
+        """``[(c, start, end, peak)]``: where each limit is violated while it is not ridden."""
         out = []
-        for t, g in self._free_samples(shoot, v):
+        for t, g, active in self._free_samples(shoot, v):
             for c in range(self.nc):
+                if c in active:
+                    continue
                 bad = g[:, c] > 1e-6 * scale[c]    # above rounding at tangential junctions
                 if not bad.any():
                     continue
@@ -715,6 +731,35 @@ class Homotopy:
                     ta, tb = t[max(a - 1, 0)], t[min(b + 1, len(t) - 1)]
                     out.append((c, ta, tb, float(g[run, c].max())))
         return out
+
+    def _mas_entries(self, arcs, values, names=False):
+        """MultiArcShooting entries for arcs that may overlap: ``(entries, values)``.
+
+        The events (entries, exits, touches) are ordered by their times, so a
+        limit that comes into play while another is ridden becomes an arc
+        inside or across that one; the values follow the order of entry.
+        """
+        events = []
+        for i, ((kind, c), val) in enumerate(zip(arcs, values)):
+            if kind == "touch":
+                events.append((float(val[0]), 1, "touch", i))
+            else:
+                events += [(float(val[0]), 1, "enter", i), (float(val[1]), 0, "exit", i)]
+        events.sort(key=lambda e: (e[0], e[1]))
+        label = (lambda c: self.kr.CONSTRAINT_NAMES[c]) if names else (lambda c: c)
+        depth, overlap = 0, False
+        for _, _, ev, _ in events:
+            if ev != "exit" and depth > 0:
+                overlap = True             # an entry or touch while an arc is ridden
+            depth += 1 if ev == "enter" else -1 if ev == "exit" else 0
+        order = [i for _, _, ev, i in events if ev != "exit"]
+        if not overlap:
+            # Plain sequence: the compact entries.
+            entries = [("boundary" if arcs[i][0] == "boundary" else "touch", label(arcs[i][1]))
+                       for i in order]
+        else:
+            entries = [(ev, label(arcs[i][1])) for _, _, ev, i in events]
+        return entries, [values[i] for i in order]
 
     @staticmethod
     def _arcs_of(shoot, v):
@@ -829,6 +874,7 @@ class Homotopy:
     def _exact_jump(self, arcs, v, tol):
         """The exact problem's solve of structure ``arcs`` from ``v``: ``(J, shoot, sol)`` or None."""
         kx, px = self.exact_kernels, self.exact_params()
+        tol = _scaled(tol, v)
         try:
             if arcs:
                 shoot = MultiArcShooting(kx, px, arcs, max_nfev=self.attempt_nfev, **self.options)
@@ -840,9 +886,23 @@ class Homotopy:
                               options=_budget(method, 4 * self.attempt_evaluations))
             if self._accept(shoot, sol, tol):
                 return self.objective(shoot, sol.v), shoot, sol
-        except _FAILURES:
-            pass
+            self._detail(f"  exact solve: residual {sol.residual_norm:.1e} (max |v| "
+                         f"{np.abs(sol.v).max():.1e}), "
+                         f"max violation {sol.max_violation:.1e}; {self._rejection(shoot, sol)}")
+        except _FAILURES as exc:
+            self._detail(f"  exact solve failed: {exc}")
         return None
+
+    def _rejection(self, shoot, sol):
+        """Why ``_accept`` turned a converged solution down (for the log)."""
+        if not sol.success or not isinstance(shoot, MultiArcShooting) or not shoot.arcs:
+            return "not converged" if not sol.success else "rejected"
+        try:
+            d = shoot.diagnostics(sol.v)
+        except _FAILURES as exc:
+            return f"diagnostics failed: {exc}"
+        return (f"touch nu {np.round(d['touch_nu'], 6).tolist()}, mu ranges "
+                f"{[(round(a, 6), round(b, 6)) for a, b in d['boundary_mu']]}")
 
     def _active_set(self, sol, eps0, s_max, steps, tol, max_solves=400):
         """The active-set route: from the unconstrained regularized solution ``sol``
@@ -850,21 +910,27 @@ class Homotopy:
         true value, bringing in arcs as limits come into play, then lower
         ``eps`` with the structure following, trying the exact problem at each
         step. Returns ``(J, shoot, sol)`` or None."""
-        kr = self.kr
         deadline = time.perf_counter() + self.active_set_seconds
         shoot = self._smoothed([], eps0, np.zeros(self.nc))
-        (_, g), = self._free_samples(shoot, sol.v)
+        (_, g, _), = self._free_samples(shoot, sol.v)
         scale = np.maximum(g.max(axis=0) - g.min(axis=0), 1e-12)
         off0 = np.maximum(g.max(axis=0), 0.0) + 1e-3 * scale
         state = {"shoot": shoot, "v": sol.v, "le": np.log10(eps0) if self.bang_bang else 0.0,
                  "off": off0.copy(), "solves": 0}
         log_eps_min = state["le"] - s_max
 
+        # The path only has to be followed closely, not solved to the last digit:
+        # at an order-1 entry with a smooth control H continuity has a double
+        # root, and Newton converges only linearly there. The exact jumps use ``tol``.
+        path_tol = max(tol, 1e-6)
+
         def solve_structure(arcs, values, base, le, off):
-            sh = self._smoothed(arcs, 10.0 ** le if self.bang_bang else None, off)
+            entries, values = self._mas_entries(arcs, values)
+            sh = self._smoothed(entries, 10.0 ** le if self.bang_bang else None, off)
             guess = sh.pack_arcs(base, values) if arcs else np.asarray(base, dtype=float)
             state["solves"] += 1
-            r = sh.solve(guess, tol=tol, options=_budget("hybr", 4 * self.attempt_evaluations))
+            r = sh.solve(guess, tol=path_tol,
+                         options=_budget("hybr", 4 * self.attempt_evaluations))
             return sh, r
 
         def settle(sh, r, le, off):
@@ -874,6 +940,7 @@ class Homotopy:
                 viol = self._free_violations(sh, r.v, scale)
                 if viol:
                     if max(peak / scale[c] for c, _, _, peak in viol) > 1e-3:
+                        self._detail("    violation too large: a shorter step")
                         return None        # too far in: take a shorter step
                     options = self._activate(sh, r.v, viol)
                 else:
@@ -885,8 +952,11 @@ class Homotopy:
                 for arcs, values in options:
                     try:
                         nsh, nr = solve_structure(arcs, values, base, le, off)
-                    except _FAILURES:
+                    except _FAILURES as exc:
+                        self._detail(f"    try {self._mas_entries(arcs, values, True)[0]}: {exc}")
                         continue
+                    self._detail(f"    try {self._mas_entries(arcs, values, True)[0]}: "
+                                 f"residual {nr.residual_norm:.1e}")
                     if nr.success:
                         break
                 else:
@@ -918,8 +988,12 @@ class Homotopy:
                     vals = self._arcs_of(sh0, g)[1] if arcs else values
                     try:
                         sh, r = solve_structure(arcs, vals, base, le, off)
+                        self._detail(f"  step to {f:.6f} (ds {ds:.1e}): residual "
+                                     f"{r.residual_norm:.1e}; junctions "
+                                     f"{self._junction_text(sh, r.v)}")
                         done = settle(sh, r, le, off) if r.success else None
-                    except _FAILURES:
+                    except _FAILURES as exc:
+                        self._detail(f"  step to {f:.6f} (ds {ds:.1e}): {exc}")
                         done = None
                     if done is not None:
                         break
@@ -939,8 +1013,8 @@ class Homotopy:
 
         def try_exact():
             sh, v = state["shoot"], state["v"]
-            arcs, _ = self._arcs_of(sh, v)
-            entries = [(kind, kr.CONSTRAINT_NAMES[c]) for kind, c in arcs]
+            arcs, values = self._arcs_of(sh, v)
+            entries, _ = self._mas_entries(arcs, values, names=True)
             step = Step(log_eps_min + s_max - state["le"] if self.bang_bang else 0.0,
                         10.0 ** state["le"] if self.bang_bang else np.nan, np.zeros(self.nc),
                         0.0, candidates=1, structure=tuple(entries))
@@ -965,6 +1039,18 @@ class Homotopy:
         if advance(log_eps_min, np.zeros(self.nc), on_step=try_exact) and found:
             return found[0]
         return found[0] if found else None
+
+    def _junction_text(self, shoot, v):
+        if isinstance(shoot, MultiArcShooting) and shoot._nested:
+            return " ".join(f"{ev}:{self.kr.CONSTRAINT_NAMES[shoot.arcs[i][1]]}"
+                            for ev, i in shoot.events) + " | " + self._junction_text_plain(shoot, v)
+        return self._junction_text_plain(shoot, v)
+
+    def _junction_text_plain(self, shoot, v):
+        arcs, values = self._arcs_of(shoot, v)
+        return " ".join(f"{self.kr.CONSTRAINT_NAMES[c]}@" + (
+            f"{val[0]:.5f}" if kind == "touch" else f"[{val[0]:.5f},{val[1]:.5f}]")
+            for (kind, c), val in zip(arcs, values)) or "-"
 
     def _names(self, arcs):
         return ", ".join(f"{kind} {self.kr.CONSTRAINT_NAMES[c]}" for kind, c in arcs) or "free"
@@ -1095,7 +1181,10 @@ class Homotopy:
         # singular arcs, which only the penalty route reads; each route gets
         # the other as its fallback.
         first = sol
-        active_first = self.nc and not any(self.exact_kernels.SINGULAR_ARCS)
+        kx = self.exact_kernels
+        # The active-set route needs every limit to have exact arcs (order 1 or 2).
+        can_activate = self.nc and all(self.kr.EXACT_ARCS)
+        active_first = can_activate and not any(kx.SINGULAR_ARCS)
 
         def active_route():
             hit = self._active_set(first, eps0, s_max, steps, tol)
@@ -1151,7 +1240,7 @@ class Homotopy:
             J, xs, xsol = min(accepted, key=lambda a: a[0])
             return HomotopyResult(xsol, xs, self._entries(xs), True, J, xs.params, steps,
                                   tries, f"exact after {len(steps)} steps")
-        if self.nc and not active_first:
+        if can_activate and not active_first:
             self._say("penalty route: no exact structure; trying the active-set route")
             out = active_route()
             if out is not None:
@@ -1173,6 +1262,12 @@ class Homotopy:
         if not isinstance(shoot, MultiArcShooting):
             return ()
         k = shoot.kernels
+        if not shoot._legacy and shoot._nested:
+            out = []
+            for ev, i in shoot.events:
+                kind, c, _ = shoot.arcs[i]
+                out.append(({"in": "enter", "out": "exit"}.get(ev, ev), k.CONSTRAINT_NAMES[c]))
+            return tuple(out)
         out = []
         for kind, c, extra in shoot.arcs:
             if kind in ("boundary", "touch"):
@@ -1187,6 +1282,12 @@ class Homotopy:
             else:
                 out.append(("singular", name, *sides))
         return tuple(out)
+
+
+def _scaled(tol, v):
+    """``tol`` relative to the size of the unknowns (absolute while they are below 1):
+    costates in the thousands cannot be resolved to 1e-10 absolutely."""
+    return tol * max(1.0, float(np.abs(np.asarray(v, dtype=float)).max(initial=0.0)))
 
 
 def _budget(method, n):

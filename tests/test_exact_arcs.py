@@ -236,7 +236,9 @@ def test_order_one_boundary_arc_is_exact(vel_boundary):
     t1 = 3 * (V - 1) / (2 * V)
     assert sol.success
     (t_in, t_out, _), = shoot.unpack_arcs(sol.v)
-    assert t_in == pytest.approx(t1, abs=1e-8) and t_out == pytest.approx(1 - t1, abs=1e-8)
+    # dg/dt = 0 at the entry and mu = 0 at the exit have simple roots, so the
+    # junction times are exact (H continuity alone gave them to about 1e-8).
+    assert t_in == pytest.approx(t1, abs=1e-12) and t_out == pytest.approx(1 - t1, abs=1e-12)
     assert shoot.cost(sol.v) == pytest.approx(4 * V ** 2 / (3 * t1), rel=1e-10)
     tr = shoot.trajectory(sol.v)
     on = tr["arc"] == 0

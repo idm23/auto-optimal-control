@@ -4,6 +4,7 @@ Each function returns an :class:`~auto_optimal_control.problem.OptimalControlPro
 Constants are runtime parameters, so a derived system serves every value.
 """
 
+import numpy as np
 import sympy as sp
 
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint, UnitVector
@@ -317,6 +318,60 @@ def singular_regulator(smoothed=False):
         final_state={x: a}, final_time=T, control_sets=[Box(u, -1, 1)])
 
 
+def two_link_arm_torques(m1, m2, l1, l2, q2, w1, w2, a1, a2):
+    """The joint torques of a planar two-link arm of uniform rods (no gravity).
+
+    ``tau = M(q) a + c(q, w)``: link ``i`` has mass ``m_i`` and length ``l_i``,
+    pivoted at one end; ``q2`` is the elbow angle, ``w`` the joint rates and
+    ``a`` the joint accelerations. Works on SymPy symbols and NumPy arrays.
+    """
+    cos, sin = (sp.cos, sp.sin) if isinstance(q2, sp.Basic) else (np.cos, np.sin)
+    i1, i2 = m1 * l1 ** 2 / 3, m2 * l2 ** 2 / 3          # about each pivot
+    h = m2 * l1 * l2 / 2
+    M11 = i1 + i2 + m2 * l1 ** 2 + 2 * h * cos(q2)
+    M12 = i2 + h * cos(q2)
+    tau1 = M11 * a1 + M12 * a2 - h * sin(q2) * (2 * w1 * w2 + w2 ** 2)
+    tau2 = M12 * a1 + i2 * a2 + h * sin(q2) * w1 ** 2
+    return tau1, tau2
+
+
+def two_link_arm():
+    """A planar two-link arm, jerk-controlled, minimum jerk, with torque limits.
+
+    States: the joint angles ``q``, rates ``w`` and accelerations ``a``; the
+    controls are the joint jerks ``j``. Rest to rest from ``q = 0`` to
+    ``(q1f, q2f)`` in time ``T``, minimizing ``int (j1^2 + j2^2) / 2`` (the
+    minimum-jerk motion of Flash and Hogan, 1985), with each joint's torque
+    ``|tau_i| <= tau_i_max`` (:func:`two_link_arm_torques`, uniform rods, no
+    gravity). The torque limits are order 1, and each involves *both*
+    jerks: riding one fixes a combination of the controls, and riding one
+    limit on each joint fixes them both. Unconstrained, the joints follow
+    independent quintics; with tight limits the arcs come one after another,
+    overlap, or nest.
+
+    params: ``m1, m2, l1, l2, T, q1f, q2f, tau1_max, tau2_max``.
+    """
+    t = sp.Symbol("t", real=True)
+    q1, q2, w1, w2, a1, a2, j1, j2 = sp.symbols("q1 q2 w1 w2 a1 a2 j1 j2", real=True)
+    m1, m2, l1, l2, T, tau1_max, tau2_max = sp.symbols("m1 m2 l1 l2 T tau1_max tau2_max",
+                                                       positive=True)
+    q1f, q2f = sp.symbols("q1f q2f", real=True)
+    tau1, tau2 = two_link_arm_torques(m1, m2, l1, l2, q2, w1, w2, a1, a2)
+    return OptimalControlProblem(
+        name="two_link_arm", time=t, states=[q1, q2, w1, w2, a1, a2], controls=[j1, j2],
+        params=[m1, m2, l1, l2, T, q1f, q2f, tau1_max, tau2_max],
+        dynamics=[w1, w2, a1, a2, j1, j2], running_cost=(j1 ** 2 + j2 ** 2) / 2,
+        initial_state=[0] * 6, final_state={q1: q1f, q2: q2f, w1: 0, w2: 0, a1: 0, a2: 0},
+        final_time=T,
+        path_constraints=[PathConstraint(tau1 - tau1_max, "tau1_max"),
+                          PathConstraint(-tau1 - tau1_max, "tau1_min"),
+                          PathConstraint(tau2 - tau2_max, "tau2_max"),
+                          PathConstraint(-tau2 - tau2_max, "tau2_min")])
+
+
+TWO_LINK_ARM_PARAMS = (1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 1.0)   # m1, m2, l1, l2, T, q1f, q2f
+
+
 def goddard(dynamic_pressure=False):
     """Goddard's rocket: the highest climb on a given propellant, through drag.
 
@@ -381,6 +436,7 @@ def all_examples():
         "speed_limited_min_time": speed_limited_min_time(),
         "speed_limited_min_time_smoothed": speed_limited_min_time(smoothed=True),
         "jerk_limited_move": jerk_limited_move(),
+        "two_link_arm": two_link_arm(),
         "singular_regulator": singular_regulator(),
         "singular_regulator_smoothed": singular_regulator(smoothed=True),
         "goddard": goddard(),
