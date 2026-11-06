@@ -6,27 +6,49 @@ initial costates (and of ``t_f`` when it is free). Everything else is found:
 
 1. **Regularize.** :func:`regularize` adds a smoothing term
    ``eps ((u - mid) / half)^2 / 2`` to the running cost for each bang-bang
-   control (its law becomes clipped-linear) and an exterior penalty
-   ``rho / 2 max(0, g)^2`` for each path constraint, with ``eps`` and ``rho``
-   runtime parameters.
+   control (its law becomes clipped-linear), and for each path constraint
+   an exterior penalty ``rho / 2 max(0, g)^2`` and an offset (the limit
+   becomes ``g - off <= 0``), all runtime parameters.
 2. **Sample.** Single shooting from random costates on the regularized
-   problem, at ``eps = 1`` and ``rho = 0``.
-3. **Continue, in phases.** When a limit is first violated, ``eps`` is held
+   problem, at ``eps = 1``, with every limit off.
+3. **The active-set route** (problems with path constraints). Exact arcs on
+   the smoothed problem, built up as the limits are tightened:
+
+   - each limit's offset starts just above the unconstrained solution and
+     falls to zero in adaptive steps (a secant predictor starts each solve);
+   - when a free arc starts to violate a limit, the structure changes
+     there: a newborn touch point (order 2) or short boundary arc (order
+     1) with zero jump; a touch point violated beside it grows into a
+     boundary arc or splits into two; neighbouring arcs of one limit merge;
+     an arc that shrinks to nothing, or a touch point whose jump turns
+     negative, is retired;
+   - then ``eps`` falls, in decades, with the structure following, and the
+     *exact* problem is tried with the current structure at every step.
+
+   Arcs are born where a limit first comes into play, small and with small
+   jumps, which is where shooting with exact arcs is well conditioned. The
+   route ends at the first exact solution accepted (step 6). It goes first
+   unless the exact problem may have singular arcs (which only the penalty
+   route reads); each route is the other's fallback, and the active-set
+   route has a time budget, ``Homotopy.active_set_seconds``.
+4. **The penalty route.** When a limit is first violated, ``eps`` is held
    while its penalty weight ramps up, in decades, from ``1e-6 rho_ref`` to
    ``1e4 rho_ref`` (``rho_ref`` makes the penalty of the violation it saw as
    large as the cost); then ``eps`` falls, in decades, with the penalties
    held. A ramp that stalls is held where it got to. The steps adapt: they
    grow after a success and halve after a failure, and a secant predictor
    starts each solve.
-4. **Read the structure and jump.** After each step the regularized
-   solution is read: the intervals where each limit is violated become
-   boundary arcs (or touch points, for order 2), and stretches where a
-   bang-bang control stays strictly between its bounds become singular arcs
-   (or, when short, the ramps of ordinary switches). Each reading gives
-   candidate structures for :class:`~auto_optimal_control.shooting.MultiArcShooting`
-   on the *exact* problem, seeded from the regularized costates, junction
-   times and fitted jump multipliers, plus a few seeds with jittered times.
-5. **Accept.** A candidate is accepted when the exact solve converges and
+5. **Read the structure and jump** (penalty route). After each step the
+   regularized solution is read: the intervals where each limit is violated
+   become boundary arcs (or touch points, for order 2), and stretches where
+   a bang-bang control stays strictly between its bounds become singular
+   arcs (or, when short, the ramps of ordinary switches). Each reading
+   gives candidate structures for
+   :class:`~auto_optimal_control.shooting.MultiArcShooting` on the *exact*
+   problem, seeded from the regularized costates, junction times and
+   fitted jump multipliers, plus a few seeds with jittered times. This is
+   the route that finds singular arcs.
+6. **Accept.** A candidate is accepted when the exact solve converges and
    passes the necessary conditions it can check (no violation on free arcs,
    controls within bounds on special arcs, ``mu >= 0`` on boundary arcs,
    ``nu >= 0`` at touch points, Legendre-Clebsch, the held bounds agreeing
@@ -43,6 +65,7 @@ at once, a structure outside what :class:`MultiArcShooting` represents),
 """
 
 import itertools
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -55,6 +78,7 @@ from auto_optimal_control.shooting import MultiArcShooting, ShootingError, Singl
 
 EPS = "eps_reg"
 RHO = "rho_reg_"
+OFF = "off_reg_"
 _FAILURES = (ShootingError, RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError)
 
 
@@ -78,16 +102,19 @@ def _copy(problem, *, name, running_cost, params, path_constraints):
 
 
 def regularize(problem, bang_bang=None):
-    """The problem with a smoothing weight and a penalty weight per path constraint.
+    """The problem with a smoothing weight, and a penalty weight and an offset per path constraint.
 
     Each bang-bang control ``u`` in ``[lo, hi]`` gets
     ``eps ((u - mid) / half)^2 / 2`` in the running cost (``mid`` and
     ``half`` the middle and half-width of its range), so its law becomes
-    ``clip(mid - half^2 S / eps)``. Each path constraint ``c`` gets the
-    exterior penalty weight ``rho_reg_<name>``. Both are runtime parameters,
-    appended to ``problem.params`` (``eps_reg`` first, when there are
-    bang-bang controls). Penalty weights the problem gives itself are
-    replaced. ``bang_bang`` defaults to :func:`bang_bang_controls`.
+    ``clip(mid - half^2 S / eps)``. Each path constraint ``g <= 0`` gets the
+    exterior penalty weight ``rho_reg_<name>`` and becomes
+    ``g - off_reg_<name> <= 0``: an offset loosens the limit, and tightening
+    it back to zero is how :class:`Homotopy` brings a limit into play. All
+    are runtime parameters, appended to ``problem.params`` in that order
+    (``eps_reg`` first, when there are bang-bang controls, then the weights,
+    then the offsets). Penalty weights the problem gives itself are replaced.
+    ``bang_bang`` defaults to :func:`bang_bang_controls`.
 
     Returns ``(problem, eps, rhos)``: the regularized problem, the ``eps``
     symbol (``None`` without bang-bang controls) and the ``rho`` symbols.
@@ -104,10 +131,11 @@ def regularize(problem, bang_bang=None):
             mid, half = (lo + hi) / 2, (hi - lo) / 2
             cost = cost + eps * ((u - mid) / half) ** 2 / 2
     rhos = tuple(sp.Symbol(RHO + c.name, nonnegative=True) for c in problem.path_constraints)
-    limits = [PathConstraint(c.expr, c.name, penalty=r)
-              for c, r in zip(problem.path_constraints, rhos)]
+    offs = tuple(sp.Symbol(OFF + c.name, real=True) for c in problem.path_constraints)
+    limits = [PathConstraint(c.expr - o, c.name, penalty=r)
+              for c, r, o in zip(problem.path_constraints, rhos, offs)]
     reg = _copy(problem, name=(problem.name or "problem") + "_regularized", running_cost=cost,
-                params=params + list(rhos), path_constraints=limits)
+                params=params + list(rhos) + list(offs), path_constraints=limits)
     return reg, eps, rhos
 
 
@@ -130,7 +158,8 @@ class Step:
     ``s`` is how many decades ``eps`` has fallen from its start (0 without
     bang-bang controls), ``rho`` the penalty weights, ``candidates`` how many
     exact solves were tried from this step's reading, ``accepted`` whether
-    one passed.
+    one passed. On the active-set route ``structure`` is the set of arcs
+    the smoothed solution has at that step.
     """
 
     s: float
@@ -139,6 +168,7 @@ class Step:
     residual: float
     candidates: int = 0
     accepted: bool = False
+    structure: tuple = ()
 
 
 @dataclass
@@ -199,6 +229,7 @@ class Homotopy:
         self.verbose = verbose
         self.attempt_evaluations = 60      # MINPACK evaluations per exact attempt
         self.attempt_nfev = 50000          # right-hand-side evaluations per arc
+        self.active_set_seconds = 60.0     # time budget of the active-set route
         self.bang_bang = bang_bang_controls(problem)
         self.regularized, self.eps_symbol, self.rho_symbols = regularize(problem, self.bang_bang)
         self.kr = build_kernels(derive(self.regularized), cache_dir=cache_dir)
@@ -231,11 +262,14 @@ class Homotopy:
             return self.params.copy()
         return self.regularized_params(None, np.zeros(self.nc))
 
-    def regularized_params(self, eps, rho):
+    def regularized_params(self, eps, rho, off=None):
+        """The regularized problem's parameter vector at smoothing ``eps``, penalty
+        weights ``rho`` and limit offsets ``off`` (default zero: the exact limits)."""
         p = list(self.params)
         if self.bang_bang:
             p.append(eps)
-        return np.array(p + list(rho), dtype=float)
+        off = np.zeros(self.nc) if off is None else off
+        return np.array(p + list(rho) + list(off), dtype=float)
 
     def objective(self, shooting, v):
         """``phi(t_f, x(t_f)) + int L`` of the exact problem at ``v``."""
@@ -636,6 +670,305 @@ class Homotopy:
                         break              # this structure is solved; next candidate
         return accepted, tried, possible
 
+    # -- the active-set route ---------------------------------------------------
+
+    def _smoothed(self, arcs, eps, off):
+        """Shooting on the regularized kernels with exact arcs ``arcs`` and penalties off."""
+        p = self.regularized_params(eps, np.zeros(self.nc), off)
+        if not arcs:
+            return SingleShooting(self.kr, p, **self.options)
+        return MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, **self.options)
+
+    def _free_samples(self, shoot, v, n_points=801):
+        """``(t, g)`` sampled on the free arcs of ``shoot`` at ``v``."""
+        k = shoot.kernels
+        if not isinstance(shoot, MultiArcShooting):
+            x0, lam0, _, tf = shoot.unpack(v)
+            tr = k.trajectory(shoot.t0, np.concatenate([x0, lam0]), tf, shoot.params,
+                              n_points=n_points, constraint_events=False, **self.options)
+            return [(tr["t"], tr["g"])]
+        _, _, segs = shoot._evaluate(np.asarray(v, dtype=float), jac=False)
+        span = segs[-1][3] - shoot.t0
+        out = []
+        for kind, _, ta, tb, za, flags, _ in segs:
+            if kind is not None:
+                continue
+            m = max(int(n_points * (tb - ta) / span), 3)
+            tr = k.trajectory(ta, za, tb, shoot.params, n_points=m, constraint_events=False,
+                              arc=shoot._free_arc(ta, za, flags), frozen=sorted(flags),
+                              **self.options)
+            out.append((tr["t"], tr["g"]))
+        return out
+
+    def _free_violations(self, shoot, v, scale):
+        """``[(c, start, end, peak)]``: where each limit is violated on a free arc."""
+        out = []
+        for t, g in self._free_samples(shoot, v):
+            for c in range(self.nc):
+                bad = g[:, c] > 1e-6 * scale[c]    # above rounding at tangential junctions
+                if not bad.any():
+                    continue
+                idx = np.flatnonzero(bad)
+                for run in np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1):
+                    a, b = run[0], run[-1]
+                    # Widen to the neighbouring samples, where g was still <= 0.
+                    ta, tb = t[max(a - 1, 0)], t[min(b + 1, len(t) - 1)]
+                    out.append((c, ta, tb, float(g[run, c].max())))
+        return out
+
+    @staticmethod
+    def _arcs_of(shoot, v):
+        """The structure and its values, as MultiArcShooting entries (``[]`` for none)."""
+        if not isinstance(shoot, MultiArcShooting):
+            return [], []
+        return [(kind, c) for kind, c, _ in shoot.arcs], list(shoot.unpack_arcs(v))
+
+    def _activate(self, shoot, v, violations):
+        """Structures that bring the violated limits in, most likely first.
+
+        A violation away from the limit's arcs becomes a newborn touch point
+        (order 2) or a short boundary arc (order 1), with zero jump. A
+        violation beside arcs of the same limit widens them into one
+        boundary arc that covers it: a boundary arc widens, a touch point
+        grows into a boundary arc (its jump kept as the first ``pi``), and
+        neighbouring arcs with the violation between them merge. A touch
+        point violated on both sides may instead split into two touch points
+        that share its jump; that structure is offered second. Returns a list
+        of ``(arcs, values)``.
+        """
+        kr = self.kr
+        arcs, values = self._arcs_of(shoot, v)
+        T = shoot.unpack(v)[3] - shoot.t0
+        near = 0.05 * T
+
+        def span(i):
+            kind, val = arcs[i][0], values[i]
+            return (val[0], val[0]) if kind == "touch" else (val[0], val[1])
+
+        groups, born = [], []              # groups: [set of arc indices, [(a, b), ...]]
+        for c, a, b, _ in violations:
+            hits = {i for i, (_, cc) in enumerate(arcs)
+                    if cc == c and a - near <= span(i)[1] and b + near >= span(i)[0]}
+            if not hits:
+                q = kr.CONSTRAINT_ORDERS[c]
+                if q == 2:
+                    born.append((("touch", c), (0.5 * (a + b), 0.0)))
+                else:
+                    w = max(b - a, 1e-3 * T) / 2
+                    mid = 0.5 * (a + b)
+                    born.append((("boundary", c), (mid - w, mid + w, np.zeros(q))))
+                continue
+            for g in groups:
+                if g[0] & hits:
+                    g[0] |= hits
+                    g[1].append((a, b))
+                    break
+            else:
+                groups.append([set(hits), [(a, b)]])
+
+        def build(split):
+            out = list(zip(arcs, values))
+            for idx, spans in sorted(groups, key=lambda g: -max(g[0])):
+                lo_i, hi_i = min(idx), max(idx)
+                (kind, c), val = out[lo_i]
+                if split and lo_i == hi_i and kind == "touch":
+                    tc, nu = val
+                    left = [s_ for s_ in spans if s_[1] <= tc + 1e-12 * T]
+                    right = [s_ for s_ in spans if s_[0] >= tc - 1e-12 * T]
+                    if left and right:
+                        ta = 0.5 * (min(x for x, _ in left) + tc)
+                        tb = 0.5 * (tc + max(y for _, y in right))
+                        out[lo_i:lo_i + 1] = [(("touch", c), (ta, 0.5 * nu)),
+                                              (("touch", c), (tb, 0.5 * nu))]
+                        continue
+                # The merged arc's entry jump carries the jumps of all it absorbs.
+                pi = np.zeros(kr.CONSTRAINT_ORDERS[c])
+                for i in idx:
+                    if out[i][0][0] == "touch":
+                        pi[0] += out[i][1][1]
+                    else:
+                        pi += np.asarray(out[i][1][2], dtype=float)
+                lo = min([span(i)[0] for i in idx] + [x for x, _ in spans])
+                hi = max([span(i)[1] for i in idx] + [y for _, y in spans])
+                out[lo_i:hi_i + 1] = [(("boundary", c), (lo, hi, pi))]
+            for entry, val in born:
+                pos = int(np.searchsorted([w[1][0] for w in out], val[0]))
+                out.insert(pos, (entry, val))
+            return [a for a, _ in out], [w for _, w in out]
+
+        options = [build(False)]
+        if any(len(g[0]) == 1 and arcs[next(iter(g[0]))][0] == "touch" for g in groups):
+            alternative = build(True)
+            if alternative[0] != options[0][0]:
+                options.append(alternative)
+        return options
+
+    def _retire(self, shoot, v):
+        """The structure without arcs that have died: a boundary arc shrunk to
+        nothing becomes a touch point (order 2) or goes (order 1), and a touch
+        point whose jump has the wrong sign goes. ``None`` if nothing changes."""
+        arcs, values = self._arcs_of(shoot, v)
+        if not arcs:
+            return None
+        T = shoot.unpack(v)[3] - shoot.t0
+        out_a, out_v, changed = [], [], False
+        for (kind, c), val in zip(arcs, values):
+            if kind == "boundary" and val[1] - val[0] < 1e-6 * T:
+                changed = True
+                if self.kr.CONSTRAINT_ORDERS[c] == 2:
+                    out_a.append(("touch", c))
+                    out_v.append((0.5 * (val[0] + val[1]), float(val[2][0])))
+                continue
+            if kind == "touch" and val[1] < -1e-9:
+                changed = True
+                continue
+            out_a.append((kind, c))
+            out_v.append(val)
+        return (out_a, out_v) if changed else None
+
+    def _exact_jump(self, arcs, v, tol):
+        """The exact problem's solve of structure ``arcs`` from ``v``: ``(J, shoot, sol)`` or None."""
+        kx, px = self.exact_kernels, self.exact_params()
+        try:
+            if arcs:
+                shoot = MultiArcShooting(kx, px, arcs, max_nfev=self.attempt_nfev, **self.options)
+                method = "lm" if kx.N_SWITCHING else "hybr"
+            else:
+                shoot = SingleShooting(kx, px, **self.options)
+                method = "hybr"
+            sol = shoot.solve(v, method=method, tol=tol,
+                              options=_budget(method, 4 * self.attempt_evaluations))
+            if self._accept(shoot, sol, tol):
+                return self.objective(shoot, sol.v), shoot, sol
+        except _FAILURES:
+            pass
+        return None
+
+    def _active_set(self, sol, eps0, s_max, steps, tol, max_solves=400):
+        """The active-set route: from the unconstrained regularized solution ``sol``
+        at ``eps0``, tighten every limit from just above the solution to its
+        true value, bringing in arcs as limits come into play, then lower
+        ``eps`` with the structure following, trying the exact problem at each
+        step. Returns ``(J, shoot, sol)`` or None."""
+        kr = self.kr
+        deadline = time.perf_counter() + self.active_set_seconds
+        shoot = self._smoothed([], eps0, np.zeros(self.nc))
+        (_, g), = self._free_samples(shoot, sol.v)
+        scale = np.maximum(g.max(axis=0) - g.min(axis=0), 1e-12)
+        off0 = np.maximum(g.max(axis=0), 0.0) + 1e-3 * scale
+        state = {"shoot": shoot, "v": sol.v, "le": np.log10(eps0) if self.bang_bang else 0.0,
+                 "off": off0.copy(), "solves": 0}
+        log_eps_min = state["le"] - s_max
+
+        def solve_structure(arcs, values, base, le, off):
+            sh = self._smoothed(arcs, 10.0 ** le if self.bang_bang else None, off)
+            guess = sh.pack_arcs(base, values) if arcs else np.asarray(base, dtype=float)
+            state["solves"] += 1
+            r = sh.solve(guess, tol=tol, options=_budget("hybr", 4 * self.attempt_evaluations))
+            return sh, r
+
+        def settle(sh, r, le, off):
+            """Bring in violated limits and retire dead arcs until the solution at
+            (le, off) is consistent; ``(shoot, sol)`` or None."""
+            for _ in range(2 * self.nc + 4):
+                viol = self._free_violations(sh, r.v, scale)
+                if viol:
+                    if max(peak / scale[c] for c, _, _, peak in viol) > 1e-3:
+                        return None        # too far in: take a shorter step
+                    options = self._activate(sh, r.v, viol)
+                else:
+                    dead = self._retire(sh, r.v)
+                    if dead is None:
+                        return sh, r
+                    options = [dead]
+                base = r.v[:sh.n_base] if isinstance(sh, MultiArcShooting) else r.v
+                for arcs, values in options:
+                    try:
+                        nsh, nr = solve_structure(arcs, values, base, le, off)
+                    except _FAILURES:
+                        continue
+                    if nr.success:
+                        break
+                else:
+                    return None
+                sh, r = nsh, nr
+                self._say(f"  structure: {self._names(arcs)}")
+            return None
+
+        def advance(target_le, target_off, on_step=None):
+            le0, off_start = state["le"], state["off"].copy()
+            frac, ds = 0.0, 0.25
+            prev = None                    # (frac, v, structure) of the solution before
+            while frac < 1.0:
+                if (state["solves"] > max_solves or ds < 1e-6
+                        or time.perf_counter() > deadline):
+                    return False
+                f = min(frac + ds, 1.0)
+                le = le0 + f * (target_le - le0)
+                off = off_start + f * (target_off - off_start)
+                sh0, v0 = state["shoot"], state["v"]
+                arcs, values = self._arcs_of(sh0, v0)
+                guesses = [v0]
+                if prev is not None and prev[2] == arcs and frac > prev[0]:
+                    # Secant predictor along the path, while the structure holds.
+                    guesses.insert(0, v0 + (v0 - prev[1]) * (f - frac) / (frac - prev[0]))
+                done = None
+                for g in guesses:
+                    base = g[:sh0.n_base] if isinstance(sh0, MultiArcShooting) else g
+                    vals = self._arcs_of(sh0, g)[1] if arcs else values
+                    try:
+                        sh, r = solve_structure(arcs, vals, base, le, off)
+                        done = settle(sh, r, le, off) if r.success else None
+                    except _FAILURES:
+                        done = None
+                    if done is not None:
+                        break
+                if done is None:
+                    ds *= 0.5
+                    continue
+                prev = (frac, v0, arcs)
+                state.update(shoot=done[0], v=done[1].v, le=le, off=off)
+                if self._arcs_of(done[0], done[1].v)[0] != arcs:
+                    prev = None            # the structure changed: no secant across it
+                frac, ds = f, min(ds * 1.5, 0.25)
+                if on_step is not None and on_step():
+                    return True
+            return True
+
+        found = []
+
+        def try_exact():
+            sh, v = state["shoot"], state["v"]
+            arcs, _ = self._arcs_of(sh, v)
+            entries = [(kind, kr.CONSTRAINT_NAMES[c]) for kind, c in arcs]
+            step = Step(log_eps_min + s_max - state["le"] if self.bang_bang else 0.0,
+                        10.0 ** state["le"] if self.bang_bang else np.nan, np.zeros(self.nc),
+                        0.0, candidates=1, structure=tuple(entries))
+            steps.append(step)
+            hit = self._exact_jump(entries, v, tol)
+            self._say(f"active set at eps = {step.eps:.3g}: {self._names(arcs)}, "
+                      f"exact {'accepted' if hit else 'not accepted'}")
+            if hit is not None:
+                step.accepted = True
+                found.append(hit)
+                return True
+            return False
+
+        self._say(f"active set: tightening the limits from offsets {np.round(off0, 6)}")
+        if not advance(state["le"], np.zeros(self.nc)):
+            self._say("active set: tightening stalled")
+            return None
+        if try_exact():
+            return found[0]
+        if not self.bang_bang:
+            return None
+        if advance(log_eps_min, np.zeros(self.nc), on_step=try_exact) and found:
+            return found[0]
+        return found[0] if found else None
+
+    def _names(self, arcs):
+        return ", ".join(f"{kind} {self.kr.CONSTRAINT_NAMES[c]}" for kind, c in arcs) or "free"
+
     # -- the whole solve --------------------------------------------------------
 
     def solve(self, params, costates, final_time=None, *, n_tries=200, seed=0, eps0=1.0,
@@ -758,6 +1091,25 @@ class Homotopy:
             return HomotopyResult(sol, shoot, (), True, J, shoot.params,
                                   [Step(0.0, np.nan, np.zeros(0), sol.residual_norm)], tries,
                                   "exact: no bang-bang controls or path constraints")
+        # The active-set route goes first unless the exact problem may have
+        # singular arcs, which only the penalty route reads; each route gets
+        # the other as its fallback.
+        first = sol
+        active_first = self.nc and not any(self.exact_kernels.SINGULAR_ARCS)
+
+        def active_route():
+            hit = self._active_set(first, eps0, s_max, steps, tol)
+            if hit is None:
+                return None
+            J, xs, xsol = hit
+            return HomotopyResult(xsol, xs, self._entries(xs), True, J, xs.params, steps,
+                                  tries, f"exact after {len(steps)} steps (active set)")
+
+        if active_first:
+            out = active_route()
+            if out is not None:
+                return out
+            self._say("active set: no exact structure; trying the penalty route")
         new = activate(shoot, sol.v)
         if new is not False:
             state["m"][new] = m_start
@@ -799,6 +1151,11 @@ class Homotopy:
             J, xs, xsol = min(accepted, key=lambda a: a[0])
             return HomotopyResult(xsol, xs, self._entries(xs), True, J, xs.params, steps,
                                   tries, f"exact after {len(steps)} steps")
+        if self.nc and not active_first:
+            self._say("penalty route: no exact structure; trying the active-set route")
+            out = active_route()
+            if out is not None:
+                return out
         shoot, sol = best if best is not None else (shoot, state["sol"])
         return HomotopyResult(sol, shoot, (), False, np.nan, shoot.params, steps, tries,
                               "no exact structure accepted before the continuation ended")

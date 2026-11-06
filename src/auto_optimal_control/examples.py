@@ -237,6 +237,57 @@ def speed_limited_min_time(smoothed=False):
         path_constraints=[PathConstraint(v - V, "v_max", penalty=penalty)])
 
 
+def jerk_limited_move():
+    """Minimum-time rest-to-rest move over ``D`` with jerk, acceleration and speed limits.
+
+    One axis of a machine: ``x''' = j`` with ``|j| <= J``, ``|a| <= A`` and
+    ``v <= V``, from rest at 0 to rest at ``D``. The answer is the
+    "S-curve" of motion control, up to seven segments: jerk on until the
+    acceleration limit, ride it (a boundary arc of the order-1 limit
+    ``a - A <= 0``), jerk off onto the speed limit (a boundary arc of the
+    order-2 limit ``v - V <= 0``), cruise, and the same backwards, riding
+    ``-a - A <= 0``. On every boundary arc ``j = 0``. Depending on ``D``,
+    ``V`` and ``A^2 / J``, the speed or acceleration limit may never be
+    reached; :func:`jerk_limited_min_time` gives the time in every case.
+
+    params: ``J, A, V, D``.
+    """
+    t, x, v, a, j = sp.symbols("t x v a j", real=True)
+    J, A, V, D = sp.symbols("J A V D", positive=True)
+    return OptimalControlProblem(
+        name="jerk_limited_move", time=t, states=[x, v, a], controls=[j], params=[J, A, V, D],
+        dynamics=[v, a, j], running_cost=1, initial_state=[0, 0, 0],
+        final_state={x: D, v: 0, a: 0}, control_sets=[Box(j, -J, J)],
+        path_constraints=[PathConstraint(v - V, "v_max"), PathConstraint(a - A, "a_max"),
+                          PathConstraint(-a - A, "a_min")])
+
+
+def jerk_limited_min_time(J, A, V, D):
+    """The minimum time of :func:`jerk_limited_move`, in closed form.
+
+    Returns ``(t_f, v_peak, a_peak)``. The acceleration phase is symmetric
+    and covers ``v_peak T_a / 2``. If ``v_peak >= A^2 / J`` it reaches the
+    acceleration limit and lasts ``T_a = A / J + v_peak / A``; otherwise the
+    jerk switches straight from ``+J`` to ``-J`` and ``T_a = 2 sqrt(v_peak / J)``.
+    ``v_peak = V``, with a cruise of ``(D - V T_a) / V``, when there is room
+    for one; otherwise it is the peak at which the two phases meet.
+    """
+    def phase(vp):
+        if vp >= A * A / J:
+            return A / J + vp / A, A
+        return 2.0 * (vp / J) ** 0.5, (vp * J) ** 0.5
+
+    Ta, ap = phase(V)
+    if V * Ta <= D:
+        return 2.0 * Ta + (D - V * Ta) / V, V, ap
+    # No cruise: the peak speed solves vp T_a(vp) = D.
+    vp = A / 2.0 * (-A / J + (A * A / (J * J) + 4.0 * D / A) ** 0.5)
+    if vp < A * A / J:
+        vp = J * (D / (2.0 * J)) ** (2.0 / 3.0)
+    Ta, ap = phase(vp)
+    return 2.0 * Ta, vp, ap
+
+
 def singular_regulator(smoothed=False):
     """``min int x^2``, ``x' = u``, ``|u| <= 1``, from ``x(0) = a`` to ``x(T) = a``.
 
@@ -329,6 +380,7 @@ def all_examples():
         "velocity_limited_move_bounded": velocity_limited_move(bounded=True),
         "speed_limited_min_time": speed_limited_min_time(),
         "speed_limited_min_time_smoothed": speed_limited_min_time(smoothed=True),
+        "jerk_limited_move": jerk_limited_move(),
         "singular_regulator": singular_regulator(),
         "singular_regulator_smoothed": singular_regulator(smoothed=True),
         "goddard": goddard(),

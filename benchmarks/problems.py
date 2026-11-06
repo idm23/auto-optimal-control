@@ -438,6 +438,25 @@ def run_speed_limit(cache_dir=None, seed=0):
     return rows
 
 
+JERK_CASES = ((1.0, 1.0, 2.0, 10.0), (1.0, 1.0, 2.0, 4.0), (1.0, 1.0, 0.5, 10.0),
+              (1.0, 1.0, 2.0, 1.0))
+
+
+def run_jerk_limited(cache_dir=None, seed=0):
+    """The S-curve: minimum time with |j| <= J, |a| <= A and v <= V, in each regime."""
+    rows = []
+    h = Homotopy(examples.jerk_limited_move(), cache_dir=cache_dir)
+    for J, A, V, D in JERK_CASES:
+        start = time.perf_counter()
+        r = h.solve([J, A, V, D], ([-3, -3, -3], [3, 3, 3]), (0.5, 30.0), seed=seed)
+        arcs = ", ".join(name for _, name in r.arcs) or "no arcs"
+        rows.append(Result("jerk_limited", f"t_f (J={J}, A={A}, V={V}, D={D}; {arcs})",
+                           r.solution.tf, examples.jerk_limited_min_time(J, A, V, D)[0],
+                           "closed form (S-curve)", 1e-9, time.perf_counter() - start,
+                           _details(r)))
+    return rows
+
+
 GODDARD_REFERENCE = {"free": (1.01283692, 0.19885626), "q": (1.01271727, 0.20407108)}
 GODDARD_SOURCE = "Graichen & Petit (2008), collocation with saturation functions"
 
@@ -480,6 +499,7 @@ ALL = {
     "bryson_denham": run_bryson_denham,
     "velocity_limit": run_velocity_limit,
     "speed_limit": run_speed_limit,
+    "jerk_limited": run_jerk_limited,
     "orbit_raising": run_orbit_raising,
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,
