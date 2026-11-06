@@ -413,6 +413,32 @@ With `V = 0.5` the acceleration limit is never reached and only the cruise
 is a boundary arc; with `D = 4` there is no cruise; with `D = 1` the jerk is
 bang-bang with two switches and no limit is reached.
 
+### Several limits at once: a two-link arm
+
+`examples.two_link_arm()` is a planar arm of two uniform rods, controlled by
+its joint jerks, moving rest to rest in time `T` with minimum jerk
+`∫(j₁² + j₂²)/2` and a torque limit on each joint, `|τᵢ| ≤ τᵢ,max`. A torque
+limit is order 1 and involves *both* jerks (through the mass matrix), so
+riding one fixes a combination of the controls; riding one limit on each
+joint fixes them both. `derive` adds the boundary arcs for every pair of
+limits that can be ridden together (`PontryaginSystem.boundary_sets`; the
+lower and upper bound of one torque are left out), and `MultiArcShooting`
+takes arcs that overlap or nest, given by their junctions:
+
+```python
+h = Homotopy(examples.two_link_arm())
+r = h.solve(list(examples.TWO_LINK_ARM_PARAMS) + [17.0, 6.5], ([-200] * 6, [200] * 6))
+r.arcs   # (('enter', 'tau1_max'), ('enter', 'tau2_max'), ('exit', 'tau1_max'),
+         #  ('exit', 'tau2_max'), ('enter', 'tau1_min'), ('exit', 'tau1_min'))
+```
+
+Joint 1 rides its limit, then both do, then joint 2 alone, and later joint 1
+its lower limit. With `τ ≤ 15 / 7` joint 2's arc falls inside joint 1's;
+with `20 / 7` the arcs come one after another. The active-set route finds
+each structure as the limits tighten, and an independent simulation of the
+arm under the jerk found confirms the cost, the final state and torques
+exactly at their limits.
+
 ### Singular arcs
 
 Where a bang-bang control's switching function `S` vanishes on an interval,
@@ -574,12 +600,17 @@ a speed limit, a singular regulator and Goddard's rocket (singular arcs).
   - Goddard: a singular arc, and with `q ≤ 10` a boundary arc joined to a
     singular arc.
   - The jerk-limited S-curve in its four regimes, against the closed form.
+- **`test_simultaneous.py`:** limits ridden at once on the two-link arm: the
+  pairs derived, the pair kernels (both torque rates zero, the multiplier
+  gradient against differences), structure validation, and the automatic
+  solve of overlapping and nested arcs, checked by an independent
+  simulation; with loose limits, the minimum-jerk quintic.
 
   An order-3 limit comes back flagged as inexact.
 
 ## Benchmarks against the literature
 
-`benchmarks/` solves eleven canonical problems from scratch and compares each
+`benchmarks/` solves twelve canonical problems from scratch and compares each
 indirect solution with a published value. Each benchmark gives
 `auto_optimal_control.homotopy` the problem, its parameter values and a box
 (or a function) to draw costates and `t_f` from, and nothing else. No
@@ -597,6 +628,7 @@ never as a starting point.
 | Velocity-limited move with a force limit (2 cases) | `∫u²/2` | matches to 1e-13 | closed form (saturated, a ramp, the limit) | — |
 | Minimum time with a speed limit (2 cases), bang-bang | `t_f` | matches to 1e-15 | closed form, `D/V + V/u_max` | — |
 | Jerk-limited S-curve (4 regimes: every limit, no cruise, no acceleration arc, none) | `t_f` | matches to 1e-14 | closed form (seven-segment profile) | — |
+| Two-link arm, minimum jerk with torque limits (arcs in sequence, overlapping, nested) | `∫j²/2` | 1840.217, 7464.658, 14418.501 | matches to 1e-6 | independent SciPy simulation of the arm under this jerk |
 | Maximum-radius orbit transfer | `r(t_f)` | 1.5252777 | 1.5252776 | Bryson & Ho (1975) pp. 66–69; value from YAPSS/IPOPT |
 | Earth–Mars fuel-optimal rendezvous | `m(t_f)` | 603.9402 kg | 603.935 kg | arXiv:2409.01490, Tables 1–2 |
 | COPS robot arm, minimum time | `t_f` | 9.1409117 | 9.1409 | COPS #8 (Dolan, Moré & Munson); GAMS NOA, PROPT |
@@ -736,11 +768,12 @@ keeps a one-line summary at the bottom. The rendered videos are in
 - **What exact arcs support.** `MultiArcShooting` solves a given sequence
   of boundary arcs, touch points and singular arcs, and `homotopy` finds that
   sequence. Not supported: unit-vector control sets, limits that depend
-  explicitly on time (`H` then jumps at the entry), order 3 or more, two
-  constraints active at once, one limit with more than one bang-bang
-  control (the boundary control is solved for every control at once), and a
-  singular arc that ends directly on a boundary arc (the reverse join is
-  supported).
+  explicitly on time (`H` then jumps at the entry), order 3 or more, limits
+  ridden at once with bang-bang controls or singular arcs (sets of limits
+  are supported when `H` is regular in the controls, as with minimum
+  jerk), one limit with more than one bang-bang control (the boundary
+  control is solved for every control at once), and a singular arc that
+  ends directly on a boundary arc (the reverse join is supported).
 - **Structure finding is heuristic.** The penalty route reads arcs from a
   regularized solution with fixed thresholds (stretches shorter than 2% of
   the horizon are switches, not singular arcs; limits closer than 2% are
@@ -753,10 +786,6 @@ keeps a one-line summary at the bottom. The rendered videos are in
   cheapest accepted at the first step where any is, from the costate draws
   it was given. Other draws can lead to other extremals (the cart-pole has
   two).
-- **Order-1 entries with a smooth control converge linearly.** There `H`
-  continuity has a double root (the control is continuous, so `H` differs
-  only to second order), so Newton converges linearly and junction times
-  come out to about 1e-8 while the cost is exact to 1e-12 or better.
 - **Single shooting and large penalties.** Penalty continuation gets
   ill-conditioned as the weight grows (about `exp(sqrt(rho) T)`): around
   ρ = 400 for the velocity limit, 3e7 for Bryson–Denham's boundary arc. Exact
@@ -819,10 +848,11 @@ with PyPI trusted publishing, so no tokens are stored.
    several limits and controls active at once, gradient-free search (PSO,
    differential evolution) and learned samplers of the costate space.
 7. Robot motion: ~~a jerk-limited axis with acceleration and speed limits
-   (the S-curve), its structure found by tightening the limits~~; next, a
-   planar two-link arm with jerk control and torque limits (a limit that
-   involves several controls, several limits active at once), singular arcs
-   on a constrained arm, and learned warm starts to scale to six joints.
+   (the S-curve), its structure found by tightening the limits; a planar
+   two-link arm with jerk control and torque limits, each involving both
+   controls, ridden one at a time, overlapping or nested~~; next,
+   minimum-time and singular arcs on a constrained arm, and learned warm
+   starts to scale to six joints.
 
 ## License
 

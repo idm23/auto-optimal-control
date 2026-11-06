@@ -98,8 +98,10 @@ def brachistochrone_exact(g, xf, yf):
 
 def _details(r):
     """What a :class:`~auto_optimal_control.homotopy.HomotopyResult` found, for the report."""
-    return {"residual": r.solution.residual_norm, "random draws": r.tries,
-            "continuation steps": len(r.steps), "structure": list(r.arcs) or "free arcs"}
+    return {"residual": r.solution.residual_norm,
+            "unknowns scale": float(max(1.0, np.abs(r.solution.v).max())),
+            "random draws": r.tries, "continuation steps": len(r.steps),
+            "structure": list(r.arcs) or "free arcs"}
 
 
 def run_brachistochrone(cache_dir=None, seed=0):
@@ -457,6 +459,47 @@ def run_jerk_limited(cache_dir=None, seed=0):
     return rows
 
 
+ARM_CASES = ((20.0, 7.0, "one after another"), (17.0, 6.5, "overlapping"),
+             (15.0, 7.0, "nested"))
+
+
+def simulate_two_link_arm(r, params):
+    """The cost and the final state of the arm under the extremal's jerk, simulated
+    with SciPy apart from the package; and the peak torques along it."""
+    from scipy.integrate import solve_ivp
+    from scipy.interpolate import interp1d
+
+    tr = r.shooting.trajectory(r.solution.v, n_points=20001)
+    t, u = tr["t"], tr["u"]
+    keep = np.concatenate([[True], np.diff(t) > 0])
+    jerk = interp1d(t[keep], u[keep], axis=0)
+    T = params[4]
+    sol = solve_ivp(lambda s, x: np.concatenate([x[2:6], jerk(min(s, t[-1]))]), (0, T),
+                    np.zeros(6), rtol=1e-10, atol=1e-12, max_step=1e-3)
+    tau1, tau2 = examples.two_link_arm_torques(*params[:4], *tr["z"][:, 1:6].T)
+    J = float(np.trapezoid(0.5 * (u[keep] ** 2).sum(axis=1), t[keep]))
+    return J, sol.y[:, -1], float(np.abs(tau1).max()), float(np.abs(tau2).max())
+
+
+def run_two_link_arm(cache_dir=None, seed=0):
+    """Minimum jerk on a two-link arm with torque limits: arcs in sequence, overlapping and nested."""
+    rows = []
+    h = Homotopy(examples.two_link_arm(), cache_dir=cache_dir)
+    base = list(examples.TWO_LINK_ARM_PARAMS)
+    for t1, t2, how in ARM_CASES:
+        start = time.perf_counter()
+        p = base + [t1, t2]
+        r = h.solve(p, ([-200] * 6, [200] * 6), seed=seed)
+        seconds = time.perf_counter() - start
+        J, xf, tau1, tau2 = simulate_two_link_arm(r, p)
+        details = {**_details(r), "max |tau1|": tau1, "max |tau2|": tau2,
+                   "final state error": float(np.abs(xf - [p[5], p[6], 0, 0, 0, 0]).max())}
+        rows.append(Result("two_link_arm", f"J (tau <= {t1}/{t2}, {how})", r.objective, J,
+                           "independent SciPy simulation of the arm under this jerk", 1e-5,
+                           seconds, details))
+    return rows
+
+
 GODDARD_REFERENCE = {"free": (1.01283692, 0.19885626), "q": (1.01271727, 0.20407108)}
 GODDARD_SOURCE = "Graichen & Petit (2008), collocation with saturation functions"
 
@@ -500,6 +543,7 @@ ALL = {
     "velocity_limit": run_velocity_limit,
     "speed_limit": run_speed_limit,
     "jerk_limited": run_jerk_limited,
+    "two_link_arm": run_two_link_arm,
     "orbit_raising": run_orbit_raising,
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,
