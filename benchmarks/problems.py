@@ -17,7 +17,8 @@ Robotics:
 - **two_link_arm** / **two_link_arm_min_time**: a planar two-link arm with
   joint torque limits, minimum jerk; then minimum time with bounded jerks
   (degenerate as stated: the default policy adds a small jerk cost).
-- **six_joint_arm**: six joints under gravity, minimum jerk, with torque limits.
+- **six_joint_arm** / **six_joint_arm_min_time**: six joints under gravity with torque
+  limits, minimum jerk; then minimum time with bounded jerks.
 - **cart_pole**: minimum-effort cart-pole swing-up (Kelly 2017, SIAM Review).
   Kelly's direct method is run for comparison only.
 
@@ -619,6 +620,64 @@ def run_six_joint_arm(cache_dir=None, seed=0):
     return rows
 
 
+SIX_JOINT_MIN_TIME_GOAL = [1.0, -0.9, 0.8, 1.1, -0.7, 0.6]
+SIX_JOINT_JERK = 30.0
+SIX_JOINT_WEIGHT = 1e-2
+SIX_JOINT_MIN_TIME_FRACTIONS = (0.95, 0.9)
+
+
+def run_six_joint_arm_min_time(cache_dir=None, seed=0):
+    """Six joints in minimum time with bounded jerks: degenerate as stated, so the default
+    policy adds a small jerk cost. Without active limits the slowest joint's time is close to
+    the closed form. With tight ones the reference is an independent replay of the jerk."""
+    from scipy.integrate import solve_ivp
+    from scipy.interpolate import interp1d
+
+    qf = np.array(SIX_JOINT_MIN_TIME_GOAL)
+    J = SIX_JOINT_JERK
+    torques = _six_joint_torques()
+    h = Homotopy(examples.six_joint_arm_min_time(), cache_dir=cache_dir)
+    base = [*np.zeros(6), *qf, *([J] * 6)]
+    box, times = ([-0.5] * 18, [0.5] * 18), (0.3, 5.0)
+    rows = []
+
+    start = time.perf_counter()
+    r = h.solve([*base, *([1e4] * 6)], box, times, seed=seed)
+    rows.append(Result("six_joint_arm_min_time", "t_f (limits loose: the slowest joint alone)",
+                       r.solution.tf, (32 * float(np.abs(qf).max()) / J) ** (1 / 3),
+                       "closed form, without the small jerk cost", 1e-4,
+                       time.perf_counter() - start, _details(r)))
+    tr = r.shooting.trajectory(r.solution.v, n_points=4001)
+    tau = torques(tr["z"][:, :6], tr["z"][:, 6:12], tr["z"][:, 12:18])
+    peak = np.abs(tau).max(axis=0)
+    ends = 1.001 * np.maximum(np.abs(tau[0]), np.abs(tau[-1]))
+
+    for fraction in SIX_JOINT_MIN_TIME_FRACTIONS:
+        start = time.perf_counter()
+        limits = ends + fraction * (peak - ends).clip(0)
+        r = h.solve([*base, *limits], box, times, seed=seed)
+        seconds = time.perf_counter() - start
+        tr = r.shooting.trajectory(r.solution.v, n_points=40001)
+        t, u = tr["t"], tr["u"]
+        keep = np.concatenate([[True], np.diff(t) > 0])
+        jerk = interp1d(t[keep], u[keep], axis=0)
+        sol = solve_ivp(lambda ti, x: np.concatenate([x[6:], jerk(min(ti, t[-1]))]), (0, t[-1]),
+                        np.zeros(18), rtol=1e-10, atol=1e-12, max_step=1e-3,
+                        t_eval=np.linspace(0, t[-1], 4001))
+        over = np.abs(torques(sol.y[:6].T, sol.y[6:12].T, sol.y[12:].T)) - limits
+        cost = t[-1] + SIX_JOINT_WEIGHT * float(np.trapezoid(
+            0.5 * ((u[keep] / J) ** 2).sum(axis=1), t[keep]))
+        details = {**_details(r), "t_f": r.solution.tf, "max |j|": float(np.abs(u).max()),
+                   "final state error":
+                   float(np.abs(sol.y[:, -1] - np.concatenate([qf, np.zeros(12)])).max()),
+                   "largest torque over its limit": float(over.max())}
+        rows.append(Result("six_joint_arm_min_time",
+                           f"t_f + w int j^2 (all six limits at {fraction:.0%})", r.objective, cost,
+                           "independent SciPy replay of the arm under this jerk", 1e-6, seconds,
+                           details))
+    return rows
+
+
 GODDARD_REFERENCE = {"free": (1.01283692, 0.19885626), "q": (1.01271727, 0.20407108)}
 GODDARD_SOURCE = "Graichen & Petit (2008), collocation with saturation functions"
 
@@ -665,6 +724,7 @@ ALL = {
     "two_link_arm": run_two_link_arm,
     "two_link_arm_min_time": run_two_link_arm_min_time,
     "six_joint_arm": run_six_joint_arm,
+    "six_joint_arm_min_time": run_six_joint_arm_min_time,
     "orbit_raising": run_orbit_raising,
     "earth_mars": run_earth_mars,
     "robot_arm": run_robot_arm,

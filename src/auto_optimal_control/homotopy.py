@@ -18,6 +18,8 @@ initial costates (and of ``t_f`` when it is free). Everything else is found:
    becomes ``g - off <= 0``), all runtime parameters.
 2. **Sample.** Single shooting from random costates on the regularized
    problem, at ``eps = 1``, with every limit off.
+   A free final time with separate components needs no draws: each follows its
+   costates from a long time down to its own minimum time, and they share ``t_f``.
 3. **The active-set route** (problems with path constraints). Exact arcs on
    the smoothed problem, built up as the limits are tightened:
 
@@ -972,6 +974,7 @@ class Homotopy:
                  if arcs else SingleShooting(self.kr, p, **self.path_options))
         shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
         shoot.fast_residuals = True
+        shoot.tangent_junctions = self.kr.system.riding is not None
         return shoot
 
     def _free_samples(self, shoot, v, n_points=801):
@@ -1130,33 +1133,38 @@ class Homotopy:
             return out
 
         def build(split, newborn=None):
-            out = list(zip(arcs, values))
-            for idx, spans in sorted(groups, key=lambda g: -max(g[0])):
-                lo_i, hi_i = min(idx), max(idx)
-                (kind, c), val = out[lo_i]
-                if split and lo_i == hi_i and kind == "touch":
+            replaced = {}                  # arc index -> what stands in its place
+            for idx, spans in groups:
+                lo_i = min(idx)
+                (kind, c), val = arcs[lo_i], values[lo_i]
+                for i in idx:
+                    replaced[i] = []
+                if split and len(idx) == 1 and kind == "touch":
                     tc, nu = val
                     left = [s_ for s_ in spans if s_[1] <= tc + 1e-12 * T]
                     right = [s_ for s_ in spans if s_[0] >= tc - 1e-12 * T]
                     if left and right:
                         ta = 0.5 * (min(x for x, _ in left) + tc)
                         tb = 0.5 * (tc + max(y for _, y in right))
-                        out[lo_i:lo_i + 1] = [(("touch", c), (ta, 0.5 * nu)),
-                                              (("touch", c), (tb, 0.5 * nu))]
+                        replaced[lo_i] = [(("touch", c), (ta, 0.5 * nu)),
+                                          (("touch", c), (tb, 0.5 * nu))]
                         continue
-                # The merged arc's entry jump carries the jumps of all it absorbs.
+                # The merged arc's entry jump carries the jumps of all it absorbs. Only
+                # this limit's arcs go: another limit's arc may lie between them.
                 pi = np.zeros(kr.CONSTRAINT_ORDERS[c])
                 for i in idx:
-                    if out[i][0][0] == "touch":
-                        pi[0] += out[i][1][1]
+                    if arcs[i][0] == "touch":
+                        pi[0] += values[i][1]
                     else:
-                        pi += np.asarray(out[i][1][2], dtype=float)
+                        pi += np.asarray(values[i][2], dtype=float)
                 lo = min([span(i)[0] for i in idx] + [x for x, _ in spans])
                 hi = max([span(i)[1] for i in idx] + [y for _, y in spans])
-                out[lo_i:hi_i + 1] = [(("boundary", c), (lo, hi, pi))]
-            for entry, val in (born if newborn is None else newborn):
-                pos = int(np.searchsorted([w[1][0] for w in out], val[0]))
-                out.insert(pos, (entry, val))
+                replaced[lo_i] = [(("boundary", c), (lo, hi, pi))]
+            out = []
+            for i, item in enumerate(zip(arcs, values)):
+                out += replaced.get(i, [item])
+            out += list(born if newborn is None else newborn)
+            out.sort(key=lambda w: float(w[1][0]))
             return [a for a, _ in out], [w for _, w in out]
 
         # A limit that comes into play while another is ridden may enter and
@@ -1202,22 +1210,26 @@ class Homotopy:
         """The exact problem's solve of structure ``arcs`` from ``v``: ``(J, shoot, sol)`` or None."""
         kx, px = self.exact_kernels, self.exact_params()
         tol = _scaled(tol, v)
-        try:
-            if arcs:
-                shoot = MultiArcShooting(kx, px, arcs, max_nfev=self.attempt_nfev, **self.options)
-                method = "lm" if kx.N_SWITCHING else "hybr"
-            else:
-                shoot = SingleShooting(kx, px, **self.options)
-                method = "hybr"
-            sol = shoot.solve(v, method=method, tol=tol,
-                              options=_budget(method, 4 * self.attempt_evaluations))
-            if self._accept(shoot, sol, tol):
-                return self.objective(shoot, sol.v), shoot, sol
-            self._detail(f"  exact solve: residual {sol.residual_norm:.1e} (max |v| "
-                         f"{np.abs(sol.v).max():.1e}), "
-                         f"max violation {sol.max_violation:.1e}; {self._rejection(shoot, sol)}")
-        except _FAILURES as exc:
-            self._detail(f"  exact solve failed: {exc}")
+        # A large problem's search has run on tangential junctions; if a control really does
+        # jump at one, the rows that allow it are the ones to try next.
+        for tangent in ((True, False) if kx.system.riding is not None else (False,)):
+            try:
+                if arcs:
+                    shoot = MultiArcShooting(kx, px, arcs, max_nfev=self.attempt_nfev, **self.options)
+                    method = "lm" if kx.N_SWITCHING else "hybr"
+                else:
+                    shoot = SingleShooting(kx, px, **self.options)
+                    method = "hybr"
+                shoot.tangent_junctions = tangent
+                sol = shoot.solve(v, method=method, tol=tol,
+                                  options=_budget(method, 4 * self.attempt_evaluations))
+                if self._accept(shoot, sol, tol):
+                    return self.objective(shoot, sol.v), shoot, sol
+                self._detail(f"  exact solve: residual {sol.residual_norm:.1e} (max |v| "
+                             f"{np.abs(sol.v).max():.1e}), "
+                             f"max violation {sol.max_violation:.1e}; {self._rejection(shoot, sol)}")
+            except _FAILURES as exc:
+                self._detail(f"  exact solve failed: {exc}")
         return None
 
     def _rejection(self, shoot, sol):

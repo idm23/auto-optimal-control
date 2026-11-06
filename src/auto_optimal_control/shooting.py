@@ -138,6 +138,10 @@ class SingleShooting:
     # the residual below about this level times the unknowns' size.
     jacobian_rtol = None
     max_nfev = MAX_NFEV
+    # Use the tangential rows even with some control at its bound. In minimum time some control
+    # nearly always is; one that stays there across the junction does not stop the arrival
+    # being tangential. A control that has to jump does, and the solve then fails or is rejected.
+    tangent_junctions = False
     # Residuals apart from the Jacobians. MINPACK asks for far more of the first, and without
     # the matrix they cost a small fraction as much. But their steps are longer, and each
     # saturation corner carries the error of its step, so they reach only about 1e-9.
@@ -713,7 +717,7 @@ class MultiArcShooting(SingleShooting):
                 and not self.kernels.N_SWITCHING):
             return False
         k, p = self.kernels, self.params
-        if not k.system.problem.control_sets:
+        if not k.system.problem.control_sets or self.tangent_junctions:
             return True
         u = k.control(t, z, p) if side is None else k.boundary_control(side, t, z, p)
         lo, hi = k.control_bounds(t, z, p)

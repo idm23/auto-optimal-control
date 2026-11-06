@@ -275,6 +275,25 @@ def test_axes_with_exactly_tied_moves_solve(kernel_cache):
     assert r.solution.tf == pytest.approx(32 ** (1 / 3), abs=1e-3) and r.solution.tf > 32 ** (1 / 3)
 
 
+def test_merging_a_limits_arcs_keeps_another_limits_arc_between_them():
+    h = Homotopy.__new__(Homotopy)
+    h.kr = type("K", (), {"CONSTRAINT_ORDERS": (1, 1)})()
+    arcs = [("boundary", 0), ("boundary", 1), ("boundary", 0)]
+    values = [(0.2, 0.3, np.zeros(1)), (0.31, 0.6, np.zeros(1)), (0.5, 0.7, np.ones(1))]
+    h._arcs_of = lambda shoot, v: (arcs, values)
+
+    class Shoot:
+        @staticmethod
+        def unpack(v):
+            return None, None, None, 1.0
+        t0 = 0.0
+
+    (merged, spans), = h._activate(Shoot, None, [(0, 0.25, 0.55, 1.0)])
+    assert merged == [("boundary", 0), ("boundary", 1)]
+    assert spans[0][:2] == (0.2, 0.7) and spans[0][2] == pytest.approx([1.0])
+    assert spans[1][:2] == (0.31, 0.6)
+
+
 def test_the_common_time_shares_the_cost_of_time():
     # Each path: (T, lam, H), with H = 1 + (the component's part). Alone a component would
     # stop where H = 0; two of them at the same time share it, so they stop later.
