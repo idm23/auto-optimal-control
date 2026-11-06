@@ -6,8 +6,8 @@ problem: the Hamiltonian, the optimal control law, switching functions for
 bang-bang controls, the state–costate dynamics and the boundary-condition
 residuals.
 
-**Documentation:** https://idm23.github.io/auto-optimal-control/, including a
-seventeen-lecture course on optimal control by the indirect method that
+**Documentation:** https://idm23.github.io/auto-optimal-control/, including an
+eighteen-lecture course on optimal control by the indirect method that
 covers every part of the package.
 
 Integration runs on

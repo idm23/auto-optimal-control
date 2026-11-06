@@ -1,13 +1,13 @@
 # Lectures
 
 A course on optimal control by the indirect (Pontryagin) method, one
-notebook per lecture, in five parts. It covers what a first graduate course
+notebook per lecture, in six parts. It covers what a first graduate course
 covers, from the brachistochrone to state constraints, and every mechanism
 the package is built on. Each lecture opens with a challenge the previous
 ones cannot meet, tells the story of the people who met it, develops the
 theory with SymPy doing the algebra in view, and then solves real problems
 with the package, showing all of the code and checking the answers
-independently. A reader who works through all seventeen can use every part
+independently. A reader who works through all eighteen can use every part
 of the package; Lecture 17 maps each module to the lectures that teach it.
 
 Diagrams drawn to illustrate an idea, rather than to solve something, have their
@@ -56,6 +56,12 @@ it. Everything else shows its code.
 | 16 | {doc}`16_spacecraft` | real orbit transfers | the primer vector; orbit raising; a fuel-optimal Earth–Mars rendezvous |
 | 17 | {doc}`17_practice` | trusting and extending a result | independent checks; benchmarks and animations; the map of the package; open problems |
 
+## Part VI. Robot motion
+
+| # | Lecture | The challenge | New ideas |
+|---|---|---|---|
+| 18 | {doc}`18_minimum_time_several_axes` | the fastest motion of several axes | non-unique optima; vanishing costates and singular Jacobians; a secondary cost, a two-stage solve, a fixed path |
+
 To run the notebooks yourself, clone the repository and run
 `uv sync --group docs`, then open them in Jupyter. They need a C compiler,
 like the package. Each compiles the kernels it uses the first time, which
@@ -82,6 +88,7 @@ takes a few seconds per problem; later runs load them from the cache.
 15_automatic_homotopy
 16_spacecraft
 17_practice
+18_minimum_time_several_axes
 ```
 
 ## Sources
