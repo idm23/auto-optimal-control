@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auto-optimal-control"
-version = "0.2.0"
+version = "0.3.0"
 description = "Symbolic indirect (Pontryagin) optimal control: from dynamics and cost to every function a two-point BVP solver needs"
 readme = "README.md"
 license = "MIT"
