@@ -159,6 +159,7 @@ class _Function:
         self.outputs = []
         self.mapping = mapping
         self.helpers = []
+        self.post = []
 
     def zero_fill(self, array, size):
         if size:
@@ -182,6 +183,7 @@ class _Function:
                 lines.append(f"    const double {s} = {_c(e)};")
             for (lhs, _), e in zip(keep, reduced):
                 lines.append(f"    {lhs} = {_c(e)};")
+        lines += self.post
         lines.append("    return 0;")
         lines.append("}")
         return "\n".join(self.helpers + ["\n".join(lines)])
@@ -238,15 +240,18 @@ def _arc_dynamics(pmp, flags):
 
 def _kinks(laws):
     """Where a clipped law switches branch: ``a - b`` for each ``Min(a, b)`` or ``Max(a, b)``."""
-    out = []
+    out, seen = [], set()
     for law in laws:
         for node in sorted(sp.sympify(law).atoms(sp.Min, sp.Max), key=sp.default_sort_key):
             args = node.args
             for i in range(len(args)):
                 for j in range(i + 1, len(args)):
                     guard = _smooth(args[i] - args[j])
-                    if guard.free_symbols and not any(sp.simplify(guard - o) == 0 or
-                                                      sp.simplify(guard + o) == 0 for o in out):
+                    # One guard for a corner, up to sign. Two that only simplify to the same
+                    # thing would cost an extra guard; simplifying every pair costs far more.
+                    key = sp.expand(guard)
+                    if guard.free_symbols and key not in seen:
+                        seen |= {key, -key}
                         out.append(guard)
     return out
 
@@ -573,6 +578,7 @@ def generate_c(pmp, name=None):
     if numeric:
         small, riding_tape, riding_text = riding_kernels(pmp, P, _Function, mapping)
         functions += small
+    first_of_root, shared_derivatives = {}, []
     for c, arc, sc in riding:
         tag = f"{P}b{c}_"
         if not numeric:
@@ -630,6 +636,25 @@ def generate_c(pmp, name=None):
         for i, e in enumerate(N_c):
             f.out(f"N[{i}]", e)
         functions.append(f)
+        # The two limits on one tape step differ by a sign and terms free of the state: the
+        # later one scales the derivatives of the first, the largest kernels of the system.
+        if numeric:
+            root = pmp.riding.root_of[c]
+            first = first_of_root.setdefault(root, (c, N_c))
+            scale = float(pmp.riding.sign_of[c] * pmp.riding.sign_of[first[0]])
+            if first[0] != c and len(first[1]) == len(N_c) and not any(
+                    (e - scale * o).free_symbols & {t_sym, *x_c} for e, o in zip(N_c, first[1])):
+                base = f"{P}b{first[0]}_"
+                for name, sizes in (("tangency_grad", (("Nt", QMAX), ("Nx", QMAX * n))),
+                                    ("tangency_hess", (("Nxx", QMAX * n * n), ("Nxt", QMAX * n)))):
+                    names = [a for a, _ in sizes]
+                    sig = (f"int {tag}{name}({tzp}, double* {names[0]}, double* {names[1]})")
+                    scaling = "".join(f"    for (int i = 0; i < {size}; ++i) {a}[i] *= {scale!r};\n"
+                                      for a, size in sizes)
+                    shared_derivatives.append((sig, f"{sig} {{\n    int rc = {base}{name}"
+                                                    f"(t, z, p, {names[0]}, {names[1]});\n"
+                                                    f"{scaling}    return rc;\n}}\n"))
+                continue
         f = _Function(f"int {tag}tangency_grad({tzp}, double* Nt, double* Nx)",
                       ["t", "z", "p", "Nt", "Nx"])
         f.zero_fill("Nt", QMAX)
@@ -647,8 +672,11 @@ def generate_c(pmp, name=None):
             for j, xj in enumerate(x_c):
                 d = sp.diff(e, xj)
                 f.out(f"Nxt[{i * n + j}]", sp.diff(d, t_sym))
-                for k2, xk in enumerate(x_c):
+                for k2, xk in enumerate(x_c[j:], j):
                     f.out(f"Nxx[{(i * n + j) * n + k2}]", sp.diff(d, xk))
+                    if k2 != j:
+                        f.post.append(f"    Nxx[{(i * n + k2) * n + j}] = "
+                                      f"Nxx[{(i * n + j) * n + k2}];")
         functions.append(f)
 
     # Singular arcs: per bang-bang control k with a derived SingularArc, the
@@ -788,7 +816,7 @@ def generate_c(pmp, name=None):
     ]
     header_lines += [s + ";" for s in (*stm_sigs, *sparse_sigs)]
     header_lines += [s + ";" for s in dispatch_sigs]
-    header_lines += [sig + ";" for sig, _ in arc_kernels]
+    header_lines += [sig + ";" for sig, _ in (*arc_kernels, *shared_derivatives)]
     header_lines += ["", f"#endif /* {guard} */", ""]
     header = "\n".join(header_lines)
 
@@ -886,6 +914,6 @@ int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int
         stm,
         sparse_stm,
         "\n".join(dispatch),
-        "\n".join(text for _, text in arc_kernels),
+        "\n".join(text for _, text in (*arc_kernels, *shared_derivatives)),
     ])
     return P, header, source, macros

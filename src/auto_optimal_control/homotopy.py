@@ -84,7 +84,7 @@ import sympy as sp
 
 from auto_optimal_control.build import build_kernels
 from auto_optimal_control.policy import Lexicographic, SecondaryCost, analyze, resolve
-from auto_optimal_control.pontryagin import derive
+from auto_optimal_control.pontryagin import bang_bang_controls, derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
 from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting
 
@@ -101,11 +101,6 @@ _FAILURES = (ShootingError, RuntimeError, ValueError, FloatingPointError, np.lin
 # =============================================================================
 # The regularized and exact problems
 # =============================================================================
-
-def bang_bang_controls(problem):
-    """The controls the Hamiltonian is linear in, on a :class:`Box` (the bang-bang ones)."""
-    return tuple(sw.control for sw in derive(problem).switching_functions)
-
 
 def _copy(problem, *, name, running_cost, params, path_constraints):
     return OptimalControlProblem(
@@ -279,7 +274,10 @@ class Homotopy:
         self.path_options = dict(rtol=rtol, atol=atol)    # along the active-set route
         self.bang_bang = bang_bang_controls(problem)
         self.regularized, self.eps_symbol, self.rho_symbols = regularize(problem, self.bang_bang)
-        self.kr = build_kernels(derive(self.regularized), cache_dir=cache_dir)
+        # Limits ridden at run time have no penalty route, and a penalty's tape in every
+        # kernel takes most of the compile.
+        self.kr = build_kernels(derive(self.regularized, penalties_when_riding=False),
+                                cache_dir=cache_dir)
         if self.kr.system.riding is not None:
             self.active_set_seconds = 300.0     # many arcs, and no penalty route to fall back on
         self.nc = len(problem.path_constraints)

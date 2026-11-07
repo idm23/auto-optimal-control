@@ -407,6 +407,24 @@ def test_a_penalty_that_comes_on_mid_flight_gets_the_whole_phi(kernel_cache):
     assert np.abs(on["stm"].reshape(-1)[outside]).max() > 0.0
 
 
+def test_tangency_derivatives_of_a_limit_and_its_opposite_match_differences(arm_kernels):
+    # The second limit on a joint scales the first's derivatives: the sign has to be right.
+    pmp, k = arm_kernels
+    p = _arm_params(k)
+    n = len(pmp.states)
+    z = np.random.default_rng(5).uniform(-1, 1, k.N_Z)
+    h = 1e-6
+    for c in range(12):
+        _, Nx, Nxx, _ = k.tangency_gradient(c, 0.3, z, p)
+        for i in range(n):
+            step = np.zeros(k.N_Z)
+            step[i] = h
+            hi, lo = (k.tangency_gradient(c, 0.3, z + s * step, p)[1] for s in (1, -1))
+            assert Nxx[:, :, i] == pytest.approx((hi - lo) / (2 * h), abs=1e-4)
+            value = (k.tangency(c, 0.3, z + step, p) - k.tangency(c, 0.3, z - step, p)) / (2 * h)
+            assert Nx[:, i] == pytest.approx(value, abs=1e-4)
+
+
 def test_a_violation_across_a_junction_is_one_violation():
     h = Homotopy.__new__(Homotopy)
     h.nc = 1

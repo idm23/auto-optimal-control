@@ -45,7 +45,7 @@ simplify the same way.
 
 import itertools
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import sympy as sp
@@ -694,7 +694,7 @@ def _outline(problem, above):
     ordinary SymPy expressions.
     """
     limits = problem.path_constraints
-    if above is None or not limits or max(sp.count_ops(c.expr) for c in limits) <= above:
+    if above is None or not any(sp.count_ops(c.expr) > above for c in limits):
         return None
     variables = {problem.time, *problem.states}
     tape, rng = Tape(), np.random.default_rng(0)
@@ -840,7 +840,16 @@ def _singular_arc(problem, H, law, costates, sw):
                        upper=sw.upper), ""
 
 
-def derive(problem, singular=False, simultaneous=None, outline_above=OUTLINE_ABOVE_OPS):
+def bang_bang_controls(problem):
+    """The controls the Hamiltonian is linear in, on a :class:`Box`: the control law alone."""
+    taken = {s.name for s in (problem.time, *problem.states, *problem.controls, *problem.params)}
+    costates = tuple(_new_symbol(f"lam_{s.name}", taken, real=True) for s in problem.states)
+    H = problem.running_cost + sp.Add(*[l * f for l, f in zip(costates, problem.dynamics)])
+    return tuple(sw.control for sw in _control_law(problem, H)[1])
+
+
+def derive(problem, singular=False, simultaneous=None, outline_above=OUTLINE_ABOVE_OPS,
+           penalties_when_riding=True):
     """Derive the first-order necessary conditions of ``problem``.
 
     With ``singular=True``, also derive the singular arc of each bang-bang
@@ -871,6 +880,9 @@ def derive(problem, singular=False, simultaneous=None, outline_above=OUTLINE_ABO
     # control law alone and add w max(0, g) dg/dx to -lambda'.
     outlined = _outline(problem, outline_above)
     constraints = _state_constraints(problem, H, costates, outlined)
+    if not penalties_when_riding and any(isinstance(c.boundary, _RiddenAtRunTime)
+                                         for c in constraints):
+        constraints = tuple(replace(c, penalty=None) for c in constraints)
     penalized = [c for c in constraints if c.penalty is not None]
     penalty = sp.Add(*[c.penalty / 2 * sp.Max(0, c.expr) ** 2 for c in penalized])
     costate_dynamics = tuple(
