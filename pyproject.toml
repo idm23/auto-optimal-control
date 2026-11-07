@@ -32,6 +32,9 @@ dependencies = [
 [project.optional-dependencies]
 # SingleShooting.solve uses scipy.optimize.root.
 shooting = ["scipy>=1.13"]
+# auto_optimal_control.learn: learned proposals (a conditional flow, a JEPA) trained on
+# generated indirect extremals.
+learn = ["torch>=2.2"]
 
 [project.urls]
 Homepage = "https://github.com/idm23/auto-optimal-control"

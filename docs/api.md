@@ -35,6 +35,18 @@ each carries its own docstring: use `help(kernels.propagate)`.
 .. automodule:: auto_optimal_control.homotopy
 ```
 
+## Generating extremals
+
+```{eval-rst}
+.. automodule:: auto_optimal_control.generation
+```
+
+## An embedding of extremals
+
+```{eval-rst}
+.. automodule:: auto_optimal_control.embedding
+```
+
 ## NumPy evaluation
 
 ```{eval-rst}

@@ -434,14 +434,16 @@ def six_joint_arm():
     return jerk_controlled_arm(SIX_JOINT_LINKS, name="six_joint_arm")
 
 
-def six_joint_arm_min_time():
+def six_joint_arm_min_time(moving_ends=False):
     """:func:`six_joint_arm` in minimum time with bounded jerks, torque limits as before.
 
-    See :func:`~auto_optimal_control.robot.jerk_limited_arm`.
+    See :func:`~auto_optimal_control.robot.jerk_limited_arm`; ``moving_ends``
+    puts the rates and accelerations at both ends among the params too.
 
     params: ``q0_1..6``, ``qf_1..6``, ``j_max1..6``, ``tau_max1..6``.
     """
-    return jerk_limited_arm(SIX_JOINT_LINKS, name="six_joint_arm_min_time")
+    return jerk_limited_arm(SIX_JOINT_LINKS, name="six_joint_arm_min_time" + ("_moving" if moving_ends else ""),
+                            moving_ends=moving_ends)
 
 
 def goddard(dynamic_pressure=False):

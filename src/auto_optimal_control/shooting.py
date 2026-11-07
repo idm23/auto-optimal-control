@@ -448,13 +448,14 @@ class MultiArcShooting(SingleShooting):
     _SIZES = {"touch": 2, "singular": 2, "singular_joined": 1, "switch": 1}
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
-                 atol=1e-12, max_nfev=200000, junctions="auto"):
+                 atol=1e-12, max_nfev=200000, junctions="auto", open_end=False):
         super().__init__(kernels, params, x0=x0, method=method, rtol=rtol, atol=atol,
                          n_interior=0)
         if junctions not in ("auto", "hamiltonian"):
             raise ValueError("junctions must be 'auto' or 'hamiltonian'")
         self.junctions = junctions
         k = kernels
+        self.entries = tuple(arcs)
         self.arcs = []
         self.events = []                 # ("in" | "out" | "touch" | "legacy", arc index)
         open_arcs = {}                   # constraint -> index of its arc entered, not yet left
@@ -521,9 +522,13 @@ class MultiArcShooting(SingleShooting):
             else:
                 raise ValueError("arc kind must be 'boundary', 'touch', 'singular', 'switch', "
                                  f"'enter' or 'exit', got {kind!r}")
-        if open_arcs:
+        if open_arcs and not open_end:
             raise ValueError(f"{[k.CONSTRAINT_NAMES[c] for c in open_arcs]} entered but never left")
+        # Arcs still ridden at t_f (open_end): their unknowns are (t_in, pi), with no exit.
+        self._open = set(open_arcs.values())
         self._legacy = any(e[0] == "legacy" for e in self.events)
+        if self._legacy and self._open:
+            raise ValueError("arcs open at the end are not supported with singular arcs")
         # Overlapping: an entry or a touch while another limit is ridden.
         nested, depth = False, 0
         for e in self.events:
@@ -560,8 +565,8 @@ class MultiArcShooting(SingleShooting):
         self.n_base = self.n_unknowns
         self._arc_slices = []
         off = self.n_base
-        for kind, c, q in self.arcs:
-            size = 2 + q if kind == "boundary" else self._SIZES[kind]
+        for i, (kind, c, q) in enumerate(self.arcs):
+            size = (1 if i in self._open else 2) + q if kind == "boundary" else self._SIZES[kind]
             self._arc_slices.append(slice(off, off + size))
             off += size
         self.n_unknowns = off
@@ -601,13 +606,14 @@ class MultiArcShooting(SingleShooting):
         ``(t_in, t_out)`` for a singular arc, ``t_out`` for a joined one or
         ``t_s`` for a switch."""
         parts = [np.asarray(base, dtype=float).reshape(-1)[:self.n_base]]
-        for (kind, c, q), val in zip(self.arcs, arc_values, strict=True):
+        for i, ((kind, c, q), val) in enumerate(zip(self.arcs, arc_values, strict=True)):
             if kind == "boundary":
                 t_in, t_out, pi = val
                 pi = np.asarray(pi, dtype=float).reshape(-1)
                 if pi.shape != (q,):
                     raise ValueError(f"pi must have {q} entries for an order-{q} constraint")
-                parts.append(np.concatenate([[t_in, t_out], pi]))
+                # An arc open at the end has no exit time; t_out is ignored.
+                parts.append(np.concatenate([[t_in] if i in self._open else [t_in, t_out], pi]))
             else:
                 parts.append(np.asarray(val, dtype=float).reshape(self._SIZES[kind]))
         return np.concatenate(parts)
@@ -617,9 +623,11 @@ class MultiArcShooting(SingleShooting):
         ``t_out`` (joined singular) or ``t_s`` (switch)."""
         v = np.asarray(v, dtype=float).reshape(-1)
         out = []
-        for (kind, _, _), sl in zip(self.arcs, self._arc_slices):
+        for i, ((kind, _, _), sl) in enumerate(zip(self.arcs, self._arc_slices)):
             w = v[sl]
-            if kind == "boundary":
+            if kind == "boundary" and i in self._open:
+                out.append((w[0], np.nan, w[1:].copy()))
+            elif kind == "boundary":
                 out.append((w[0], w[1], w[2:].copy()))
             elif kind in ("switch", "singular_joined"):
                 out.append(w[0])
@@ -832,8 +840,9 @@ class MultiArcShooting(SingleShooting):
                 rows.append(Nv[r_])
                 grads.append(Nt[r_] * d_ev + Nx[r_] @ D[:n] if jac else None)
             used = slice(0, 1) if kind == "touch" else slice(0, q)
-            mult = w[1:2] if kind == "touch" else w[2:]
-            mult_cols = [sl.start + 1] if kind == "touch" else list(range(sl.start + 2, sl.stop))
+            mult = w[1:2] if kind == "touch" else w[len(w) - q:]
+            mult_cols = ([sl.start + 1] if kind == "touch"
+                         else list(range(sl.stop - q, sl.stop)))
             zp = z.copy()
             zp[n:] -= Nx[used].T @ mult
             Dp = None
@@ -862,10 +871,22 @@ class MultiArcShooting(SingleShooting):
             if jac:
                 D = Dp
         d_tf = unit(m + n + k.N_MULTIPLIERS) if k.FREE_FINAL_TIME else np.zeros(N)
-        r, D = self._segment(None, None, t, dt, z, D, tf, d_tf, jac, record, flags)
-        segments.append((None, None, t, tf, z, dict(flags), r))
+        # The last segment: free, or the limits still ridden at t_f (open_end).
+        aid = self._arc_id(active)
+        seg = None if aid is None else "boundary"
+        r, D = self._segment(seg, aid, t, dt, z, D, tf, d_tf, jac, record, flags)
+        segments.append((seg, aid, t, tf, z, dict(flags) if aid is None else None, r))
         zf = r["z"]
-        R = np.concatenate([k.residual(z0, zf, nu, tf, p)[self._rows], rows])
+        base_rows = k.residual(z0, zf, nu, tf, p)[self._rows]
+        fix = None
+        if aid is not None and k.FREE_FINAL_TIME:
+            # H(t_f) is the last residual row, written at the free law: on an arc
+            # it is H at the riding control.
+            Hf, Hft, Hfz = self._set_hamiltonian(None, tf, zf, flags)
+            Hb, Hbt, Hbz = self._set_hamiltonian(aid, tf, zf, flags)
+            base_rows[-1] += Hb - Hf
+            fix = (Hbt - Hft, Hbz - Hfz)
+        R = np.concatenate([base_rows, rows])
         if not jac:
             return R, None, segments
         Jb = k.residual_jacobian(z0, zf, nu, tf, p)
@@ -874,6 +895,8 @@ class MultiArcShooting(SingleShooting):
             Jbase[:, m + n:m + n + k.N_MULTIPLIERS] += Jb["nu"][self._rows]
         if k.FREE_FINAL_TIME:
             Jbase += np.outer(Jb["tf"][self._rows], d_tf)
+        if fix is not None:
+            Jbase[-1] += fix[0] * d_tf + fix[1] @ D
         J = np.vstack([Jbase] + [g[None, :] for g in grads]) if grads else Jbase
         return R, J, segments
 
