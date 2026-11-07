@@ -45,13 +45,14 @@ simplify the same way.
 
 import itertools
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import sympy as sp
 
 from auto_optimal_control.functions import greater, lesser
 from auto_optimal_control.problem import Box, OptimalControlProblem, UnitVector
+from auto_optimal_control.tape import Outlined, Tape, Unsupported
 
 
 @dataclass(frozen=True)
@@ -192,6 +193,26 @@ class BoundaryConditions:
 
 
 @dataclass(frozen=True)
+class RidingSystem:
+    """Boundary arcs of large order-1 limits, solved at run time (:mod:`~auto_optimal_control.riding`).
+
+    Each limit is ``sign_of[c] * root + (terms free of the states)``, with
+    ``roots[root_of[c]]`` a step of ``tape``: both limits on one torque share
+    its root. The set of limits ridden is chosen when the kernels are called,
+    so there is one kernel for all of them.
+    """
+
+    tape: Tape
+    roots: tuple
+    root_of: tuple
+    sign_of: tuple
+
+
+class _RiddenAtRunTime:
+    """Stands in :attr:`StateConstraint.boundary` for a :class:`RidingSystem` arc."""
+
+
+@dataclass(frozen=True)
 class PontryaginSystem:
     """The necessary conditions of an optimal control problem.
 
@@ -218,6 +239,7 @@ class PontryaginSystem:
     singular_arcs: tuple = ()      # per switching function: SingularArc, or None
     singular_unsupported: tuple = ()   # per switching function: why not, when None
     boundary_sets: tuple = ()      # ((constraint indices, BoundaryArc), ...): limits ridden at once
+    riding: object = None          # RidingSystem: boundary arcs solved at run time, or None
 
     @property
     def z(self):
@@ -434,14 +456,19 @@ def constraint_derivatives(problem, expr):
     g = sp.sympify(expr)
     derivatives = [g]
     for _ in range(MAX_CONSTRAINT_ORDER):
-        g = sp.simplify(sp.diff(g, t) + sp.Add(*[sp.diff(g, x) * f for x, f in
-                                                 zip(problem.states, problem.dynamics)]))
+        g = sp.diff(g, t) + sp.Add(*[sp.diff(g, x) * f for x, f in
+                                     zip(problem.states, problem.dynamics)])
+        if not g.has(Outlined):
+            g = sp.simplify(g)
         derivatives.append(g)
         if any(not _is_zero(sp.diff(g, u)) for u in controls):
             return tuple(derivatives)
     raise ValueError(f"no control appears in the first {MAX_CONSTRAINT_ORDER} time derivatives "
                      f"of the path constraint {expr} <= 0: the controls cannot influence it")
 
+
+# A path constraint longer than this written out goes on a tape.
+OUTLINE_ABOVE_OPS = 200
 
 # simplify() is kept for small expressions, where it reads best; on larger
 # ones it can take minutes (trigsimp on a two-link arm's boundary arcs), and
@@ -659,18 +686,111 @@ def _boundary_sets(problem, H, constraints, simultaneous):
     return tuple(out)
 
 
-def _state_constraints(problem, H=None, costates=()):
+def _outline(problem, above):
+    """Put large path constraints on a tape: ``(exprs, tape, roots, root_of, sign_of)``, or None.
+
+    None when every constraint has at most ``above`` operations written out,
+    or one uses something a tape does not record; the constraints then stay
+    ordinary SymPy expressions.
+    """
+    limits = problem.path_constraints
+    if above is None or not any(sp.count_ops(c.expr) > above for c in limits):
+        return None
+    variables = {problem.time, *problem.states}
+    tape, rng = Tape(), np.random.default_rng(0)
+    points = [{}, {}]
+
+    def values(i):
+        for point in points:
+            for name in tape.input_names(i):
+                point.setdefault(name, float(rng.uniform(0.5, 1.5)))
+        return np.array([tape.evaluate([i], point)[0] for point in points])
+
+    exprs, roots, seen, root_of, sign_of = [], [], [], [], []
+    for c in limits:
+        terms = sp.Add.make_args(c.expr)
+        state = sp.Add(*[e for e in terms if e.free_symbols & variables])
+        rest = sp.Add(*[e for e in terms if not e.free_symbols & variables])
+        try:
+            step = tape.from_sympy(state)
+        except Unsupported:
+            return None
+        v = values(step)
+        for k, other in enumerate(seen):
+            scale = 1e-9 * max(1.0, float(np.max(np.abs(v))))
+            if np.all(np.abs(v - other) < scale):
+                sign = 1
+            elif np.all(np.abs(v + other) < scale):
+                sign = -1
+            else:
+                continue
+            break
+        else:
+            k, sign = len(roots), 1
+            roots.append(step)
+            seen.append(v)
+        root_of.append(k)
+        sign_of.append(sign)
+        exprs.append(sign * tape.outlined(roots[k]) + rest)
+    return exprs, tape, tuple(roots), tuple(root_of), tuple(sign_of)
+
+
+def _rides_at_run_time(problem, derivatives_of):
+    """Whether boundary arcs of these limits can be solved at run time, or why not."""
+    if any(not isinstance(cs, Box) for cs in problem.control_sets):
+        return "unit-vector control sets are not supported with exact arcs"
+    z_free_bounds = {problem.time, *problem.states}
+    if any((cs.lower.free_symbols | cs.upper.free_symbols) & z_free_bounds
+           for cs in problem.control_sets):
+        return "limits this large need control bounds free of the states and time"
+    if any(len(d) != 2 for d in derivatives_of):
+        return "limits this large are supported at order 1"
+    t, u = problem.time, problem.controls
+    z_free = {problem.time, *problem.states}
+    H_like = [problem.running_cost, *problem.dynamics]
+    if any(t in e.free_symbols for e in H_like):
+        return "limits this large need autonomous dynamics and cost"
+    if any(sp.diff(f, a, b) != 0 for f in problem.dynamics for a in u for b in u):
+        return "limits this large need dynamics affine in the controls"
+    second = [sp.diff(problem.running_cost, a, b) for a in u for b in u]
+    if any(e.free_symbols & z_free for e in second):
+        return "limits this large need a running cost quadratic in the controls"
+    if sp.Matrix(len(u), len(u), second).is_zero_matrix:
+        return "limits this large need a running cost strictly convex in the controls"
+    return ""
+
+
+def _sets_at_run_time(root_of, n_controls, simultaneous):
+    """Each set of up to ``simultaneous`` limits, at most one per root and per control."""
+    by_root = {}
+    for c, k in enumerate(root_of):
+        by_root.setdefault(k, []).append(c)
+    largest = min(simultaneous, n_controls, len(by_root))
     out = []
-    for c in problem.path_constraints:
-        derivatives = constraint_derivatives(problem, c.expr)
+    for size in range(2, largest + 1):
+        for chosen in itertools.combinations(sorted(by_root), size):
+            for limits in itertools.product(*[by_root[k] for k in chosen]):
+                out.append((tuple(sorted(limits)), None))
+    return tuple(out)
+
+
+def _state_constraints(problem, H=None, costates=(), outlined=None):
+    out = []
+    exprs = [c.expr for c in problem.path_constraints] if outlined is None else outlined[0]
+    derivatives_of = [constraint_derivatives(problem, e) for e in exprs]
+    why_not = _rides_at_run_time(problem, derivatives_of) if outlined is not None else ""
+    for c, expr, derivatives in zip(problem.path_constraints, exprs, derivatives_of):
         order = len(derivatives) - 1
         if order >= 3:
             warnings.warn(
                 f"path constraint {c.name!r} has order {order}. Optimal solutions that ride a "
                 "constraint of order 3 or more generally chatter (infinitely many touch points), "
                 "so only its penalty and termination are meaningful", stacklevel=3)
-        arc, why = (None, "") if H is None else _boundary_arc(problem, H, costates, derivatives)
-        out.append(StateConstraint(name=c.name, expr=c.expr, order=order,
+        if outlined is not None:
+            arc, why = (None, why_not) if why_not else (_RiddenAtRunTime(), "")
+        else:
+            arc, why = (None, "") if H is None else _boundary_arc(problem, H, costates, derivatives)
+        out.append(StateConstraint(name=c.name, expr=expr, order=order,
                                    derivatives=derivatives, penalty=c.penalty, boundary=arc,
                                    unsupported=why))
     return tuple(out)
@@ -720,14 +840,28 @@ def _singular_arc(problem, H, law, costates, sw):
                        upper=sw.upper), ""
 
 
-def derive(problem, singular=False, simultaneous=2):
+def bang_bang_controls(problem):
+    """The controls the Hamiltonian is linear in, on a :class:`Box`: the control law alone."""
+    taken = {s.name for s in (problem.time, *problem.states, *problem.controls, *problem.params)}
+    costates = tuple(_new_symbol(f"lam_{s.name}", taken, real=True) for s in problem.states)
+    H = problem.running_cost + sp.Add(*[l * f for l, f in zip(costates, problem.dynamics)])
+    return tuple(sw.control for sw in _control_law(problem, H)[1])
+
+
+def derive(problem, singular=False, simultaneous=None, outline_above=OUTLINE_ABOVE_OPS,
+           penalties_when_riding=True):
     """Derive the first-order necessary conditions of ``problem``.
 
     With ``singular=True``, also derive the singular arc of each bang-bang
     control (:class:`SingularArc`), for exact shooting over structures with
     singular arcs. ``simultaneous`` is the largest number of path
     constraints an exact arc may ride at once (:attr:`PontryaginSystem.boundary_sets`);
-    1 derives single limits only. Returns a :class:`PontryaginSystem`.
+    1 derives single limits only; by default it is 2, or every set when
+    the arcs are solved at run time. A path constraint with more than
+    ``outline_above`` operations written out goes on a tape
+    (:mod:`~auto_optimal_control.tape`), and its arcs, when they qualify, are
+    solved at run time (:mod:`~auto_optimal_control.riding`); ``None`` keeps
+    everything symbolic. Returns a :class:`PontryaginSystem`.
     """
     taken = {s.name for s in (problem.time, *problem.states, *problem.controls, *problem.params)}
     costates = tuple(_new_symbol(f"lam_{s.name}", taken, real=True) for s in problem.states)
@@ -744,7 +878,11 @@ def derive(problem, singular=False, simultaneous=2):
 
     # Path-constraint penalties depend on the state only, so they leave the
     # control law alone and add w max(0, g) dg/dx to -lambda'.
-    constraints = _state_constraints(problem, H, costates)
+    outlined = _outline(problem, outline_above)
+    constraints = _state_constraints(problem, H, costates, outlined)
+    if not penalties_when_riding and any(isinstance(c.boundary, _RiddenAtRunTime)
+                                         for c in constraints):
+        constraints = tuple(replace(c, penalty=None) for c in constraints)
     penalized = [c for c in constraints if c.penalty is not None]
     penalty = sp.Add(*[c.penalty / 2 * sp.Max(0, c.expr) ** 2 for c in penalized])
     costate_dynamics = tuple(
@@ -758,7 +896,18 @@ def derive(problem, singular=False, simultaneous=2):
         singular_arcs.append(arc)
         singular_unsupported.append(why)
 
-    sets = _boundary_sets(problem, H, constraints, simultaneous) if simultaneous > 1 else ()
+    at_run_time = outlined is not None and all(isinstance(c.boundary, _RiddenAtRunTime)
+                                               for c in constraints)
+    riding = None
+    if at_run_time:
+        riding = RidingSystem(*outlined[1:])
+        sets = _sets_at_run_time(riding.root_of, len(problem.controls),
+                                 len(problem.controls) if simultaneous is None else simultaneous)
+    elif outlined is not None:
+        sets = ()
+    else:
+        simultaneous = 2 if simultaneous is None else simultaneous
+        sets = _boundary_sets(problem, H, constraints, simultaneous) if simultaneous > 1 else ()
     boundary = _boundary_conditions(problem, H_star + penalty, costates, taken)
     return PontryaginSystem(
         problem=problem, time=problem.time, states=problem.states, costates=costates,
@@ -767,4 +916,4 @@ def derive(problem, singular=False, simultaneous=2):
         running_cost=sp.simplify(problem.running_cost.subs(law)) + penalty,
         state_dynamics=state_dynamics, costate_dynamics=costate_dynamics, boundary=boundary,
         path_constraints=constraints, penalty=penalty, singular_arcs=tuple(singular_arcs),
-        singular_unsupported=tuple(singular_unsupported), boundary_sets=sets)
+        singular_unsupported=tuple(singular_unsupported), boundary_sets=sets, riding=riding)

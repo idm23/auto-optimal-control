@@ -37,20 +37,45 @@ _TEMPLATE = Path(__file__).with_name("wrapper_template.pyx")
 _SETUP = '''\
 import os
 
+from concurrent.futures import ThreadPoolExecutor
+
 from Cython.Build import cythonize
 from setuptools import Extension, setup
+from setuptools.command.build_ext import build_ext
 
 MOD = {mod!r}
 FNI_INCLUDE = {fni_include!r}
 # As in fast-numerical-integration: no FMA contraction, so results do not
-# depend on the compiler's choice to fuse multiply-adds.
-FLAGS = ["/O2", "/fp:precise"] if os.name == "nt" else ["-O3", "-ffp-contract=off"]
+# depend on the compiler's choice to fuse multiply-adds. The kernels are the hot code. The
+# wrapper is mostly argument handling, megabytes of it, and takes far longer to optimize than
+# the kernels of a small problem; -O1 solves as fast as -O3, where -O0 does not. No debug info:
+# Python's own flags would ask for it.
+if os.name == "nt":
+    KERNELS, WRAPPER = ["/O2", "/fp:precise"], ["/O1", "/fp:precise"]
+else:
+    KERNELS = ["-O3", "-g0", "-ffp-contract=off"]
+    WRAPPER = ["-O1", "-g0", "-ffp-contract=off"]
 
-ext = Extension(MOD, [MOD + ".pyx", MOD + "_kernels.c"], extra_compile_args=FLAGS)
+
+class Build(build_ext):
+    """The kernels with their own flags, alongside the wrapper."""
+
+    def build_extension(self, ext):
+        compiler, link = self.compiler, self.compiler.link_shared_object
+        with ThreadPoolExecutor(1) as pool:
+            kernels = pool.submit(compiler.compile, [MOD + "_kernels.c"],
+                                  output_dir=self.build_temp, extra_postargs=KERNELS)
+            compiler.link_shared_object = lambda objects, *args, **kwargs: link(
+                [*objects, *kernels.result()], *args, **kwargs)
+            super().build_extension(ext)
+
+
+ext = Extension(MOD, [MOD + ".pyx"], extra_compile_args=WRAPPER)
 setup(
     name=MOD,
     ext_modules=cythonize([ext], include_path=[FNI_INCLUDE], quiet=True,
                           compiler_directives={{"language_level": 3}}),
+    cmdclass={{"build_ext": Build}},
     script_args=["build_ext", "--inplace"],
 )
 '''
@@ -143,7 +168,7 @@ def build_kernels(pmp, name=None, *, cache_dir=None, force=False, verbose=False)
     prefix, header, source, macros = generate_c(pmp, ident)
     probe = "aoc_" + ident
     wrapper = _render_wrapper(pmp, prefix, probe + "_kernels.h", macros)
-    key = _fingerprint(header, source, wrapper)
+    key = _fingerprint(header, source, wrapper, _SETUP)
     mod = f"aoc_{ident}_{key[:16]}"
     header_name = mod + "_kernels.h"
     wrapper = wrapper.replace(probe + "_kernels.h", header_name)
@@ -231,11 +256,14 @@ class Kernels:
         """The fixed initial state, with NaN for free components."""
         problem = self.system.problem
         values = dict(zip(self.system.params, np.asarray(params, dtype=float).reshape(-1)))
-        t0 = float(problem.initial_time.subs(values))
+        # A solve asks often, and subs is slow even on a constant.
+        t0 = float(problem.initial_time) if problem.initial_time.is_number \
+            else float(problem.initial_time.subs(values))
         out = np.full(len(self.system.states), np.nan)
         for i, s in enumerate(self.system.states):
             if s in problem.initial_state:
-                out[i] = float(problem.initial_state[s].subs({**values, problem.time: t0}))
+                e = problem.initial_state[s]
+                out[i] = float(e) if e.is_number else float(e.subs({**values, problem.time: t0}))
         return out
 
     def z0(self, lam0, params=(), x0=None):

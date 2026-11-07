@@ -1,18 +1,27 @@
 # Lectures
 
 A course on optimal control by the indirect (Pontryagin) method, one
-notebook per lecture, in six parts. It covers what a first graduate course
+notebook per lecture, in six parts, with a prerequisite lecture before them. It covers what a first graduate course
 covers, from the brachistochrone to state constraints, and every mechanism
 the package is built on. Each lecture opens with a challenge the previous
 ones cannot meet, tells the story of the people who met it, develops the
 theory with SymPy doing the algebra in view, and then solves real problems
 with the package, showing all of the code and checking the answers
-independently. A reader who works through all nineteen can use every part
+independently. A reader who works through all twenty can use every part
 of the package; Lecture 17 maps each module to the lectures that teach it.
 
 Diagrams drawn to illustrate an idea, rather than to solve something, have their
 plotting code folded away: click "Show code cell source" above a figure to see
 it. Everything else shows its code.
+
+## Prerequisites
+
+Single-variable calculus and matrix multiplication are all this assumes. Skip it
+if gradients, Jacobians and Hessians are familiar.
+
+| # | Lecture | The challenge | New ideas |
+|---|---|---|---|
+| P1 | {doc}`p1_jacobians_and_hessians` | the words every lecture uses | derivatives as linear approximations; the gradient; the Jacobian and its determinant; the chain rule; Newton's method and how it fails; the Hessian and the test for a minimum; finite differences, symbolic and automatic differentiation |
 
 ## Part I. Formulating optimal control
 
@@ -62,6 +71,7 @@ it. Everything else shows its code.
 |---|---|---|---|
 | 18 | {doc}`18_minimum_time_several_axes` | the fastest motion of several axes | non-unique optima; vanishing costates and singular Jacobians; a secondary cost, a two-stage solve, a fixed path |
 | 19 | {doc}`19_choosing_among_equal_motions` | a two-link arm in minimum time, with bounded jerks and torque limits | non-uniqueness read from the statement; selectable policies; riding a limit with bounded controls |
+| 20 | {doc}`20_six_joints` | what breaks at six joints? | the bottlenecks, measured; the recursive Newton–Euler algorithm; tapes; arcs solved at run time; a survey of random motions; minimum time with bounded jerks, and where the time goes; why a limit on a control's rate must make that control a state |
 
 To run the notebooks yourself, clone the repository and run
 `uv sync --group docs`, then open them in Jupyter. They need a C compiler,
@@ -72,6 +82,7 @@ takes a few seconds per problem; later runs load them from the cache.
 :maxdepth: 1
 :hidden:
 
+p1_jacobians_and_hessians
 01_brachistochrone
 02_calculus_of_variations
 03_hamilton_cart_pole
@@ -91,6 +102,7 @@ takes a few seconds per problem; later runs load them from the cache.
 17_practice
 18_minimum_time_several_axes
 19_choosing_among_equal_motions
+20_six_joints
 ```
 
 ## Sources

@@ -7,6 +7,7 @@ Do not edit: regenerate with ``auto_optimal_control.build.build_kernels``.
 import numpy as np
 
 from libc.math cimport INFINITY
+from libc.string cimport memcmp, memcpy
 
 from fast_numerical_integration.integrators cimport (
     EventFunction, OdeSystem, fni_event, fni_hybrid_options, fni_integrate, fni_integrate_hybrid,
@@ -21,6 +22,9 @@ cdef extern from "{{header}}" nogil:
     int P_dfdp_arc "{{P}}dfdp_arc"(double t, const double* z, const double* p, const int* arc, double* B)
     int P_stm_rhs "{{P}}stm_rhs"(double t, const double* y, const double* p, const int* arc, int with_p, double* dy)
     int P_stm_jump "{{P}}stm_jump"(int k, double t, double* y, const double* p, const int* arc, int with_p)
+    int P_stm_sparse_rhs "{{P}}stm_sparse_rhs"(double t, const double* y, const double* p, const int* arc, double* dy)
+    int P_stm_sparse_jump "{{P}}stm_sparse_jump"(int k, double t, double* y, const double* p, const int* arc)
+    void P_stm_indices "{{P}}stm_indices"(int* out)
     int P_switching "{{P}}switching"(double t, const double* z, const double* p, double* S)
     int P_switching_grad "{{P}}switching_grad"(double t, const double* z, const double* p, double* St, double* Sz, double* Sp)
     int P_constraint "{{P}}constraint"(double t, const double* z, const double* p, double* g)
@@ -59,6 +63,9 @@ cdef extern from "{{header}}" nogil:
 
 cdef enum:
     NZ = {{NZ}}
+    NPHI = {{NPHI}}
+    SPARSE_STM = {{SPARSE_STM}}
+    PENALTY_FLAGS = {{PENALTY_FLAGS}}
     NP = {{NP}}
     NSW = {{NSW}}
     NC = {{NC}}
@@ -98,6 +105,8 @@ BOUNDARY_SETS = {{boundary_sets}}
 N_CONTROLS = NU
 N_MULTIPLIERS = NNU
 N_RESIDUALS = NR
+N_PHI = NPHI
+STM_IS_SPARSE = bool(SPARSE_STM)
 N_STM = NZ + NZ * NZ
 N_STM_PARAMS = NZ + NZ * NZ + NZ * NP
 PARAM_NAMES = {{param_names}}
@@ -173,6 +182,7 @@ cdef struct _ctx:
     int arc[NM1]
     int stop_on[NC1]    # stop when path constraint c becomes violated
     int with_p
+    int sparse_stm      # the state holds only the entries of Phi that can be nonzero
     int with_cost       # last entry of the state is J = int L dt
     int constraint_events   # 0: path constraints are not watched (exact multi-arc shooting)
     int frozen[NSW1]    # 1: switching function k is not watched, its flag is held
@@ -180,10 +190,41 @@ cdef struct _ctx:
     Py_ssize_t max_calls    # > 0: fail past this many (a runaway trajectory)
 
 
+cdef struct _guard_values:
+    # FNI asks each guard in turn at the same point, and a kernel computes all of them at once:
+    # on a large problem that is the whole tape per guard. So the guards share one evaluation.
+    double t
+    double z[NZ]
+    int arc[NM1]
+    int filled          # GUARD_MODES | GUARD_RATES | GUARD_KINKS, or 0
+    double modes[NM1]
+    double rates[NC1]
+    double kinks[NK1]
+
+
+cdef enum:
+    GUARD_MODES = 1
+    GUARD_RATES = 2
+    GUARD_KINKS = 4
+
+
 cdef struct _ev_ctx:
     const double* p
     const int* arc      # constraint rates and kinks only: the arc the flow is on
     int k
+    _guard_values* shared   # NULL: not shared
+
+
+cdef inline int _guards_fresh(_guard_values* v, double t, const double* y,
+                              const int* arc, int which) noexcept nogil:
+    """1 if ``which`` is already known at this point; if not, get ready to store it."""
+    if not (v.filled and v.t == t and memcmp(v.z, y, NZ * sizeof(double)) == 0
+            and memcmp(v.arc, arc, NM1 * sizeof(int)) == 0):
+        v.t = t
+        memcpy(v.z, y, NZ * sizeof(double))
+        memcpy(v.arc, arc, NM1 * sizeof(int))
+        v.filled = 0
+    return (v.filled & which) != 0
 
 
 cdef int _rhs_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ctx) noexcept nogil:
@@ -210,7 +251,8 @@ cdef int _stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ct
     c.calls += 1
     if c.max_calls > 0 and c.calls > c.max_calls:
         return RC_TOO_MANY_EVALUATIONS
-    cdef int rc = P_stm_rhs(t, y, c.p, c.arc, c.with_p, dydt)
+    cdef int rc = (P_stm_sparse_rhs(t, y, c.p, c.arc, dydt) if c.sparse_stm
+                   else P_stm_rhs(t, y, c.p, c.arc, c.with_p, dydt))
     if rc == 0 and c.with_cost:
         rc = P_cost_rate_arc(t, y, c.p, c.arc, &dydt[n - 1])
     return rc
@@ -219,7 +261,17 @@ cdef int _stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ct
 cdef int _event_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
     cdef _ev_ctx* c = <_ev_ctx*> ctx
     cdef double M[NM1]
-    cdef int rc = P_modes(t, y, c.p, M)
+    cdef _guard_values* v = c.shared
+    cdef int rc
+    if v != NULL:
+        if not _guards_fresh(v, t, y, c.arc, GUARD_MODES):
+            rc = P_modes(t, y, c.p, v.modes)
+            if rc != 0:
+                return rc
+            v.filled |= GUARD_MODES
+        g[0] = v.modes[c.k]
+        return 0
+    rc = P_modes(t, y, c.p, M)
     g[0] = M[c.k]
     return rc
 
@@ -235,7 +287,17 @@ cdef int _constraint_fn(double t, const double* y, Py_ssize_t n, void* ctx, doub
 cdef int _rate_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
     cdef _ev_ctx* c = <_ev_ctx*> ctx
     cdef double Gd[NC1]
-    cdef int rc = P_constraint_rate_arc(t, y, c.p, c.arc, Gd)
+    cdef _guard_values* v = c.shared
+    cdef int rc
+    if v != NULL:
+        if not _guards_fresh(v, t, y, c.arc, GUARD_RATES):
+            rc = P_constraint_rate_arc(t, y, c.p, c.arc, v.rates)
+            if rc != 0:
+                return rc
+            v.filled |= GUARD_RATES
+        g[0] = v.rates[c.k]
+        return 0
+    rc = P_constraint_rate_arc(t, y, c.p, c.arc, Gd)
     g[0] = Gd[c.k]
     return rc
 
@@ -243,7 +305,17 @@ cdef int _rate_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g)
 cdef int _kink_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
     cdef _ev_ctx* c = <_ev_ctx*> ctx
     cdef double K[NK1]
-    cdef int rc = P_kinks_arc(t, y, c.p, c.arc, K)
+    cdef _guard_values* v = c.shared
+    cdef int rc
+    if v != NULL:
+        if not _guards_fresh(v, t, y, c.arc, GUARD_KINKS):
+            rc = P_kinks_arc(t, y, c.p, c.arc, v.kinks)
+            if rc != 0:
+                return rc
+            v.filled |= GUARD_KINKS
+        g[0] = v.kinks[c.k]
+        return 0
+    rc = P_kinks_arc(t, y, c.p, c.arc, K)
     g[0] = K[c.k]
     return rc
 
@@ -285,6 +357,7 @@ cdef class ArcDynamics(OdeSystem):
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
         self.ctx.with_p = 1 if param_sensitivity else 0
+        self.ctx.sparse_stm = 0
         self.ctx.calls = 0
         self.ctx.max_calls = 0
         self.ctx.with_cost = 0
@@ -315,6 +388,7 @@ cdef class Switching(EventFunction):
         if NP:
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
+        self.ctx.shared = NULL
         self.ctx.k = k
         self.c_fn = _event_fn
         self.c_ctx = &self.ctx
@@ -334,6 +408,7 @@ cdef class Constraint(EventFunction):
         if NP:
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
+        self.ctx.shared = NULL
         self.ctx.k = c
         self.c_fn = _constraint_fn
         self.c_ctx = &self.ctx
@@ -361,6 +436,7 @@ cdef class ConstraintRate(EventFunction):
         if NP:
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
+        self.ctx.shared = NULL
         self.ctx.k = c
         self.ctx.arc = self.arc_buf
         self.arc = np.zeros(NM, dtype=np.intc) if arc is None else arc
@@ -399,6 +475,7 @@ cdef class Kink(EventFunction):
         if NP:
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
+        self.ctx.shared = NULL
         self.ctx.k = k
         self.ctx.arc = self.arc_buf
         self.arc = np.zeros(NM, dtype=np.intc) if arc is None else arc
@@ -622,6 +699,7 @@ cdef enum:
     STATUS_TOO_MANY_SWITCHES = -2
     STATUS_JUMP_FAILED = -3
     STATUS_CONSTRAINT_VIOLATED = -4
+    STATUS_NEEDS_DENSE = -5
 
 STATUS_VIOLATED = STATUS_CONSTRAINT_VIOLATED
 
@@ -636,6 +714,7 @@ cdef struct _switch_ctx:
     Py_ssize_t max_sw   # with kinks, FNI's reset limit is off and this one counts switches
     int jump_failed
     int violated
+    int needs_dense     # a penalty came on, and the sparse Phi leaves out what it couples
     int too_many
 
 
@@ -693,7 +772,11 @@ cdef int _switch_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n,
     if k >= NSW and flag == 1 and r.c.stop_on[k - NSW]:
         r.violated = 1
         return FNI_RESET_STOP
-    if r.stm and k < NSW and P_stm_jump(k, t, y, r.c.p, r.c.arc, r.c.with_p) != 0:
+    if PENALTY_FLAGS and r.c.sparse_stm and k >= NSW and flag == 1:
+        r.needs_dense = 1
+        return FNI_RESET_STOP
+    if r.stm and k < NSW and (P_stm_sparse_jump(k, t, y, r.c.p, r.c.arc) if r.c.sparse_stm
+                              else P_stm_jump(k, t, y, r.c.p, r.c.arc, r.c.with_p)) != 0:
         r.jump_failed = 1
         return FNI_RESET_STOP
     r.c.arc[k] = flag
@@ -715,6 +798,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     starts and ends inside one step is still found."""
     cdef fni_event events[NE1]
     cdef _ev_ctx evc[NE1]
+    cdef _guard_values shared
     cdef int kind[NE1]
     cdef fni_hybrid_options hopt
     cdef _switch_ctx rctx
@@ -723,6 +807,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     cdef Py_ssize_t i, ne = 0
 
     n_sw[0] = 0
+    shared.filled = 0
     for k in range(NC if ctx.constraint_events else 0):
         if ctx.stop_on[k] and ctx.arc[NSW + k]:
             # Already violated at t0: stop before the first step.
@@ -739,6 +824,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
             continue                    # a control held at one bound
         evc[ne].p = ctx.p
         evc[ne].arc = ctx.arc
+        evc[ne].shared = &shared
         kind[ne] = k
         if k < NM:
             evc[ne].k = k
@@ -766,6 +852,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     rctx.max_sw = max_sw
     rctx.jump_failed = 0
     rctx.violated = 0
+    rctx.needs_dense = 0
     rctx.too_many = 0
     rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events, ne,
                               _switch_reset, &rctx, &hopt, y_out, NULL, NULL, NULL, NULL,
@@ -774,7 +861,9 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     t_final[0] = st.t_final
     if rc != FNI_OK:
         return rc
-    if rctx.violated:
+    if rctx.needs_dense:
+        status[0] = STATUS_NEEDS_DENSE
+    elif rctx.violated:
         status[0] = STATUS_CONSTRAINT_VIOLATED
     elif rctx.jump_failed:
         status[0] = STATUS_JUMP_FAILED
@@ -783,6 +872,18 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     else:
         status[0] = st.status
     return FNI_OK
+
+
+def _tolerances(Py_ssize_t ny, Py_ssize_t n_sens, double rtol, double atol, stm_rtol):
+    """Per-component ``(rtol, atol)``: the sensitivities after ``z`` get their own tolerance.
+
+    Step control then follows ``z``, and the steps fall by a factor of two or three. A Newton
+    iteration needs its Jacobian far less accurately than it needs its residual.
+    """
+    r, a = np.full(ny, rtol), np.full(ny, atol)
+    r[NZ:NZ + n_sens] = stm_rtol
+    a[NZ:NZ + n_sens] = stm_rtol
+    return r, a
 
 
 cdef int _setup_options(fni_options* opt, double rtol, double atol, first_step,
@@ -802,10 +903,10 @@ cdef int _setup_options(fni_options* opt, double rtol, double atol, first_step,
     return 0
 
 
-def _layout(stm, param_sensitivity, cost):
+def _layout(stm, param_sensitivity, cost, Py_ssize_t n_phi=NZ * NZ):
     if param_sensitivity and not stm:
         raise ValueError("param_sensitivity requires stm=True")
-    return NZ + (NZ * NZ if stm else 0) + (NZ * NP if param_sensitivity else 0) + (1 if cost else 0)
+    return NZ + (n_phi if stm else 0) + (NZ * NP if param_sensitivity else 0) + (1 if cost else 0)
 
 
 def _split_events(times, index):
@@ -843,11 +944,22 @@ def _initial_y(z, stm, Py_ssize_t ny):
     return y
 
 
+def _phi_entries():
+    """Where the entries of a sparse ``Phi`` sit in the flat ``NZ x NZ`` matrix."""
+    out = np.zeros(NPHI, dtype=np.intc)
+    cdef int[::1] view = out
+    P_stm_indices(&view[0])
+    return out
+
+
+PHI_ENTRIES = _phi_entries()
+
+
 def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensitivity=False,
               cost=False, arc=None, method="DOP853", double rtol=1e-10, double atol=1e-12,
               first_step=None, double max_step=np.inf, Py_ssize_t max_switches=10000,
               terminate=False, Py_ssize_t n_interior=4, constraint_events=True, frozen=(),
-              Py_ssize_t max_nfev=0):
+              Py_ssize_t max_nfev=0, stm_rtol=None, sparse_stm=True):
     """Integrate the extremal from ``z0 = [x0, lambda0]`` from ``t0`` to ``t1``.
 
     The integration runs arc by arc and stops at every switch, so each
@@ -895,6 +1007,10 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
         the right-hand side, so a trajectory that runs into a singularity
         fails fast instead of shrinking its steps for millions of them.
 
+    sparse_stm : bool
+        Integrate only the entries of ``Phi`` that can be nonzero, when few enough of them
+        are (``STM_IS_SPARSE``); ``stm`` still comes back whole. False is for comparing.
+
     Returns
     -------
     dict
@@ -912,14 +1028,23 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     cdef int status = 0, meth, rc
     cdef double t_final = t0
     cdef int do_stm = 1 if stm else 0
+    cdef int sparse = 1 if stm and sparse_stm and SPARSE_STM and not param_sensitivity else 0
+    cdef Py_ssize_t n_phi = NPHI if sparse else NZ * NZ
 
-    ny = _layout(stm, param_sensitivity, cost)
+    ny = _layout(stm, param_sensitivity, cost, n_phi)
     if method not in _METHODS:
         raise ValueError(f"method must be one of {list(_METHODS)}")
     meth = _METHODS[method]
     if max_switches < 0:
         raise ValueError("max_switches must be >= 0")
     _setup_options(&opt, rtol, atol, first_step, max_step, n_interior)
+    cdef double[::1] rvec, avec
+    if stm and stm_rtol is not None:
+        tolerances = _tolerances(ny, _layout(stm, param_sensitivity, False, n_phi) - NZ,
+                                 rtol, atol, float(stm_rtol))
+        rvec, avec = tolerances
+        opt.rtol_vec = &rvec[0]
+        opt.atol_vec = &avec[0]
     z = _buffer(z0, NZ, "z0")
     p_arr = _params(params)
     arc0 = initial_arc(t0, z[:NZ], p_arr[:NP] if NP else None) if arc is None else _arc(arc)[:NM]
@@ -928,8 +1053,18 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
         arc0[NSW:] = 0
     arc_buf = _arc(arc0)
     stop = _stop_mask(terminate)
+    dense_again = dict(param_sensitivity=param_sensitivity, cost=cost, arc=arc, method=method,
+                       rtol=rtol, atol=atol, first_step=first_step, max_step=max_step,
+                       max_switches=max_switches, terminate=terminate, n_interior=n_interior,
+                       constraint_events=constraint_events, frozen=frozen, max_nfev=max_nfev,
+                       stm_rtol=stm_rtol, sparse_stm=False)
+    if PENALTY_FLAGS and sparse and any(np.asarray(arc0)[NSW:]):
+        return propagate(t0, z0, t1, params, stm=True, **dense_again)
 
-    y = _initial_y(z[:NZ], stm, ny)
+    y = _initial_y(z[:NZ], False, ny)
+    if stm:
+        identity = np.eye(NZ).reshape(-1)
+        y[NZ:NZ + n_phi] = identity[PHI_ENTRIES] if sparse else identity
     y_out = np.zeros(ny)
     sw_t = np.zeros(max(max_switches, 1))
     sw_k = np.zeros(max(max_switches, 1), dtype=np.intc)
@@ -941,6 +1076,7 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     cdef int[::1] kv = sw_k
     ctx.p = &pv[0]
     ctx.with_p = 1 if param_sensitivity else 0
+    ctx.sparse_stm = sparse
     ctx.with_cost = 1 if cost else 0
     ctx.constraint_events = 1 if constraint_events else 0
     ctx.calls = 0
@@ -961,14 +1097,19 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
                         max_switches, &n_sw, &nfev, &status, &t_final)
     if rc != FNI_OK:
         raise RuntimeError(f"integration failed with code {rc}")
+    if status == STATUS_NEEDS_DENSE:
+        return propagate(t0, z0, t1, params, stm=True, **dense_again)
 
     arc_end = np.array([ctx.arc[k] for k in range(NM)], dtype=np.intc)
-    o = NZ + NZ * NZ
+    o = NZ + n_phi
     st, sk, ct, ck = _split_events(sw_t[:n_sw], sw_k[:n_sw])
+    if stm:
+        phi = np.zeros(NZ * NZ)
+        phi[PHI_ENTRIES if sparse else slice(None)] = y_out[NZ:o]
     return {
         "t": t_final,
         "z": y_out[:NZ].copy(),
-        "stm": y_out[NZ:o].reshape(NZ, NZ).copy() if stm else None,
+        "stm": phi.reshape(NZ, NZ) if stm else None,
         "dz_dp": y_out[o:o + NZ * NP].reshape(NZ, NP).copy() if param_sensitivity else None,
         "cost": float(y_out[ny - 1]) if cost else None,
         "dz_dt1": rhs_arc(t_final, y_out[:NZ], p_arr[:NP] if NP else None,
@@ -996,6 +1137,7 @@ cdef int _propagate_rows(int meth, int do_stm, int with_p, int with_cost, Py_ssi
     cdef int rc
     ctx.p = p
     ctx.with_p = with_p
+    ctx.sparse_stm = 0
     ctx.with_cost = with_cost
     ctx.constraint_events = 1
     ctx.calls = 0
@@ -1372,7 +1514,7 @@ def tangency_gradient(c, double t, z, params=None):
 
 def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, cost=False,
                        method="DOP853", double rtol=1e-10, double atol=1e-12, first_step=None,
-                       double max_step=np.inf, Py_ssize_t max_nfev=0):
+                       double max_step=np.inf, Py_ssize_t max_nfev=0, stm_rtol=None):
     """Integrate along a boundary arc of constraint ``c`` from ``t0`` to ``t1``.
 
     No events are watched: the arc's control holds ``g^(q) = 0``, so ``g``
@@ -1382,11 +1524,12 @@ def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, c
     ``status``.
     """
     return _propagate_on(_exact(c), 0, t0, z0, t1, params, stm, cost, method, rtol, atol,
-                         first_step, max_step, max_nfev)
+                         first_step, max_step, max_nfev, stm_rtol)
 
 
 def _propagate_on(int c, int singular, double t0, z0, double t1, params, stm, cost, method,
-                  double rtol, double atol, first_step, double max_step, Py_ssize_t max_nfev):
+                  double rtol, double atol, first_step, double max_step, Py_ssize_t max_nfev,
+                  stm_rtol=None):
     cdef _b_ctx ctx
     cdef fni_options opt
     cdef fni_stats st
@@ -1400,6 +1543,12 @@ def _propagate_on(int c, int singular, double t0, z0, double t1, params, stm, co
         raise ValueError(f"method must be one of {list(_METHODS)}")
     meth = _METHODS[method]
     _setup_options(&opt, rtol, atol, first_step, max_step, 0)
+    cdef double[::1] rvec, avec
+    if stm and stm_rtol is not None:
+        tolerances = _tolerances(ny, NZ * NZ, rtol, atol, float(stm_rtol))
+        rvec, avec = tolerances
+        opt.rtol_vec = &rvec[0]
+        opt.atol_vec = &avec[0]
     p_arr = _params(params)
     y = _initial_y(_buffer(z0, NZ, "z0")[:NZ], stm, ny)
     y_out = np.zeros(ny)

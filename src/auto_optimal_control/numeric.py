@@ -13,6 +13,8 @@ vector ``p``, in the orders of ``system.z`` and ``system.params``.
 import numpy as np
 import sympy as sp
 
+from auto_optimal_control.tape import Outlined
+
 
 def _vector(fn):
     def wrapped(*args):
@@ -24,6 +26,10 @@ class NumericSystem:
     """Lambdified necessary conditions."""
 
     def __init__(self, system):
+        if any(c.expr.has(Outlined) for c in system.path_constraints):
+            raise ValueError("NumericSystem is a reference for small problems; these path "
+                             "constraints are on a tape (derive(..., outline_above=None) "
+                             "keeps them symbolic)")
         self.system = system
         t, z, p = system.time, list(system.z), list(system.params)
         bc = system.boundary

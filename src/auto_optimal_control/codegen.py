@@ -61,10 +61,13 @@ A path constraint's penalty ``w/2 max(0, g)^2`` and its gradient vanish at
 
 import re
 
+import numpy as np
 import sympy as sp
 from sympy.printing.c import C99CodePrinter
 
 from auto_optimal_control.functions import greater, lesser
+from auto_optimal_control.riding import riding_kernels
+from auto_optimal_control.tape import OUTLINED_PREFIX, Outlined
 
 
 class _Printer(C99CodePrinter):
@@ -148,12 +151,15 @@ def _smooth(expr):
 class _Function:
     """One generated C function: outputs computed through common subexpressions."""
 
-    def __init__(self, signature, args):
+    def __init__(self, signature, args, mapping=None):
         self.signature = signature
         self.args = args
         self.pre = []
         self.zero = []
         self.outputs = []
+        self.mapping = mapping
+        self.helpers = []
+        self.post = []
 
     def zero_fill(self, array, size):
         if size:
@@ -163,6 +169,7 @@ class _Function:
         self.outputs.append((lhs, expr))
 
     def render(self, mapping):
+        mapping = self.mapping or mapping
         lines = [self.signature + " {"]
         lines += [f"    (void){a};" for a in self.args]
         lines += self.pre
@@ -171,13 +178,41 @@ class _Function:
         keep = [(lhs, e) for lhs, e in keep if not (self.zero and e == 0)]
         if keep:
             repl, reduced = sp.cse([e for _, e in keep], symbols=sp.numbered_symbols("cse"))
+            lines += self._outlined_lines([e for _, e in repl] + list(reduced))
             for s, e in repl:
                 lines.append(f"    const double {s} = {_c(e)};")
             for (lhs, _), e in zip(keep, reduced):
                 lines.append(f"    {lhs} = {_c(e)};")
+        lines += self.post
         lines.append("    return 0;")
         lines.append("}")
-        return "\n".join(lines)
+        return "\n".join(self.helpers + ["\n".join(lines)])
+
+    def _outlined_lines(self, exprs):
+        """Statements computing the :class:`~auto_optimal_control.tape.Outlined` steps used.
+
+        What each input of the tape is called here comes from the functions' own
+        arguments. The boundary residuals work on ``tf`` and ``zf``, which go by
+        ``t`` and ``z`` in these statements, as they do everywhere else.
+        """
+        nodes = [node for e in exprs for node in sp.sympify(e).atoms(Outlined)]
+        if not nodes:
+            return []
+        tape = nodes[0].tape
+        names = {}
+        for node in nodes:
+            names.update(zip(tape.input_names(int(node.args[0])), map(str, node.args[1:])))
+        boundary = any(text == "tf" or text.startswith("zf[") for text in names.values())
+        if boundary:
+            names = {name: "t" if text == "tf" else text.replace("zf[", "z[")
+                     for name, text in names.items()}
+        steps = sorted({int(node.args[0]) for node in nodes})
+        prefix = "h_" + re.sub(r"\W", "_", self.signature.split("(")[0].split()[-1])
+        helpers, body, operand = tape.c_block(steps, names, prefix, args="t, z, p, 0, 0")
+        self.helpers = helpers
+        head = ["    const double t = tf; const double* z = zf; (void)t; (void)z;"] if boundary else []
+        return head + body + [f"    const double {OUTLINED_PREFIX}{k} = {operand(k)}; "
+                              f"(void){OUTLINED_PREFIX}{k};" for k in steps]
 
 
 def _arc_dynamics(pmp, flags):
@@ -205,17 +240,109 @@ def _arc_dynamics(pmp, flags):
 
 def _kinks(laws):
     """Where a clipped law switches branch: ``a - b`` for each ``Min(a, b)`` or ``Max(a, b)``."""
-    out = []
+    out, seen = [], set()
     for law in laws:
         for node in sorted(sp.sympify(law).atoms(sp.Min, sp.Max), key=sp.default_sort_key):
             args = node.args
             for i in range(len(args)):
                 for j in range(i + 1, len(args)):
                     guard = _smooth(args[i] - args[j])
-                    if guard.free_symbols and not any(sp.simplify(guard - o) == 0 or
-                                                      sp.simplify(guard + o) == 0 for o in out):
+                    # One guard for a corner, up to sign. Two that only simplify to the same
+                    # thing would cost an extra guard; simplifying every pair costs far more.
+                    key = sp.expand(guard)
+                    if guard.free_symbols and key not in seen:
+                        seen |= {key, -key}
                         out.append(guard)
     return out
+
+
+def _stm_pattern(F, S, flags, z):
+    """What ``Phi`` can hold on the fixed arcs of ``propagate``.
+
+    ``(depends, reach)``, both ``NZ x NZ``: ``depends[i, k]`` when ``F[i]`` involves ``z[k]``,
+    and ``reach[i, j]`` when ``z[i]`` can respond to its start ``z[j]``: by the flow, or by the
+    jump at switch ``k``, which adds ``dF @ grad S_k`` to ``Phi`` wherever ``F`` holds flag ``k``.
+    ``F`` has the path constraints' penalties off: on, they would tie everything together.
+    """
+    index = {s: i for i, s in enumerate(z)}
+    n = len(z)
+    depends = np.zeros((n, n), dtype=bool)
+    for i, e in enumerate(F):
+        depends[i, [index[s] for s in e.free_symbols if s in index]] = True
+    edges = depends | np.eye(n, dtype=bool)
+    for flag, e in zip(flags, S):
+        rows = [i for i, f in enumerate(F) if flag in f.free_symbols]
+        edges[np.ix_(rows, [index[s] for s in e.free_symbols if s in index])] = True
+    reach = edges
+    while True:
+        wider = (reach.astype(int) @ reach.astype(int)) > 0
+        if (wider == reach).all():
+            return depends, reach
+        reach = wider
+
+
+def _sparse_stm(P, NZ, depends, reach):
+    """``Phi`` as a list of the entries it can hold. FNI steps a flat vector, so it need not know.
+
+    All of a step's work, its stages and its error, scales with the length of that vector, and
+    on a free arc of a large problem most of ``Phi`` is zero for good. A jump goes through the
+    dense code: jumps are rare.
+    """
+    NPHI = int(reach.sum())
+    sig = (f"int {P}stm_sparse_rhs(double t, const double* y, const double* p, const int* arc, "
+           "double* dy)",
+           f"int {P}stm_sparse_jump(int k, double t, double* y, const double* p, const int* arc)",
+           f"void {P}stm_indices(int* out)")
+    if NPHI > NZ * NZ // 2:                    # not worth an indirection per entry
+        return NZ * NZ, 0, sig, f"""
+{sig[0]} {{ return {P}stm_rhs(t, y, p, arc, 0, dy); }}
+{sig[1]} {{ return {P}stm_jump(k, t, y, p, arc, 0); }}
+{sig[2]} {{ for (int i = 0; i < {NZ * NZ}; ++i) out[i] = i; }}
+"""
+    position = {(int(i), int(j)): s for s, (i, j) in enumerate(zip(*np.nonzero(reach)))}
+    index, ptr, a, b = [], [0], [], []
+    for (i, j), _ in position.items():
+        index.append(i * NZ + j)
+        for k in np.nonzero(depends[i])[0]:
+            if (int(k), j) in position:
+                a.append(i * NZ + int(k))
+                b.append(position[int(k), j])
+        ptr.append(len(a))
+    table = lambda name, values: (f"static const int {P}stm_{name}[{max(len(values), 1)}] = "
+                                  f"{{{', '.join(map(str, values or [0]))}}};")
+    return NPHI, 1, sig, f"""
+{table("index", index)}
+{table("ptr", ptr)}
+{table("a", a)}
+{table("b", b)}
+
+{sig[0]} {{
+    double A[{NZ * NZ}];
+    const double* phi = y + {NZ};
+    double* dphi = dy + {NZ};
+    int rc = {P}rhs_arc(t, y, p, arc, dy);
+    if (rc) return rc;
+    rc = {P}jac_arc(t, y, p, arc, A);
+    if (rc) return rc;
+    for (int s = 0; s < {NPHI}; ++s) {{
+        double v = 0.0;
+        for (int e = {P}stm_ptr[s]; e < {P}stm_ptr[s + 1]; ++e) v += A[{P}stm_a[e]] * phi[{P}stm_b[e]];
+        dphi[s] = v;
+    }}
+    return 0;
+}}
+
+{sig[1]} {{
+    double full[{NZ + NZ * NZ}] = {{0.0}};
+    for (int i = 0; i < {NZ}; ++i) full[i] = y[i];
+    for (int s = 0; s < {NPHI}; ++s) full[{NZ} + {P}stm_index[s]] = y[{NZ} + s];
+    int rc = {P}stm_jump(k, t, full, p, arc, 0);
+    for (int s = 0; s < {NPHI}; ++s) y[{NZ} + s] = full[{NZ} + {P}stm_index[s]];
+    return rc;
+}}
+
+{sig[2]} {{ for (int s = 0; s < {NPHI}; ++s) out[s] = {P}stm_index[s]; }}
+"""
 
 
 def _arc_laws(pmp, flags):
@@ -275,28 +402,51 @@ def generate_c(pmp, name=None):
         f.out(f"dz[{i}]", e)
     functions.append(f)
 
-    f = _Function(f"int {P}rhs_arc({tzp}, const int* arc, double* dz)", ["t", "z", "p", "arc"])
-    f.pre = flag_lines
-    for i, e in enumerate(F_arc):
-        f.out(f"dz[{i}]", e)
-    functions.append(f)
+    # A path constraint's penalty is ``flag * w * g * dg``: its whole tape, Hessian and all, for
+    # a flag that is usually zero. So each arc kernel comes in two, chosen by the flags.
+    no_penalty = {flag: sp.Integer(0) for flag in flags[NSW:]}
+    penalty_flags = any(flag in e.free_symbols for flag in flags[NSW:] for e in F_arc)
+    penalty_guard = " || ".join(f"arc[{NSW + c}]" for c in range(NC))
+    arc_kernels = []
+
+    def per_arc(name, out, write):
+        """``int {P}{name}(t, z, p, arc, out)``, without a penalty's work when its flag is off."""
+        def emit(function, off):
+            f = _Function(f"int {P}{function}({tzp}, const int* arc, double* {out})",
+                          ["t", "z", "p", "arc"])
+            f.pre = flag_lines
+            write(f, off)
+            functions.append(f)
+        if not penalty_flags:
+            emit(name, {})
+            return
+        emit(name + "_penalized", {})
+        emit(name + "_free", no_penalty)
+        sig = f"int {P}{name}({tzp}, const int* arc, double* {out})"
+        arc_kernels.append((sig, f"{sig} {{\n    return ({penalty_guard}) ? "
+                                 f"{P}{name}_penalized(t, z, p, arc, {out}) : "
+                                 f"{P}{name}_free(t, z, p, arc, {out});\n}}\n"))
+
+    def write_rhs(f, off):
+        for i, e in enumerate(F_arc):
+            f.out(f"dz[{i}]", e.xreplace(off))
+
+    def write_jac(f, off):
+        f.zero_fill("A", NZ * NZ)
+        for i, e in enumerate(F_arc_c):
+            for j, zj in enumerate(z_c):
+                f.out(f"A[{i * NZ + j}]", sp.diff(e.xreplace(off), zj))
+
+    def write_dfdp(f, off):
+        f.zero_fill("B", NZ * NP)
+        for i, e in enumerate(F_arc_c):
+            for j, pj in enumerate(p_c):
+                f.out(f"B[{i * NP + j}]", sp.diff(e.xreplace(off), pj))
 
     F_arc_c = [e.xreplace(mapping) for e in F_arc]
-    f = _Function(f"int {P}jac_arc({tzp}, const int* arc, double* A)", ["t", "z", "p", "arc"])
-    f.pre = flag_lines
-    f.zero_fill("A", NZ * NZ)
-    for i, e in enumerate(F_arc_c):
-        for j, zj in enumerate(z_c):
-            f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
-    functions.append(f)
-
-    f = _Function(f"int {P}dfdp_arc({tzp}, const int* arc, double* B)", ["t", "z", "p", "arc"])
-    f.pre = flag_lines
-    f.zero_fill("B", NZ * NP)
-    for i, e in enumerate(F_arc_c):
-        for j, pj in enumerate(p_c):
-            f.out(f"B[{i * NP + j}]", sp.diff(e, pj))
-    functions.append(f)
+    per_arc("rhs_arc", "dz", write_rhs)
+    per_arc("jac_arc", "A", write_jac)
+    per_arc("dfdp_arc", "B", write_dfdp)
 
     f = _Function(f"int {P}switching({tzp}, double* S)", ["t", "z", "p", "S"])
     for k, e in enumerate(S):
@@ -368,10 +518,7 @@ def generate_c(pmp, name=None):
     f.out("L[0]", _smooth(pmp.running_cost))
     functions.append(f)
 
-    f = _Function(f"int {P}cost_rate_arc({tzp}, const int* arc, double* L)", ["t", "z", "p", "arc"])
-    f.pre = flag_lines
-    f.out("L[0]", L_arc)
-    functions.append(f)
+    per_arc("cost_rate_arc", "L", lambda f, off: f.out("L[0]", L_arc.xreplace(off)))
 
     bc_sig = "const double* z0, const double* zf, const double* nu, double tf, const double* p"
     bc_args = ["z0", "zf", "nu", "tf", "p"]
@@ -426,53 +573,60 @@ def generate_c(pmp, name=None):
               if sc.boundary is not None]
     riding += [(NC + k, arc, None) for k, (_, arc) in enumerate(pmp.boundary_sets)]
     arc_ids = [c for c, _, _ in riding]
+    numeric = pmp.riding is not None
+    riding_tape, riding_text = "", ""
+    if numeric:
+        small, riding_tape, riding_text = riding_kernels(pmp, P, _Function, mapping)
+        functions += small
+    first_of_root, shared_derivatives = {}, []
     for c, arc, sc in riding:
-        Fb = [_arc_smooth(e) for e in arc.dynamics]
-        Fb_c = [e.xreplace(mapping) for e in Fb]
         tag = f"{P}b{c}_"
-        f = _Function(f"int {tag}rhs({tzp}, double* dz)", ["t", "z", "p"])
-        for i, e in enumerate(Fb):
-            f.out(f"dz[{i}]", e)
-        functions.append(f)
-        f = _Function(f"int {tag}jac({tzp}, double* A)", ["t", "z", "p", "A"])
-        f.zero_fill("A", NZ * NZ)
-        for i, e in enumerate(Fb_c):
+        if not numeric:
+            Fb = [_arc_smooth(e) for e in arc.dynamics]
+            Fb_c = [e.xreplace(mapping) for e in Fb]
+            f = _Function(f"int {tag}rhs({tzp}, double* dz)", ["t", "z", "p"])
+            for i, e in enumerate(Fb):
+                f.out(f"dz[{i}]", e)
+            functions.append(f)
+            f = _Function(f"int {tag}jac({tzp}, double* A)", ["t", "z", "p", "A"])
+            f.zero_fill("A", NZ * NZ)
+            for i, e in enumerate(Fb_c):
+                for j, zj in enumerate(z_c):
+                    f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
+            functions.append(f)
+            Hb_c = _arc_smooth(arc.hamiltonian).xreplace(mapping)
+            f = _Function(f"int {tag}hamiltonian({tzp}, double* H)", ["t", "z", "p"])
+            f.out("H[0]", _arc_smooth(arc.hamiltonian))
+            functions.append(f)
+            f = _Function(f"int {tag}hamiltonian_grad({tzp}, double* Ht, double* Hz)",
+                          ["t", "z", "p", "Ht", "Hz"])
+            f.zero_fill("Hz", NZ)
+            f.out("Ht[0]", sp.diff(Hb_c, t_sym))
             for j, zj in enumerate(z_c):
-                f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
-        functions.append(f)
-        Hb_c = _arc_smooth(arc.hamiltonian).xreplace(mapping)
-        f = _Function(f"int {tag}hamiltonian({tzp}, double* H)", ["t", "z", "p"])
-        f.out("H[0]", _arc_smooth(arc.hamiltonian))
-        functions.append(f)
-        f = _Function(f"int {tag}hamiltonian_grad({tzp}, double* Ht, double* Hz)",
-                      ["t", "z", "p", "Ht", "Hz"])
-        f.zero_fill("Hz", NZ)
-        f.out("Ht[0]", sp.diff(Hb_c, t_sym))
-        for j, zj in enumerate(z_c):
-            f.out(f"Hz[{j}]", sp.diff(Hb_c, zj))
-        functions.append(f)
-        f = _Function(f"int {tag}cost_rate({tzp}, double* L)", ["t", "z", "p"])
-        f.out("L[0]", _arc_smooth(arc.running_cost))
-        functions.append(f)
-        f = _Function(f"int {tag}control({tzp}, double* u)", ["t", "z", "p", "u"])
-        for k, u in enumerate(pmp.controls):
-            f.out(f"u[{k}]", _arc_smooth(arc.control[u]))
-        functions.append(f)
-        mults = arc.multipliers or (arc.multiplier,)
-        f = _Function(f"int {tag}multiplier({tzp}, double* mu)", ["t", "z", "p"])
-        for i, m in enumerate(mults):
-            f.out(f"mu[{i}]", _arc_smooth(m))
-        functions.append(f)
-        f = _Function(f"int {tag}multiplier_grad({tzp}, double* Mt, double* Mz)",
-                      ["t", "z", "p", "Mt", "Mz"])
-        f.zero_fill("Mt", MSET)
-        f.zero_fill("Mz", MSET * NZ)
-        for i, m in enumerate(mults):
-            m_c = _arc_smooth(m).xreplace(mapping)
-            f.out(f"Mt[{i}]", sp.diff(m_c, t_sym))
-            for j, zj in enumerate(z_c):
-                f.out(f"Mz[{i * NZ + j}]", sp.diff(m_c, zj))
-        functions.append(f)
+                f.out(f"Hz[{j}]", sp.diff(Hb_c, zj))
+            functions.append(f)
+            f = _Function(f"int {tag}cost_rate({tzp}, double* L)", ["t", "z", "p"])
+            f.out("L[0]", _arc_smooth(arc.running_cost))
+            functions.append(f)
+            f = _Function(f"int {tag}control({tzp}, double* u)", ["t", "z", "p", "u"])
+            for k, u in enumerate(pmp.controls):
+                f.out(f"u[{k}]", _arc_smooth(arc.control[u]))
+            functions.append(f)
+            mults = arc.multipliers or (arc.multiplier,)
+            f = _Function(f"int {tag}multiplier({tzp}, double* mu)", ["t", "z", "p"])
+            for i, m in enumerate(mults):
+                f.out(f"mu[{i}]", _arc_smooth(m))
+            functions.append(f)
+            f = _Function(f"int {tag}multiplier_grad({tzp}, double* Mt, double* Mz)",
+                          ["t", "z", "p", "Mt", "Mz"])
+            f.zero_fill("Mt", MSET)
+            f.zero_fill("Mz", MSET * NZ)
+            for i, m in enumerate(mults):
+                m_c = _arc_smooth(m).xreplace(mapping)
+                f.out(f"Mt[{i}]", sp.diff(m_c, t_sym))
+                for j, zj in enumerate(z_c):
+                    f.out(f"Mz[{i * NZ + j}]", sp.diff(m_c, zj))
+            functions.append(f)
         if sc is None:
             continue
         exact.append(c)
@@ -482,6 +636,25 @@ def generate_c(pmp, name=None):
         for i, e in enumerate(N_c):
             f.out(f"N[{i}]", e)
         functions.append(f)
+        # The two limits on one tape step differ by a sign and terms free of the state: the
+        # later one scales the derivatives of the first, the largest kernels of the system.
+        if numeric:
+            root = pmp.riding.root_of[c]
+            first = first_of_root.setdefault(root, (c, N_c))
+            scale = float(pmp.riding.sign_of[c] * pmp.riding.sign_of[first[0]])
+            if first[0] != c and len(first[1]) == len(N_c) and not any(
+                    (e - scale * o).free_symbols & {t_sym, *x_c} for e, o in zip(N_c, first[1])):
+                base = f"{P}b{first[0]}_"
+                for name, sizes in (("tangency_grad", (("Nt", QMAX), ("Nx", QMAX * n))),
+                                    ("tangency_hess", (("Nxx", QMAX * n * n), ("Nxt", QMAX * n)))):
+                    names = [a for a, _ in sizes]
+                    sig = (f"int {tag}{name}({tzp}, double* {names[0]}, double* {names[1]})")
+                    scaling = "".join(f"    for (int i = 0; i < {size}; ++i) {a}[i] *= {scale!r};\n"
+                                      for a, size in sizes)
+                    shared_derivatives.append((sig, f"{sig} {{\n    int rc = {base}{name}"
+                                                    f"(t, z, p, {names[0]}, {names[1]});\n"
+                                                    f"{scaling}    return rc;\n}}\n"))
+                continue
         f = _Function(f"int {tag}tangency_grad({tzp}, double* Nt, double* Nx)",
                       ["t", "z", "p", "Nt", "Nx"])
         f.zero_fill("Nt", QMAX)
@@ -499,8 +672,11 @@ def generate_c(pmp, name=None):
             for j, xj in enumerate(x_c):
                 d = sp.diff(e, xj)
                 f.out(f"Nxt[{i * n + j}]", sp.diff(d, t_sym))
-                for k2, xk in enumerate(x_c):
+                for k2, xk in enumerate(x_c[j:], j):
                     f.out(f"Nxx[{(i * n + j) * n + k2}]", sp.diff(d, xk))
+                    if k2 != j:
+                        f.post.append(f"    Nxx[{(i * n + k2) * n + j}] = "
+                                      f"Nxx[{(i * n + j) * n + k2}];")
         functions.append(f)
 
     # Singular arcs: per bang-bang control k with a derived SingularArc, the
@@ -556,6 +732,9 @@ def generate_c(pmp, name=None):
         for name, outs, out_args in specs:
             sig = f"int {P}{group}_{name}(int c, {tzp}, {outs})"
             sigs.append(sig)
+            if numeric and group == "boundary" and not name.startswith("tangency"):
+                out.append(f"{sig} {{\n    return {P}riding_{name}(c, t, z, p, {out_args});\n}}\n")
+                continue
             cases = "".join(f"    case {c}: return {P}{letter}{c}_{name}(t, z, p, {out_args});\n"
                             for c in ids)
             voids = "".join(f" (void){a.strip()};" for a in out_args.split(","))
@@ -572,11 +751,14 @@ def generate_c(pmp, name=None):
     if (rc) return rc;
     rc = {P}{group}_jac(c, t, y, p, A);
     if (rc) return rc;
-    for (int i = 0; i < {NZ}; ++i) {{
-        for (int j = 0; j < {NZ}; ++j) {{
-            double s = 0.0;
-            for (int k = 0; k < {NZ}; ++k) s += A[i * {NZ} + k] * Phi[k * {NZ} + j];
-            dPhi[i * {NZ} + j] = s;
+    for (int i = 0; i < {NZ}; ++i) {{  /* A is mostly zeros on the free arcs of a large problem */
+        double* row = dPhi + i * {NZ};
+        for (int j = 0; j < {NZ}; ++j) row[j] = 0.0;
+        for (int k = 0; k < {NZ}; ++k) {{
+            const double a = A[i * {NZ} + k];
+            if (a == 0.0) continue;
+            const double* from = Phi + k * {NZ};
+            for (int j = 0; j < {NZ}; ++j) row[j] += a * from[j];
         }}
     }}
     return 0;
@@ -610,10 +792,15 @@ def generate_c(pmp, name=None):
 
     body = "\n\n".join(fn.render(mapping if not fn.signature.startswith(f"int {P}residual")
                                  else bc_map) for fn in functions)
+    body = "\n\n".join([riding_tape, body, riding_text]) if numeric else body
 
     NSET = len(pmp.boundary_sets)
+    NPHI, SPARSE_STM, sparse_sigs, sparse_stm = _sparse_stm(
+        P, NZ, *_stm_pattern([e.xreplace(no_penalty) for e in F_arc_c], S_c, flags, z_c))
+    PENALTY_FLAGS = int(penalty_flags)
     macros = dict(NZ=NZ, NP=NP, NSW=NSW, NC=NC, NM=NM, NK=NK, NU=NU, NNU=NNU, NR=NR, QMAX=QMAX,
-                  NSET=NSET, MSET=MSET, FREE_TF=int(free_tf))
+                  NSET=NSET, MSET=MSET, FREE_TF=int(free_tf), NPHI=NPHI, SPARSE_STM=SPARSE_STM,
+                  PENALTY_FLAGS=PENALTY_FLAGS)
     guard = f"AOC_{ident.upper()}_H"
     header_lines = [
         f"/* Generated by auto-optimal-control for problem {pmp.problem.name!r}. Do not edit. */",
@@ -627,8 +814,9 @@ def generate_c(pmp, name=None):
         f"int {P}stm_rhs(double t, const double* y, const double* p, const int* arc, int with_p, double* dy)",
         f"int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int with_p)",
     ]
-    header_lines += [s + ";" for s in stm_sigs]
+    header_lines += [s + ";" for s in (*stm_sigs, *sparse_sigs)]
     header_lines += [s + ";" for s in dispatch_sigs]
+    header_lines += [sig + ";" for sig, _ in (*arc_kernels, *shared_derivatives)]
     header_lines += ["", f"#endif /* {guard} */", ""]
     header = "\n".join(header_lines)
 
@@ -643,11 +831,14 @@ int {P}stm_rhs(double t, const double* y, const double* p, const int* arc, int w
     if (rc) return rc;
     rc = {P}jac_arc(t, y, p, arc, A);
     if (rc) return rc;
-    for (int i = 0; i < {NZ}; ++i) {{
-        for (int j = 0; j < {NZ}; ++j) {{
-            double s = 0.0;
-            for (int k = 0; k < {NZ}; ++k) s += A[i * {NZ} + k] * Phi[k * {NZ} + j];
-            dPhi[i * {NZ} + j] = s;
+    for (int i = 0; i < {NZ}; ++i) {{  /* A is mostly zeros on the free arcs of a large problem */
+        double* row = dPhi + i * {NZ};
+        for (int j = 0; j < {NZ}; ++j) row[j] = 0.0;
+        for (int k = 0; k < {NZ}; ++k) {{
+            const double a = A[i * {NZ} + k];
+            if (a == 0.0) continue;
+            const double* from = Phi + k * {NZ};
+            for (int j = 0; j < {NZ}; ++j) row[j] += a * from[j];
         }}
     }}
     if (with_p && {NP} > 0) {{
@@ -721,6 +912,8 @@ int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int
         "",
         body,
         stm,
+        sparse_stm,
         "\n".join(dispatch),
+        "\n".join(text for _, text in (*arc_kernels, *shared_derivatives)),
     ])
     return P, header, source, macros
