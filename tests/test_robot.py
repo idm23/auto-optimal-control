@@ -294,6 +294,18 @@ def test_merging_a_limits_arcs_keeps_another_limits_arc_between_them():
     assert spans[1][:2] == (0.31, 0.6)
 
 
+def test_newton_for_a_guess_accepts_a_stall_near_the_root():
+    # A residual that stops falling at 3e-6, the noise of a loose integration: the seed
+    # depended on which BLAS kernels rounding happened to favour.
+    def noisy(v, with_jacobian):
+        R = np.maximum(np.abs(v), 3e-6) * np.sign(v + 1e-300)
+        return (R, np.eye(1)) if with_jacobian else R
+
+    assert homotopy._newton(noisy, [1.0], 1e-6) is None
+    assert abs(homotopy._newton(noisy, [1.0], 1e-6, accept=1e-4)[0]) < 1e-4
+    assert homotopy._newton(noisy, [1.0], 1e-6, accept=1e-6) is None
+
+
 def test_the_common_time_shares_the_cost_of_time():
     # Each path: (T, lam, H), with H = 1 + (the component's part). Alone a component would
     # stop where H = 0; two of them at the same time share it, so they stop later.

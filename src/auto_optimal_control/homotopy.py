@@ -90,6 +90,7 @@ from auto_optimal_control.shooting import MultiArcShooting, ShootingError, Singl
 
 # The path of the continuation is followed to 1e-6: a rough Jacobian steers Newton as well.
 PATH_JACOBIAN_RTOL = 1e-7
+SEED_ACCEPT = 100.0                # a seed is a guess: how far above tol a stalled Newton may stop
 
 EPS = "eps_reg"
 RHO = "rho_reg_"
@@ -491,7 +492,8 @@ class Homotopy:
                 continue
             system = self._block_system(shoot, states, rows)
             at = [point[1] for point in path if point[0] >= T][-1]
-            lam = _newton(lambda w, jac, tf=T: system(w, tf, False, jac), at, tol)
+            lam = _newton(lambda w, jac, tf=T: system(w, tf, False, jac), at, tol,
+                          accept=SEED_ACCEPT * tol)
             if lam is None:
                 self._say("separate seed: a component did not reach the common time")
                 return None
@@ -573,7 +575,8 @@ class Homotopy:
             if H < 0.0:
                 # Between T and to: solve for the time as well.
                 w = np.append(found, to)
-                root = _newton(lambda v, jac: system(v[:-1], v[-1], True, jac), w, tol)
+                root = _newton(lambda v, jac: system(v[:-1], v[-1], True, jac), w, tol,
+                               accept=SEED_ACCEPT * tol)
                 if root is not None and root[-1] > 0.0:
                     path.append((float(root[-1]), root[:-1], 0.0))
                     return path
@@ -1701,10 +1704,12 @@ class Homotopy:
         return tuple(out)
 
 
-def _newton(system, guess, tol, steps=10):
+def _newton(system, guess, tol, steps=10, accept=0.0):
     """Damped Newton on ``system(v, with_jacobian)``: the root, or None.
 
     The step length is tried on residuals alone, and the Jacobian found where it lands.
+    A caller that only needs a guess can pass ``accept``: the residual at which a stalled
+    iteration still counts, since the noise of a loose integration can sit above ``tol``.
     """
     v = np.asarray(guess, dtype=float)
     try:
@@ -1730,8 +1735,8 @@ def _newton(system, guess, tol, steps=10):
                 v, R, best = w, Rw, float(np.linalg.norm(Rw))
                 break
         else:
-            return None
-    return v if best < tol else None
+            return v if best < accept else None
+    return v if best < max(tol, accept) else None
 
 
 def _draw(spec, rng):
