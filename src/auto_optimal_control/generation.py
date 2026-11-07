@@ -26,6 +26,7 @@ Only order-1 limits are supported, and arcs must lie strictly inside the
 motion (a sample whose limit is violated at either end is rejected).
 """
 
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -110,6 +111,9 @@ class ExtremalGenerator:
                       "all": np.arange(n)}[vary_start]
         self.start_scale = start_scale
         self.debug = False
+        # Seconds one draw may take before it is rejected (None: no limit).
+        self.max_seconds = None
+        self._deadline = np.inf
         bad = [k.CONSTRAINT_NAMES[c] for c in range(k.N_CONSTRAINTS)
                if k.CONSTRAINT_ORDERS[c] != 1 or not k.EXACT_ARCS[c]]
         self.unsupported = bad
@@ -132,6 +136,10 @@ class ExtremalGenerator:
         self.arc_fraction = (0.02, 0.3)
         # How far past the drawn duration a motion may be extended to reach a peak.
         self.extend = 3.0
+
+    def _out_of_time(self):
+        if time.perf_counter() > self._deadline:
+            raise Rejected("out of time", f"{self.max_seconds} s")
 
     @classmethod
     def from_homotopy(cls, homotopy, params, **kwargs):
@@ -231,7 +239,7 @@ class ExtremalGenerator:
 
             n_grid = 48
             grid = np.linspace(t_in, horizon, n_grid + 1)
-            z, t_prev, m_prev = za, t_in, mu_at(t_in, za)
+            z, t_prev = za, t_in
             exit_at = None
             riding = True
             for tg in grid[1:]:
@@ -256,7 +264,7 @@ class ExtremalGenerator:
                             break
                     exit_at = 0.5 * (lo + hi)
                     break
-                z, t_prev, m_prev = r["z"], tg, m
+                z, t_prev = r["z"], tg
             if exit_at is None and not riding:
                 # Riding fails before mu reaches zero: leave the exit to Newton, from there.
                 arcs[i] = (c, t_in, t_prev if np.isnan(t_out) else min(t_out, t_prev), pi)
@@ -372,6 +380,7 @@ class ExtremalGenerator:
         for _ in range(self.max_newton):
             if err < self.tol:
                 break
+            self._out_of_time()
             sc = scales[free]
             A = np.where(np.isfinite(J), J, 0.0) * sc
             merit = float(r @ r)
@@ -568,7 +577,7 @@ class ExtremalGenerator:
         the motion generated) and must be omitted otherwise. Raises
         :class:`Rejected` when the draw gives no valid extremal.
         """
-        k, p, n = self.kernels, self.params, self.kernels.N_STATES
+        k, n = self.kernels, self.kernels.N_STATES
         x0 = np.asarray(x0, dtype=float).reshape(n)
         if self.free_time:
             if tf is None:
@@ -579,12 +588,15 @@ class ExtremalGenerator:
                 raise ValueError("the final time is fixed by the problem")
             tf = self.fixed_tf
         self._rng = np.random.default_rng(rng)
+        self._deadline = (time.perf_counter() + self.max_seconds if self.max_seconds
+                          else np.inf)
         lam0 = self.on_level_set(x0, lam0)
         arcs = []                         # (c, t_in, t_out, pi)
         span = tf - self.t0
         tf_cap = self.t0 + self.extend * span
         valid = None                 # (x0, lam0, arcs, err, t_violation): valid up to t_violation
         for _ in range(self.max_rounds + 12):
+            self._out_of_time()
             try:
                 x0, lam0, arcs, err = self._project(x0, lam0, arcs, tf)
             except Rejected:
@@ -687,6 +699,7 @@ class ExtremalGenerator:
         x_s, lam_s, arcs_s = x0, lam0, arcs
         try:
             for _ in range(self.birth_steps):
+                self._out_of_time()
                 f = min(s + ds, 1.0) if s > 0 else 0.0
                 self.params = base.copy()
                 self.params[i_off] = base[i_off] + (1 - f) * o0
@@ -773,7 +786,7 @@ class ExtremalGenerator:
         return ext
 
     def _finish(self, x0, lam0, arcs, tf, err):
-        k, n = self.kernels, self.kernels.N_STATES
+        n = self.kernels.N_STATES
         shoot, order = self._shooting(x0, arcs)
         v = self._pack(shoot, order, lam0, arcs, tf)
         _, _, segs = shoot._evaluate(v, jac=False, record=True)
@@ -832,7 +845,7 @@ class ExtremalGenerator:
         junction conditions are held (the family keeps the structure).
         Returns ``(times, signs)``; a valid sample has one sign throughout.
         """
-        k, n = self.kernels, self.kernels.N_STATES
+        n = self.kernels.N_STATES
         if not self.free_time:
             raise NotImplementedError("conjugate points are checked for a free final time")
         if not self.regular:
@@ -852,7 +865,6 @@ class ExtremalGenerator:
             R, Jrows, v, _ = self._rows(shoot, order, ext.x0, ext.lam0, arcs, t)
             _, J = shoot.residual_jacobian(v)
             # dx(t)/dv: the terminal state rows of the residual are x(tf) - x_f.
-            nb = len(shoot._rows)
             cols = shoot.n_free + np.arange(n)
             Dx = np.zeros((n, n + 3 * len(arcs)))
             Dx[:, :n] = J[:n, cols]
