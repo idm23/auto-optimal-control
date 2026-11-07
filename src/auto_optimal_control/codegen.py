@@ -61,6 +61,7 @@ A path constraint's penalty ``w/2 max(0, g)^2`` and its gradient vanish at
 
 import re
 
+import numpy as np
 import sympy as sp
 from sympy.printing.c import C99CodePrinter
 
@@ -250,6 +251,95 @@ def _kinks(laws):
     return out
 
 
+def _stm_pattern(F, S, flags, z):
+    """What ``Phi`` can hold on the fixed arcs of ``propagate``.
+
+    ``(depends, reach)``, both ``NZ x NZ``: ``depends[i, k]`` when ``F[i]`` involves ``z[k]``,
+    and ``reach[i, j]`` when ``z[i]`` can respond to its start ``z[j]``: by the flow, or by the
+    jump at switch ``k``, which adds ``dF @ grad S_k`` to ``Phi`` wherever ``F`` holds flag ``k``.
+    ``F`` has the path constraints' penalties off: on, they would tie everything together.
+    """
+    index = {s: i for i, s in enumerate(z)}
+    n = len(z)
+    depends = np.zeros((n, n), dtype=bool)
+    for i, e in enumerate(F):
+        depends[i, [index[s] for s in e.free_symbols if s in index]] = True
+    edges = depends | np.eye(n, dtype=bool)
+    for flag, e in zip(flags, S):
+        rows = [i for i, f in enumerate(F) if flag in f.free_symbols]
+        edges[np.ix_(rows, [index[s] for s in e.free_symbols if s in index])] = True
+    reach = edges
+    while True:
+        wider = (reach.astype(int) @ reach.astype(int)) > 0
+        if (wider == reach).all():
+            return depends, reach
+        reach = wider
+
+
+def _sparse_stm(P, NZ, depends, reach):
+    """``Phi`` as a list of the entries it can hold. FNI steps a flat vector, so it need not know.
+
+    All of a step's work, its stages and its error, scales with the length of that vector, and
+    on a free arc of a large problem most of ``Phi`` is zero for good. A jump goes through the
+    dense code: jumps are rare.
+    """
+    NPHI = int(reach.sum())
+    sig = (f"int {P}stm_sparse_rhs(double t, const double* y, const double* p, const int* arc, "
+           "double* dy)",
+           f"int {P}stm_sparse_jump(int k, double t, double* y, const double* p, const int* arc)",
+           f"void {P}stm_indices(int* out)")
+    if NPHI > NZ * NZ // 2:                    # not worth an indirection per entry
+        return NZ * NZ, 0, sig, f"""
+{sig[0]} {{ return {P}stm_rhs(t, y, p, arc, 0, dy); }}
+{sig[1]} {{ return {P}stm_jump(k, t, y, p, arc, 0); }}
+{sig[2]} {{ for (int i = 0; i < {NZ * NZ}; ++i) out[i] = i; }}
+"""
+    position = {(int(i), int(j)): s for s, (i, j) in enumerate(zip(*np.nonzero(reach)))}
+    index, ptr, a, b = [], [0], [], []
+    for (i, j), _ in position.items():
+        index.append(i * NZ + j)
+        for k in np.nonzero(depends[i])[0]:
+            if (int(k), j) in position:
+                a.append(i * NZ + int(k))
+                b.append(position[int(k), j])
+        ptr.append(len(a))
+    table = lambda name, values: (f"static const int {P}stm_{name}[{max(len(values), 1)}] = "
+                                  f"{{{', '.join(map(str, values or [0]))}}};")
+    return NPHI, 1, sig, f"""
+{table("index", index)}
+{table("ptr", ptr)}
+{table("a", a)}
+{table("b", b)}
+
+{sig[0]} {{
+    double A[{NZ * NZ}];
+    const double* phi = y + {NZ};
+    double* dphi = dy + {NZ};
+    int rc = {P}rhs_arc(t, y, p, arc, dy);
+    if (rc) return rc;
+    rc = {P}jac_arc(t, y, p, arc, A);
+    if (rc) return rc;
+    for (int s = 0; s < {NPHI}; ++s) {{
+        double v = 0.0;
+        for (int e = {P}stm_ptr[s]; e < {P}stm_ptr[s + 1]; ++e) v += A[{P}stm_a[e]] * phi[{P}stm_b[e]];
+        dphi[s] = v;
+    }}
+    return 0;
+}}
+
+{sig[1]} {{
+    double full[{NZ + NZ * NZ}] = {{0.0}};
+    for (int i = 0; i < {NZ}; ++i) full[i] = y[i];
+    for (int s = 0; s < {NPHI}; ++s) full[{NZ} + {P}stm_index[s]] = y[{NZ} + s];
+    int rc = {P}stm_jump(k, t, full, p, arc, 0);
+    for (int s = 0; s < {NPHI}; ++s) y[{NZ} + s] = full[{NZ} + {P}stm_index[s]];
+    return rc;
+}}
+
+{sig[2]} {{ for (int s = 0; s < {NPHI}; ++s) out[s] = {P}stm_index[s]; }}
+"""
+
+
 def _arc_laws(pmp, flags):
     """The control laws on an arc, bang-bang controls fixed by their flags (Min/Max kept).
 
@@ -307,28 +397,51 @@ def generate_c(pmp, name=None):
         f.out(f"dz[{i}]", e)
     functions.append(f)
 
-    f = _Function(f"int {P}rhs_arc({tzp}, const int* arc, double* dz)", ["t", "z", "p", "arc"])
-    f.pre = flag_lines
-    for i, e in enumerate(F_arc):
-        f.out(f"dz[{i}]", e)
-    functions.append(f)
+    # A path constraint's penalty is ``flag * w * g * dg``: its whole tape, Hessian and all, for
+    # a flag that is usually zero. So each arc kernel comes in two, chosen by the flags.
+    no_penalty = {flag: sp.Integer(0) for flag in flags[NSW:]}
+    penalty_flags = any(flag in e.free_symbols for flag in flags[NSW:] for e in F_arc)
+    penalty_guard = " || ".join(f"arc[{NSW + c}]" for c in range(NC))
+    arc_kernels = []
+
+    def per_arc(name, out, write):
+        """``int {P}{name}(t, z, p, arc, out)``, without a penalty's work when its flag is off."""
+        def emit(function, off):
+            f = _Function(f"int {P}{function}({tzp}, const int* arc, double* {out})",
+                          ["t", "z", "p", "arc"])
+            f.pre = flag_lines
+            write(f, off)
+            functions.append(f)
+        if not penalty_flags:
+            emit(name, {})
+            return
+        emit(name + "_penalized", {})
+        emit(name + "_free", no_penalty)
+        sig = f"int {P}{name}({tzp}, const int* arc, double* {out})"
+        arc_kernels.append((sig, f"{sig} {{\n    return ({penalty_guard}) ? "
+                                 f"{P}{name}_penalized(t, z, p, arc, {out}) : "
+                                 f"{P}{name}_free(t, z, p, arc, {out});\n}}\n"))
+
+    def write_rhs(f, off):
+        for i, e in enumerate(F_arc):
+            f.out(f"dz[{i}]", e.xreplace(off))
+
+    def write_jac(f, off):
+        f.zero_fill("A", NZ * NZ)
+        for i, e in enumerate(F_arc_c):
+            for j, zj in enumerate(z_c):
+                f.out(f"A[{i * NZ + j}]", sp.diff(e.xreplace(off), zj))
+
+    def write_dfdp(f, off):
+        f.zero_fill("B", NZ * NP)
+        for i, e in enumerate(F_arc_c):
+            for j, pj in enumerate(p_c):
+                f.out(f"B[{i * NP + j}]", sp.diff(e.xreplace(off), pj))
 
     F_arc_c = [e.xreplace(mapping) for e in F_arc]
-    f = _Function(f"int {P}jac_arc({tzp}, const int* arc, double* A)", ["t", "z", "p", "arc"])
-    f.pre = flag_lines
-    f.zero_fill("A", NZ * NZ)
-    for i, e in enumerate(F_arc_c):
-        for j, zj in enumerate(z_c):
-            f.out(f"A[{i * NZ + j}]", sp.diff(e, zj))
-    functions.append(f)
-
-    f = _Function(f"int {P}dfdp_arc({tzp}, const int* arc, double* B)", ["t", "z", "p", "arc"])
-    f.pre = flag_lines
-    f.zero_fill("B", NZ * NP)
-    for i, e in enumerate(F_arc_c):
-        for j, pj in enumerate(p_c):
-            f.out(f"B[{i * NP + j}]", sp.diff(e, pj))
-    functions.append(f)
+    per_arc("rhs_arc", "dz", write_rhs)
+    per_arc("jac_arc", "A", write_jac)
+    per_arc("dfdp_arc", "B", write_dfdp)
 
     f = _Function(f"int {P}switching({tzp}, double* S)", ["t", "z", "p", "S"])
     for k, e in enumerate(S):
@@ -400,10 +513,7 @@ def generate_c(pmp, name=None):
     f.out("L[0]", _smooth(pmp.running_cost))
     functions.append(f)
 
-    f = _Function(f"int {P}cost_rate_arc({tzp}, const int* arc, double* L)", ["t", "z", "p", "arc"])
-    f.pre = flag_lines
-    f.out("L[0]", L_arc)
-    functions.append(f)
+    per_arc("cost_rate_arc", "L", lambda f, off: f.out("L[0]", L_arc.xreplace(off)))
 
     bc_sig = "const double* z0, const double* zf, const double* nu, double tf, const double* p"
     bc_args = ["z0", "zf", "nu", "tf", "p"]
@@ -657,8 +767,12 @@ def generate_c(pmp, name=None):
     body = "\n\n".join([riding_tape, body, riding_text]) if numeric else body
 
     NSET = len(pmp.boundary_sets)
+    NPHI, SPARSE_STM, sparse_sigs, sparse_stm = _sparse_stm(
+        P, NZ, *_stm_pattern([e.xreplace(no_penalty) for e in F_arc_c], S_c, flags, z_c))
+    PENALTY_FLAGS = int(penalty_flags)
     macros = dict(NZ=NZ, NP=NP, NSW=NSW, NC=NC, NM=NM, NK=NK, NU=NU, NNU=NNU, NR=NR, QMAX=QMAX,
-                  NSET=NSET, MSET=MSET, FREE_TF=int(free_tf))
+                  NSET=NSET, MSET=MSET, FREE_TF=int(free_tf), NPHI=NPHI, SPARSE_STM=SPARSE_STM,
+                  PENALTY_FLAGS=PENALTY_FLAGS)
     guard = f"AOC_{ident.upper()}_H"
     header_lines = [
         f"/* Generated by auto-optimal-control for problem {pmp.problem.name!r}. Do not edit. */",
@@ -672,8 +786,9 @@ def generate_c(pmp, name=None):
         f"int {P}stm_rhs(double t, const double* y, const double* p, const int* arc, int with_p, double* dy)",
         f"int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int with_p)",
     ]
-    header_lines += [s + ";" for s in stm_sigs]
+    header_lines += [s + ";" for s in (*stm_sigs, *sparse_sigs)]
     header_lines += [s + ";" for s in dispatch_sigs]
+    header_lines += [sig + ";" for sig, _ in arc_kernels]
     header_lines += ["", f"#endif /* {guard} */", ""]
     header = "\n".join(header_lines)
 
@@ -769,6 +884,8 @@ int {P}stm_jump(int k, double t, double* y, const double* p, const int* arc, int
         "",
         body,
         stm,
+        sparse_stm,
         "\n".join(dispatch),
+        "\n".join(text for _, text in arc_kernels),
     ])
     return P, header, source, macros

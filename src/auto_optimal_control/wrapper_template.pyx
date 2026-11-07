@@ -21,6 +21,9 @@ cdef extern from "{{header}}" nogil:
     int P_dfdp_arc "{{P}}dfdp_arc"(double t, const double* z, const double* p, const int* arc, double* B)
     int P_stm_rhs "{{P}}stm_rhs"(double t, const double* y, const double* p, const int* arc, int with_p, double* dy)
     int P_stm_jump "{{P}}stm_jump"(int k, double t, double* y, const double* p, const int* arc, int with_p)
+    int P_stm_sparse_rhs "{{P}}stm_sparse_rhs"(double t, const double* y, const double* p, const int* arc, double* dy)
+    int P_stm_sparse_jump "{{P}}stm_sparse_jump"(int k, double t, double* y, const double* p, const int* arc)
+    void P_stm_indices "{{P}}stm_indices"(int* out)
     int P_switching "{{P}}switching"(double t, const double* z, const double* p, double* S)
     int P_switching_grad "{{P}}switching_grad"(double t, const double* z, const double* p, double* St, double* Sz, double* Sp)
     int P_constraint "{{P}}constraint"(double t, const double* z, const double* p, double* g)
@@ -59,6 +62,9 @@ cdef extern from "{{header}}" nogil:
 
 cdef enum:
     NZ = {{NZ}}
+    NPHI = {{NPHI}}
+    SPARSE_STM = {{SPARSE_STM}}
+    PENALTY_FLAGS = {{PENALTY_FLAGS}}
     NP = {{NP}}
     NSW = {{NSW}}
     NC = {{NC}}
@@ -98,6 +104,8 @@ BOUNDARY_SETS = {{boundary_sets}}
 N_CONTROLS = NU
 N_MULTIPLIERS = NNU
 N_RESIDUALS = NR
+N_PHI = NPHI
+STM_IS_SPARSE = bool(SPARSE_STM)
 N_STM = NZ + NZ * NZ
 N_STM_PARAMS = NZ + NZ * NZ + NZ * NP
 PARAM_NAMES = {{param_names}}
@@ -173,6 +181,7 @@ cdef struct _ctx:
     int arc[NM1]
     int stop_on[NC1]    # stop when path constraint c becomes violated
     int with_p
+    int sparse_stm      # the state holds only the entries of Phi that can be nonzero
     int with_cost       # last entry of the state is J = int L dt
     int constraint_events   # 0: path constraints are not watched (exact multi-arc shooting)
     int frozen[NSW1]    # 1: switching function k is not watched, its flag is held
@@ -210,7 +219,8 @@ cdef int _stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ct
     c.calls += 1
     if c.max_calls > 0 and c.calls > c.max_calls:
         return RC_TOO_MANY_EVALUATIONS
-    cdef int rc = P_stm_rhs(t, y, c.p, c.arc, c.with_p, dydt)
+    cdef int rc = (P_stm_sparse_rhs(t, y, c.p, c.arc, dydt) if c.sparse_stm
+                   else P_stm_rhs(t, y, c.p, c.arc, c.with_p, dydt))
     if rc == 0 and c.with_cost:
         rc = P_cost_rate_arc(t, y, c.p, c.arc, &dydt[n - 1])
     return rc
@@ -285,6 +295,7 @@ cdef class ArcDynamics(OdeSystem):
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
         self.ctx.with_p = 1 if param_sensitivity else 0
+        self.ctx.sparse_stm = 0
         self.ctx.calls = 0
         self.ctx.max_calls = 0
         self.ctx.with_cost = 0
@@ -622,6 +633,7 @@ cdef enum:
     STATUS_TOO_MANY_SWITCHES = -2
     STATUS_JUMP_FAILED = -3
     STATUS_CONSTRAINT_VIOLATED = -4
+    STATUS_NEEDS_DENSE = -5
 
 STATUS_VIOLATED = STATUS_CONSTRAINT_VIOLATED
 
@@ -636,6 +648,7 @@ cdef struct _switch_ctx:
     Py_ssize_t max_sw   # with kinks, FNI's reset limit is off and this one counts switches
     int jump_failed
     int violated
+    int needs_dense     # a penalty came on, and the sparse Phi leaves out what it couples
     int too_many
 
 
@@ -693,7 +706,11 @@ cdef int _switch_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n,
     if k >= NSW and flag == 1 and r.c.stop_on[k - NSW]:
         r.violated = 1
         return FNI_RESET_STOP
-    if r.stm and k < NSW and P_stm_jump(k, t, y, r.c.p, r.c.arc, r.c.with_p) != 0:
+    if PENALTY_FLAGS and r.c.sparse_stm and k >= NSW and flag == 1:
+        r.needs_dense = 1
+        return FNI_RESET_STOP
+    if r.stm and k < NSW and (P_stm_sparse_jump(k, t, y, r.c.p, r.c.arc) if r.c.sparse_stm
+                              else P_stm_jump(k, t, y, r.c.p, r.c.arc, r.c.with_p)) != 0:
         r.jump_failed = 1
         return FNI_RESET_STOP
     r.c.arc[k] = flag
@@ -766,6 +783,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     rctx.max_sw = max_sw
     rctx.jump_failed = 0
     rctx.violated = 0
+    rctx.needs_dense = 0
     rctx.too_many = 0
     rc = fni_integrate_hybrid(method, fn_of(stm), ctx, ny, t0, y, t1, opt, events, ne,
                               _switch_reset, &rctx, &hopt, y_out, NULL, NULL, NULL, NULL,
@@ -774,7 +792,9 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     t_final[0] = st.t_final
     if rc != FNI_OK:
         return rc
-    if rctx.violated:
+    if rctx.needs_dense:
+        status[0] = STATUS_NEEDS_DENSE
+    elif rctx.violated:
         status[0] = STATUS_CONSTRAINT_VIOLATED
     elif rctx.jump_failed:
         status[0] = STATUS_JUMP_FAILED
@@ -814,10 +834,10 @@ cdef int _setup_options(fni_options* opt, double rtol, double atol, first_step,
     return 0
 
 
-def _layout(stm, param_sensitivity, cost):
+def _layout(stm, param_sensitivity, cost, Py_ssize_t n_phi=NZ * NZ):
     if param_sensitivity and not stm:
         raise ValueError("param_sensitivity requires stm=True")
-    return NZ + (NZ * NZ if stm else 0) + (NZ * NP if param_sensitivity else 0) + (1 if cost else 0)
+    return NZ + (n_phi if stm else 0) + (NZ * NP if param_sensitivity else 0) + (1 if cost else 0)
 
 
 def _split_events(times, index):
@@ -855,11 +875,22 @@ def _initial_y(z, stm, Py_ssize_t ny):
     return y
 
 
+def _phi_entries():
+    """Where the entries of a sparse ``Phi`` sit in the flat ``NZ x NZ`` matrix."""
+    out = np.zeros(NPHI, dtype=np.intc)
+    cdef int[::1] view = out
+    P_stm_indices(&view[0])
+    return out
+
+
+PHI_ENTRIES = _phi_entries()
+
+
 def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensitivity=False,
               cost=False, arc=None, method="DOP853", double rtol=1e-10, double atol=1e-12,
               first_step=None, double max_step=np.inf, Py_ssize_t max_switches=10000,
               terminate=False, Py_ssize_t n_interior=4, constraint_events=True, frozen=(),
-              Py_ssize_t max_nfev=0, stm_rtol=None):
+              Py_ssize_t max_nfev=0, stm_rtol=None, sparse_stm=True):
     """Integrate the extremal from ``z0 = [x0, lambda0]`` from ``t0`` to ``t1``.
 
     The integration runs arc by arc and stops at every switch, so each
@@ -907,6 +938,10 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
         the right-hand side, so a trajectory that runs into a singularity
         fails fast instead of shrinking its steps for millions of them.
 
+    sparse_stm : bool
+        Integrate only the entries of ``Phi`` that can be nonzero, when few enough of them
+        are (``STM_IS_SPARSE``); ``stm`` still comes back whole. False is for comparing.
+
     Returns
     -------
     dict
@@ -924,8 +959,10 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     cdef int status = 0, meth, rc
     cdef double t_final = t0
     cdef int do_stm = 1 if stm else 0
+    cdef int sparse = 1 if stm and sparse_stm and SPARSE_STM and not param_sensitivity else 0
+    cdef Py_ssize_t n_phi = NPHI if sparse else NZ * NZ
 
-    ny = _layout(stm, param_sensitivity, cost)
+    ny = _layout(stm, param_sensitivity, cost, n_phi)
     if method not in _METHODS:
         raise ValueError(f"method must be one of {list(_METHODS)}")
     meth = _METHODS[method]
@@ -934,7 +971,7 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     _setup_options(&opt, rtol, atol, first_step, max_step, n_interior)
     cdef double[::1] rvec, avec
     if stm and stm_rtol is not None:
-        tolerances = _tolerances(_layout(stm, param_sensitivity, cost), _layout(stm, param_sensitivity, False) - NZ,
+        tolerances = _tolerances(ny, _layout(stm, param_sensitivity, False, n_phi) - NZ,
                                  rtol, atol, float(stm_rtol))
         rvec, avec = tolerances
         opt.rtol_vec = &rvec[0]
@@ -947,8 +984,18 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
         arc0[NSW:] = 0
     arc_buf = _arc(arc0)
     stop = _stop_mask(terminate)
+    dense_again = dict(param_sensitivity=param_sensitivity, cost=cost, arc=arc, method=method,
+                       rtol=rtol, atol=atol, first_step=first_step, max_step=max_step,
+                       max_switches=max_switches, terminate=terminate, n_interior=n_interior,
+                       constraint_events=constraint_events, frozen=frozen, max_nfev=max_nfev,
+                       stm_rtol=stm_rtol, sparse_stm=False)
+    if PENALTY_FLAGS and sparse and any(np.asarray(arc0)[NSW:]):
+        return propagate(t0, z0, t1, params, stm=True, **dense_again)
 
-    y = _initial_y(z[:NZ], stm, ny)
+    y = _initial_y(z[:NZ], False, ny)
+    if stm:
+        identity = np.eye(NZ).reshape(-1)
+        y[NZ:NZ + n_phi] = identity[PHI_ENTRIES] if sparse else identity
     y_out = np.zeros(ny)
     sw_t = np.zeros(max(max_switches, 1))
     sw_k = np.zeros(max(max_switches, 1), dtype=np.intc)
@@ -960,6 +1007,7 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
     cdef int[::1] kv = sw_k
     ctx.p = &pv[0]
     ctx.with_p = 1 if param_sensitivity else 0
+    ctx.sparse_stm = sparse
     ctx.with_cost = 1 if cost else 0
     ctx.constraint_events = 1 if constraint_events else 0
     ctx.calls = 0
@@ -980,14 +1028,19 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
                         max_switches, &n_sw, &nfev, &status, &t_final)
     if rc != FNI_OK:
         raise RuntimeError(f"integration failed with code {rc}")
+    if status == STATUS_NEEDS_DENSE:
+        return propagate(t0, z0, t1, params, stm=True, **dense_again)
 
     arc_end = np.array([ctx.arc[k] for k in range(NM)], dtype=np.intc)
-    o = NZ + NZ * NZ
+    o = NZ + n_phi
     st, sk, ct, ck = _split_events(sw_t[:n_sw], sw_k[:n_sw])
+    if stm:
+        phi = np.zeros(NZ * NZ)
+        phi[PHI_ENTRIES if sparse else slice(None)] = y_out[NZ:o]
     return {
         "t": t_final,
         "z": y_out[:NZ].copy(),
-        "stm": y_out[NZ:o].reshape(NZ, NZ).copy() if stm else None,
+        "stm": phi.reshape(NZ, NZ) if stm else None,
         "dz_dp": y_out[o:o + NZ * NP].reshape(NZ, NP).copy() if param_sensitivity else None,
         "cost": float(y_out[ny - 1]) if cost else None,
         "dz_dt1": rhs_arc(t_final, y_out[:NZ], p_arr[:NP] if NP else None,
@@ -1015,6 +1068,7 @@ cdef int _propagate_rows(int meth, int do_stm, int with_p, int with_cost, Py_ssi
     cdef int rc
     ctx.p = p
     ctx.with_p = with_p
+    ctx.sparse_stm = 0
     ctx.with_cost = with_cost
     ctx.constraint_events = 1
     ctx.calls = 0

@@ -364,6 +364,49 @@ def test_numeric_reference_refuses_outlined_limits():
         NumericSystem(derive(examples.two_link_arm(), outline_above=0, simultaneous=1))
 
 
+def test_the_arm_integrates_only_the_entries_of_phi_a_free_arc_can_hold(arm_kernels):
+    # On a free arc each joint is a triple integrator, with 21 entries of its 36.
+    _, k = arm_kernels
+    n = k.N_Z
+    assert k.STM_IS_SPARSE and k.N_PHI == 21 * 6
+    p = _arm_params(k)
+    z0 = np.linspace(-0.4, 0.5, n)
+    dense = k.propagate(0.0, z0, 0.8, p, stm=True, sparse_stm=False, rtol=1e-11, atol=1e-11)
+    sparse = k.propagate(0.0, z0, 0.8, p, stm=True, rtol=1e-11, atol=1e-11)
+    assert sparse["z"] == pytest.approx(dense["z"], abs=1e-9)
+    assert sparse["stm"] == pytest.approx(dense["stm"], abs=1e-8)
+    outside = np.ones(n * n, dtype=bool)
+    outside[k.PHI_ENTRIES] = False
+    assert (dense["stm"].reshape(-1)[outside] == 0.0).all()
+
+
+def test_a_penalty_that_comes_on_mid_flight_gets_the_whole_phi(kernel_cache):
+    # Off, the two axes are separate and Phi is sparse. On, the penalty ties them together.
+    t = sp.Symbol("t", real=True)
+    x1, v1, x2, v2, u1, u2 = sp.symbols("x1 v1 x2 v2 u1 u2", real=True)
+    problem = OptimalControlProblem(
+        name="two_axes_penalized", time=t, states=[x1, v1, x2, v2], controls=[u1, u2],
+        dynamics=[v1, u1, v2, u2], running_cost=(u1 ** 2 + u2 ** 2) / 2,
+        initial_state=[0, 0, 0, 0], final_state={x1: 1, v1: 0, x2: 1, v2: 0}, final_time=1,
+        path_constraints=[PathConstraint(x1 + x2 - 1, "both", penalty=10)])
+    k = build_kernels(derive(problem), cache_dir=kernel_cache)
+    assert k.STM_IS_SPARSE and k.N_PHI == 20
+    quiet = [0, 0, 0, 0, 0.1, 0.1, 0.1, 0.1]
+    across = [0, 1, 0, 1, 0, 0, 0, 0]
+    for z0, crosses in ((quiet, False), (across, True)):
+        dense = k.propagate(0.0, z0, 1.0, stm=True, sparse_stm=False, rtol=1e-11, atol=1e-11)
+        sparse = k.propagate(0.0, z0, 1.0, stm=True, rtol=1e-11, atol=1e-11)
+        assert len(dense["constraint_times"]) == int(crosses)
+        assert sparse["z"] == pytest.approx(dense["z"], abs=1e-12)
+        assert sparse["stm"] == pytest.approx(dense["stm"], abs=1e-12)
+        outside = np.ones(64, dtype=bool)
+        outside[k.PHI_ENTRIES] = False
+        assert np.abs(dense["stm"].reshape(-1)[outside]).max() > 0.0 if crosses else True
+    # Starting on the penalty, and integrating sensitivities to the parameters, are dense too.
+    on = k.propagate(0.0, [2, 0, 0, 0, 0, 0, 0, 0], 0.5, stm=True, rtol=1e-11, atol=1e-11)
+    assert np.abs(on["stm"].reshape(-1)[outside]).max() > 0.0
+
+
 def test_a_violation_across_a_junction_is_one_violation():
     h = Homotopy.__new__(Homotopy)
     h.nc = 1
