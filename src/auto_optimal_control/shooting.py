@@ -107,8 +107,10 @@ class SingleShooting:
                              f"got {len(self.params)}")
         problem = k.system.problem
         values = dict(zip(k.system.params, self.params))
-        self.t0 = float(problem.initial_time.subs(values))
-        self.fixed_tf = None if k.FREE_FINAL_TIME else float(problem.final_time.subs(values))
+        # A solve builds hundreds of these, and subs is slow even on a constant.
+        at = lambda e: float(e) if e.is_number else float(e.subs(values))
+        self.t0 = at(problem.initial_time)
+        self.fixed_tf = None if k.FREE_FINAL_TIME else at(problem.final_time)
 
         n = k.N_STATES
         default = k.initial_state(self.params)

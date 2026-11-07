@@ -231,11 +231,14 @@ class Kernels:
         """The fixed initial state, with NaN for free components."""
         problem = self.system.problem
         values = dict(zip(self.system.params, np.asarray(params, dtype=float).reshape(-1)))
-        t0 = float(problem.initial_time.subs(values))
+        # A solve asks often, and subs is slow even on a constant.
+        t0 = float(problem.initial_time) if problem.initial_time.is_number \
+            else float(problem.initial_time.subs(values))
         out = np.full(len(self.system.states), np.nan)
         for i, s in enumerate(self.system.states):
             if s in problem.initial_state:
-                out[i] = float(problem.initial_state[s].subs({**values, problem.time: t0}))
+                e = problem.initial_state[s]
+                out[i] = float(e) if e.is_number else float(e.subs({**values, problem.time: t0}))
         return out
 
     def z0(self, lam0, params=(), x0=None):

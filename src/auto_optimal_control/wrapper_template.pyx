@@ -7,6 +7,7 @@ Do not edit: regenerate with ``auto_optimal_control.build.build_kernels``.
 import numpy as np
 
 from libc.math cimport INFINITY
+from libc.string cimport memcmp, memcpy
 
 from fast_numerical_integration.integrators cimport (
     EventFunction, OdeSystem, fni_event, fni_hybrid_options, fni_integrate, fni_integrate_hybrid,
@@ -189,10 +190,41 @@ cdef struct _ctx:
     Py_ssize_t max_calls    # > 0: fail past this many (a runaway trajectory)
 
 
+cdef struct _guard_values:
+    # FNI asks each guard in turn at the same point, and a kernel computes all of them at once:
+    # on a large problem that is the whole tape per guard. So the guards share one evaluation.
+    double t
+    double z[NZ]
+    int arc[NM1]
+    int filled          # GUARD_MODES | GUARD_RATES | GUARD_KINKS, or 0
+    double modes[NM1]
+    double rates[NC1]
+    double kinks[NK1]
+
+
+cdef enum:
+    GUARD_MODES = 1
+    GUARD_RATES = 2
+    GUARD_KINKS = 4
+
+
 cdef struct _ev_ctx:
     const double* p
     const int* arc      # constraint rates and kinks only: the arc the flow is on
     int k
+    _guard_values* shared   # NULL: not shared
+
+
+cdef inline int _guards_fresh(_guard_values* v, double t, const double* y,
+                              const int* arc, int which) noexcept nogil:
+    """1 if ``which`` is already known at this point; if not, get ready to store it."""
+    if not (v.filled and v.t == t and memcmp(v.z, y, NZ * sizeof(double)) == 0
+            and memcmp(v.arc, arc, NM1 * sizeof(int)) == 0):
+        v.t = t
+        memcpy(v.z, y, NZ * sizeof(double))
+        memcpy(v.arc, arc, NM1 * sizeof(int))
+        v.filled = 0
+    return (v.filled & which) != 0
 
 
 cdef int _rhs_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ctx) noexcept nogil:
@@ -229,7 +261,17 @@ cdef int _stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* ct
 cdef int _event_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
     cdef _ev_ctx* c = <_ev_ctx*> ctx
     cdef double M[NM1]
-    cdef int rc = P_modes(t, y, c.p, M)
+    cdef _guard_values* v = c.shared
+    cdef int rc
+    if v != NULL:
+        if not _guards_fresh(v, t, y, c.arc, GUARD_MODES):
+            rc = P_modes(t, y, c.p, v.modes)
+            if rc != 0:
+                return rc
+            v.filled |= GUARD_MODES
+        g[0] = v.modes[c.k]
+        return 0
+    rc = P_modes(t, y, c.p, M)
     g[0] = M[c.k]
     return rc
 
@@ -245,7 +287,17 @@ cdef int _constraint_fn(double t, const double* y, Py_ssize_t n, void* ctx, doub
 cdef int _rate_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
     cdef _ev_ctx* c = <_ev_ctx*> ctx
     cdef double Gd[NC1]
-    cdef int rc = P_constraint_rate_arc(t, y, c.p, c.arc, Gd)
+    cdef _guard_values* v = c.shared
+    cdef int rc
+    if v != NULL:
+        if not _guards_fresh(v, t, y, c.arc, GUARD_RATES):
+            rc = P_constraint_rate_arc(t, y, c.p, c.arc, v.rates)
+            if rc != 0:
+                return rc
+            v.filled |= GUARD_RATES
+        g[0] = v.rates[c.k]
+        return 0
+    rc = P_constraint_rate_arc(t, y, c.p, c.arc, Gd)
     g[0] = Gd[c.k]
     return rc
 
@@ -253,7 +305,17 @@ cdef int _rate_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g)
 cdef int _kink_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
     cdef _ev_ctx* c = <_ev_ctx*> ctx
     cdef double K[NK1]
-    cdef int rc = P_kinks_arc(t, y, c.p, c.arc, K)
+    cdef _guard_values* v = c.shared
+    cdef int rc
+    if v != NULL:
+        if not _guards_fresh(v, t, y, c.arc, GUARD_KINKS):
+            rc = P_kinks_arc(t, y, c.p, c.arc, v.kinks)
+            if rc != 0:
+                return rc
+            v.filled |= GUARD_KINKS
+        g[0] = v.kinks[c.k]
+        return 0
+    rc = P_kinks_arc(t, y, c.p, c.arc, K)
     g[0] = K[c.k]
     return rc
 
@@ -326,6 +388,7 @@ cdef class Switching(EventFunction):
         if NP:
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
+        self.ctx.shared = NULL
         self.ctx.k = k
         self.c_fn = _event_fn
         self.c_ctx = &self.ctx
@@ -345,6 +408,7 @@ cdef class Constraint(EventFunction):
         if NP:
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
+        self.ctx.shared = NULL
         self.ctx.k = c
         self.c_fn = _constraint_fn
         self.c_ctx = &self.ctx
@@ -372,6 +436,7 @@ cdef class ConstraintRate(EventFunction):
         if NP:
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
+        self.ctx.shared = NULL
         self.ctx.k = c
         self.ctx.arc = self.arc_buf
         self.arc = np.zeros(NM, dtype=np.intc) if arc is None else arc
@@ -410,6 +475,7 @@ cdef class Kink(EventFunction):
         if NP:
             self._init_params(_params(params)[:NP], PARAM_NAMES)
         self.ctx.p = self._params_ptr()
+        self.ctx.shared = NULL
         self.ctx.k = k
         self.ctx.arc = self.arc_buf
         self.arc = np.zeros(NM, dtype=np.intc) if arc is None else arc
@@ -732,6 +798,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     starts and ends inside one step is still found."""
     cdef fni_event events[NE1]
     cdef _ev_ctx evc[NE1]
+    cdef _guard_values shared
     cdef int kind[NE1]
     cdef fni_hybrid_options hopt
     cdef _switch_ctx rctx
@@ -740,6 +807,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
     cdef Py_ssize_t i, ne = 0
 
     n_sw[0] = 0
+    shared.filled = 0
     for k in range(NC if ctx.constraint_events else 0):
         if ctx.stop_on[k] and ctx.arc[NSW + k]:
             # Already violated at t0: stop before the first step.
@@ -756,6 +824,7 @@ cdef int _propagate(int method, _ctx* ctx, int stm, Py_ssize_t ny, double t0, do
             continue                    # a control held at one bound
         evc[ne].p = ctx.p
         evc[ne].arc = ctx.arc
+        evc[ne].shared = &shared
         kind[ne] = k
         if k < NM:
             evc[ne].k = k
