@@ -459,7 +459,9 @@ class Homotopy:
             return None
         # A guess, not the answer: the whole system's solve polishes it afterwards.
         whole = shoot
-        shoot = SingleShooting(shoot.kernels, shoot.params, rtol=1e-8, atol=1e-10)
+        shoot = SingleShooting(shoot.kernels, shoot.params, rtol=1e-8, atol=1e-10, n_interior=0)
+        # It does not depend on the path constraints (_free_arc_params), so it ignores their guards.
+        shoot.options["constraint_events"] = False
         shoot.max_nfev = 20000             # a bad guess can chatter on a saturation corner
         shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
         tol = max(tol, 1e-6)
