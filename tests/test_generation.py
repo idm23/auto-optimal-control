@@ -232,6 +232,17 @@ def test_a_constructed_anchor_is_a_peak_of_the_limit(smooth):
         assert gen._curvature(c, 0.0, z) < 0
 
 
+def test_an_integration_past_its_evaluation_budget_rejects_the_draw(smooth):
+    # A stiff or stalled integration must end the draw, not run on.
+    gen = ExtremalGenerator.from_homotopy(smooth, params(np.zeros(3), np.zeros(3)))
+    gen.max_nfev = 5
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        z = np.r_[0.0, rng.uniform(-0.5, 0.5, 2), rng.normal(size=3)]
+        with pytest.raises(Rejected):
+            gen.generate_anchored(0, z, 1.0, 2.0, rng=rng)
+
+
 def test_the_quasimetric_obeys_the_triangle_inequality_untrained():
     torch = pytest.importorskip("torch")
     from auto_optimal_control import learn

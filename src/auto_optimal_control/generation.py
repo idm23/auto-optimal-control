@@ -98,6 +98,9 @@ class ExtremalGenerator:
         self.kernels = k = kernels
         self.params = np.asarray(params, dtype=float)
         self.options = dict(rtol=rtol, atol=atol)
+        # Right-hand-side evaluations allowed per integration: past this a stiff or
+        # stalled integration fails instead of running on (the shooting has its own).
+        self.max_nfev = 200000
         self.n_points = n_points
         self.tol = tol
         self.max_rounds = max_rounds or 4 * max(k.N_CONSTRAINTS, 1) + 8
@@ -139,6 +142,10 @@ class ExtremalGenerator:
         self.arc_fraction = (0.02, 0.3)
         # How far past the drawn duration a motion may be extended to reach a peak.
         self.extend = 3.0
+
+    @property
+    def _capped(self):
+        return {**self.options, "max_nfev": self.max_nfev}
 
     def _out_of_time(self):
         if time.perf_counter() > self._deadline:
@@ -246,19 +253,41 @@ class ExtremalGenerator:
             exit_at = None
             riding = True
             for tg in grid[1:]:
+                self._out_of_time()
                 try:
-                    r = k.propagate_boundary(aid, t_prev, z, tg, p, **self.options)
+                    r = k.propagate_boundary(aid, t_prev, z, tg, p, **self._capped)
                     m = mu_at(tg, r["z"]) if r["status"] == 0 else np.nan
                 except RuntimeError:
                     m = np.nan
                 if not np.isfinite(m):
-                    riding = False            # the arc cannot be ridden this far
+                    # The arc cannot be ridden this far (its control would leave its
+                    # bounds): how far it can, by bisection, so a short arc survives.
+                    # Only needed when the first step fails (else the last good grid
+                    # point will do), and only roughly: the arc-length search calls this
+                    # many times.
+                    riding = False
+                    lo, hi = t_prev, tg
+                    for _ in range(12 if t_prev == t_in else 0):
+                        self._out_of_time()
+                        mid = 0.5 * (lo + hi)
+                        try:
+                            rm = k.propagate_boundary(aid, t_prev, z, mid, p, **self._capped)
+                            ok = rm["status"] == 0 and np.isfinite(mu_at(mid, rm["z"]))
+                        except RuntimeError:
+                            ok = False
+                        if ok:
+                            lo = mid
+                        else:
+                            hi = mid
+                        if hi - lo < 1e-9 * span:
+                            break
+                    t_prev = lo
                     break
                 if m < 0:
                     lo, hi, zlo = t_prev, tg, z
                     for _ in range(60):
                         mid = 0.5 * (lo + hi)
-                        rm = k.propagate_boundary(aid, lo, zlo, mid, p, **self.options)
+                        rm = k.propagate_boundary(aid, lo, zlo, mid, p, **self._capped)
                         if mu_at(mid, rm["z"]) < 0:
                             hi = mid
                         else:
@@ -270,7 +299,9 @@ class ExtremalGenerator:
                 z, t_prev = r["z"], tg
             if exit_at is None and not riding:
                 # Riding fails before mu reaches zero: leave the exit to Newton, from there.
-                arcs[i] = (c, t_in, t_prev if np.isnan(t_out) else min(t_out, t_prev), pi)
+                # An arc that cannot be ridden at all dies (the caller removes it).
+                end = max(t_prev, t_in + 1e-9 * span)
+                arcs[i] = (c, t_in, end if np.isnan(t_out) else min(t_out, end), pi)
                 continue
             if exit_at is None:
                 if horizon < tf:
@@ -314,7 +345,8 @@ class ExtremalGenerator:
             for c, t_in, t_out, _ in arcs_:
                 end = tf if np.isnan(t_out) else t_out
                 if not (self.t0 < t_in < end <= tf) or (end == tf and not np.isnan(t_out)):
-                    raise ShootingError("an arc left the motion or closed")
+                    raise ShootingError(f"an arc left the motion or closed: limit {c}, "
+                                        f"t_in {t_in:.6g}, t_out {t_out:.6g}, t0 {self.t0:.6g}, tf {tf:.6g}")
 
         def rows_at(x, lam, arcs_, jac):
             check(arcs_)
@@ -431,9 +463,9 @@ class ExtremalGenerator:
         if kind is None:
             arc = shoot._free_arc(ta, za, flags)
             r = k.propagate(ta, za, t, p, constraint_events=False, arc=arc,
-                            frozen=sorted(flags), **self.options)
+                            frozen=sorted(flags), **self._capped)
         else:
-            r = k.propagate_boundary(aid, ta, za, t, p, **self.options)
+            r = k.propagate_boundary(aid, ta, za, t, p, **self._capped)
         if r["status"] != 0:
             raise ShootingError(f"propagation failed with status {r['status']}")
         return r["z"]
@@ -907,7 +939,7 @@ class ExtremalGenerator:
             raise Rejected("anchor breaks another limit")
         # The free motion must reach the limit from inside: just before, g < 0.
         h = 1e-4
-        r = k.propagate(t, z, t - h, p, constraint_events=False, **self.options)
+        r = k.propagate(t, z, t - h, p, constraint_events=False, **self._capped)
         if r["status"] != 0 or k.constraint(t - h, r["z"], p)[c] >= 0:
             raise Rejected("anchor not reached from inside")
         return z
@@ -923,20 +955,26 @@ class ExtremalGenerator:
         construction, so the saturated controls and the out-of-reach peaks that
         stop :meth:`generate` do not arise there; later limits are handled as
         there. Requires a free final time."""
-        k, p, n = self.kernels, self.params, self.kernels.N_STATES
         if not self.free_time:
             raise NotImplementedError("anchored generation needs a free final time")
         self._rng = np.random.default_rng(rng)
         self._deadline = (time.perf_counter() + self.max_seconds if self.max_seconds
                           else np.inf)
+        try:
+            return self._generate_anchored(c, z, before, after)
+        except _FAILURES as exc:      # an integration that fails or runs past max_nfev
+            raise Rejected("propagation failed", str(exc)) from exc
+
+    def _generate_anchored(self, c, z, before, after):
+        k, p, n = self.kernels, self.params, self.kernels.N_STATES
         za = self.anchor(c, z)
         t_a = self.t0 + float(before)
         # Backward to the start. Events are not used: integrating backward a limit is
         # crossed the other way. Instead the stretch is sampled, and the motion starts
         # just after the last point where a limit is broken.
         eps = 1e-7 * before
-        r = k.propagate(t_a, za, t_a - eps, p, constraint_events=False, **self.options)
-        rb = k.propagate(t_a - eps, r["z"], self.t0, p, constraint_events=False, **self.options)
+        r = k.propagate(t_a, za, t_a - eps, p, constraint_events=False, **self._capped)
+        rb = k.propagate(t_a - eps, r["z"], self.t0, p, constraint_events=False, **self._capped)
         if rb["status"] != 0:
             raise Rejected("propagation failed", f"status {rb['status']}")
         ts = np.linspace(self.t0, t_a - eps, 400)
@@ -950,7 +988,7 @@ class ExtremalGenerator:
             for _ in range(50):                      # the last crossing, by bisection
                 mid = 0.5 * (lo + hi)
                 zm = k.propagate(t_a - eps, r["z"], mid, p, constraint_events=False,
-                                 **self.options)["z"]
+                                 **self._capped)["z"]
                 if (k.constraint(mid, zm, p) > tol_g).any():
                     lo = mid
                 else:
@@ -958,7 +996,7 @@ class ExtremalGenerator:
             t_start = hi + 1e-3 * (t_a - hi)
             if t_a - t_start < 1e-3 * before:
                 raise Rejected("violated just before the anchor")
-            rb = k.propagate(t_a - eps, r["z"], t_start, p, constraint_events=False, **self.options)
+            rb = k.propagate(t_a - eps, r["z"], t_start, p, constraint_events=False, **self._capped)
         # Shift time so the motion starts at t0 (the problem does not depend on time).
         shift = t_start - self.t0
         x0, lam0 = rb["z"][:n], rb["z"][n:]
@@ -969,6 +1007,9 @@ class ExtremalGenerator:
         target = self._rng.uniform(*self.arc_fraction) * span
         pi = self._jump_for_length(x0, lam0, arcs, tf, 0, min(target, 0.9 * (tf - t_in)))
         arcs, _ = self._settle_exits(x0, lam0, [(c, t_in, t_in + 1e-6 * span, pi)], tf)
+        # An arc that cannot be ridden at all leaves a touch: the anchor is a peak of g
+        # at the limit, so the free motion through it is an extremal without the arc.
+        arcs = [a for a in arcs if np.isnan(a[2]) or a[2] - a[1] > 1e-8 * span]
         ext = self._grow(x0, lam0, arcs, tf)
         # The anchored arc, if it survived the rest of the motion (later limits can close it).
         kept = [val for (kind, cc), val in zip([a for a in ext.arcs if a[0] == "enter"], ext.values)
