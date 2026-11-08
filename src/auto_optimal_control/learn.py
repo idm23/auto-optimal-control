@@ -276,3 +276,130 @@ def jepa_refine(model, ss, sy, se, s, e, y_init, *, steps=200, lr=0.05):
         final = ((model.predict(S, y) - G) ** 2).sum(dim=1).numpy()
     order = np.argsort(final)
     return sy.inverse(y.detach().numpy()[order]), final[order]
+
+
+# =============================================================================
+# A quasimetric of time between states
+# =============================================================================
+
+class Quasimetric(nn.Module):
+    """``d(x, y)``: a learned estimate of the least time from state ``x`` to state ``y``.
+
+    The least time is a *quasimetric*: ``d(x, x) = 0`` and the triangle
+    inequality ``d(x, z) <= d(x, y) + d(y, z)`` hold, with equality exactly
+    when ``y`` lies on a fastest path from ``x`` to ``z`` (Bellman), but it is
+    not symmetric. Here ``d(x, y) = |f(y) - f(x)| + max_i relu(g_i(y) - g_i(x))``,
+    a symmetric norm plus an asymmetric part (the form of metric residual
+    networks), which satisfies both for every value of the weights, so they
+    need not be learned. States enter as features ``s`` (the rest of the
+    state) and ``p`` (coordinates along which the problem is invariant under
+    translation, e.g. a joint about gravity's axis); ``p`` enters ``f`` and
+    ``g`` linearly, so only ``p(y) - p(x)`` matters.
+    """
+
+    def __init__(self, n_s, n_p, *, dim=32, width=128, depth=3):
+        super().__init__()
+        self.f = _mlp(n_s, dim, width, depth)
+        self.g = _mlp(n_s, dim, width, depth)
+        self.fp = nn.Linear(n_p, dim, bias=False) if n_p else None
+        self.gp = nn.Linear(n_p, dim, bias=False) if n_p else None
+
+    def embed(self, s, p):
+        """``(f, g)`` of states; differences of them are what ``d`` and the flow read."""
+        f, g = self.f(s), self.g(s)
+        if self.fp is not None:
+            f, g = f + self.fp(p), g + self.gp(p)
+        return f, g
+
+    def forward(self, s0, p0, s1, p1):
+        f0, g0 = self.embed(s0, p0)
+        f1, g1 = self.embed(s1, p1)
+        sym = torch.sqrt(((f1 - f0) ** 2).sum(dim=1) + 1e-12)
+        asym = torch.relu(g1 - g0).max(dim=1).values
+        return sym + asym
+
+
+def split_state(X, invariant):
+    """``(s, p)``: a state's features apart from, and along, the invariant coordinates."""
+    X = np.atleast_2d(np.asarray(X, dtype=float))
+    keep = np.ones(X.shape[1], dtype=bool)
+    keep[list(invariant)] = False
+    return X[:, keep], X[:, list(invariant)]
+
+
+def train_quasimetric(X0, X1, T, *, invariant=(), epochs=300, batch=512, lr=1e-3, over=10.0,
+                      seed=0, verbose=False, **kwargs):
+    """A :class:`Quasimetric` fitted to times ``T`` between states ``X0`` and ``X1``.
+
+    Each pair comes from a generated extremal, a feasible motion, so its time
+    bounds the least time from above: ``d > T`` costs ``over`` times as much
+    as ``d < T``. Pairs taken along one extremal are tight when it is a
+    fastest path. Returns ``(model, ss, sp)`` with the standardizations."""
+    torch.manual_seed(seed)
+    S0, P0 = split_state(X0, invariant)
+    S1, P1 = split_state(X1, invariant)
+    ss = Standardize(np.vstack([S0, S1]))
+    sp_scale = np.maximum(np.vstack([P0, P1]).std(axis=0), 1e-12) if len(invariant) else np.ones(0)
+    sp = lambda P: np.asarray(P, dtype=float) / sp_scale if len(invariant) else np.zeros((len(P), 0))
+    tens = lambda A: torch.as_tensor(A, dtype=torch.float32)
+    S0t, S1t, P0t, P1t = tens(ss(S0)), tens(ss(S1)), tens(sp(P0)), tens(sp(P1))
+    Tt = tens(T)
+    model = Quasimetric(S0.shape[1], P0.shape[1], **kwargs)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, epochs)
+    for epoch in range(epochs):
+        perm = torch.randperm(len(Tt))
+        total = 0.0
+        for i in range(0, len(Tt), batch):
+            idx = perm[i:i + batch]
+            err = model(S0t[idx], P0t[idx], S1t[idx], P1t[idx]) - Tt[idx]
+            loss = (err ** 2 + over * torch.relu(err) ** 2).mean()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            total += float(loss.detach()) * len(idx)
+        sched.step()
+        if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
+            print(f"quasimetric epoch {epoch}: loss {total / len(Tt):.5f}")
+    model.eval()
+    return model, ss, sp
+
+
+@torch.no_grad()
+def distance(model, ss, sp, X0, X1, invariant=()):
+    """``d(x0, x1)`` for rows of states (broadcast if one side is a single state)."""
+    S0, P0 = split_state(X0, invariant)
+    S1, P1 = split_state(X1, invariant)
+    n = max(len(S0), len(S1))
+    rep = lambda A: np.repeat(A, n, axis=0) if len(A) == 1 else A
+    tens = lambda A: torch.as_tensor(A, dtype=torch.float32)
+    return model(tens(ss(rep(S0))), tens(sp(rep(P0))), tens(ss(rep(S1))), tens(sp(rep(P1)))).numpy()
+
+
+@torch.no_grad()
+def embedding_features(model, ss, sp, X0, X1, invariant=()):
+    """Conditions for a flow: the start's own features, and the embedding's
+    differences from start to goal (which add up along a chain of motions)."""
+    S0, P0 = split_state(X0, invariant)
+    S1, P1 = split_state(X1, invariant)
+    tens = lambda A: torch.as_tensor(A, dtype=torch.float32)
+    f0, g0 = model.embed(tens(ss(S0)), tens(sp(P0)))
+    f1, g1 = model.embed(tens(ss(S1)), tens(sp(P1)))
+    return np.hstack([ss(S0), (f1 - f0).numpy(), (g1 - g0).numpy()])
+
+
+def waypoint_order(model, ss, sp, starts, ends, times, x0, xf, invariant=(), near=None):
+    """Stored motions ranked as first legs of the fastest path from ``x0`` to ``xf``.
+
+    A motion from near ``x0`` to ``b`` taking ``t`` is a good first leg when
+    ``t + d(b, xf)`` is close to ``d(x0, xf)``: then ``b`` lies (nearly) on a
+    fastest path, and by Bellman the costates that start that path are the
+    leg's own. ``near`` limits the ranking to these indices (for instance, the
+    stored motions whose starts are closest to ``x0``). Returns
+    ``(indices best first, the triangle gaps, d(x0, xf))``."""
+    idx = np.arange(len(times)) if near is None else np.asarray(near)
+    direct = float(distance(model, ss, sp, x0[None], xf[None], invariant)[0])
+    rest = distance(model, ss, sp, ends[idx], xf[None], invariant)
+    gap = times[idx] + rest - direct
+    order = np.argsort(gap)
+    return idx[order], gap[order], direct

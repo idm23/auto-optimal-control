@@ -111,6 +111,9 @@ class ExtremalGenerator:
                       "all": np.arange(n)}[vary_start]
         self.start_scale = start_scale
         self.debug = False
+        # The states an anchor may move to reach its limit (None: all). For a torque limit
+        # under jerk control the accelerations reach it with the least disturbance.
+        self.anchor_states = None
         # Seconds one draw may take before it is rejected (None: no limit).
         self.max_seconds = None
         self._deadline = np.inf
@@ -577,7 +580,7 @@ class ExtremalGenerator:
         the motion generated) and must be omitted otherwise. Raises
         :class:`Rejected` when the draw gives no valid extremal.
         """
-        k, n = self.kernels, self.kernels.N_STATES
+        n = self.kernels.N_STATES
         x0 = np.asarray(x0, dtype=float).reshape(n)
         if self.free_time:
             if tf is None:
@@ -591,7 +594,12 @@ class ExtremalGenerator:
         self._deadline = (time.perf_counter() + self.max_seconds if self.max_seconds
                           else np.inf)
         lam0 = self.on_level_set(x0, lam0)
-        arcs = []                         # (c, t_in, t_out, pi)
+        return self._grow(x0, lam0, [], tf)
+
+    def _grow(self, x0, lam0, arcs, tf):
+        """From ``(x0, lam0)`` and the arcs ``(c, t_in, t_out, pi)`` so far, the
+        extremal with every violated limit made an arc (or truncated before it)."""
+        k = self.kernels
         span = tf - self.t0
         tf_cap = self.t0 + self.extend * span
         valid = None                 # (x0, lam0, arcs, err, t_violation): valid up to t_violation
@@ -678,6 +686,267 @@ class ExtremalGenerator:
         if valid is not None and self.truncate:
             return self._truncated(*valid, why="too many rounds")
         raise Rejected("too many rounds", f"{len(arcs)} arcs")
+
+    # -- anchored at a junction ----------------------------------------------------
+
+    def _entry_rows(self, c, t, z, gap=False):
+        """The conditions for ``(t, z)`` to be an entry onto limit ``c``: ``g = 0``,
+        the arrival (tangential, or ``H`` continuous when a control may jump) and
+        ``H = 0`` when the final time is free.
+
+        With ``gap`` the arrival row is ``H(u_b) - H(u*) >= 0``, which vanishes
+        exactly when the free control already rides the limit. Unlike
+        ``dg/dt`` it still moves with the costates while that control is
+        saturated, where ``dg/dt`` is flat."""
+        k, p = self.kernels, self.params
+        rows = [float(k.constraint(t, z, p)[c])]
+        if self.regular and gap:
+            d = float(k.boundary_hamiltonian(c, t, z, p) - k.hamiltonian(t, z, p))
+            rows.append(max(d, 0.0))
+        elif self.regular:
+            rows.append(float(np.atleast_1d(k.constraint_rate(t, z, p))[c]))
+        else:
+            rows.append(float(k.hamiltonian(t, z, p) - k.boundary_hamiltonian(c, t, z, p)))
+        if self.free_time:
+            rows.append(float(k.hamiltonian(t, z, p)))
+        return np.array(rows)
+
+    def _construct_anchor(self, c, t, z, iterations=60):
+        """An entry onto limit ``c`` built in steps, for a continuous control law.
+
+        The state is moved onto the limit; the control that rides it there (at
+        the drawn costates) is the target, which must lie strictly inside its
+        bounds; then costates are found whose free control *is* that target, on
+        ``H = 0``. A free control that rides the limit has ``dg/dt = 0``: the
+        entry is tangential. Each step is smooth with simple roots, because
+        nothing is saturated."""
+        k, p, n = self.kernels, self.params, self.kernels.N_STATES
+        x, lam = z[:n].copy(), z[n:].copy()
+        # 1. The state onto g_c = 0, the other limits held where the draw has them (pulled
+        # inside if close), by Newton in the states anchor_states allows.
+        movable = list(range(n) if self.anchor_states is None else self.anchor_states)
+        g_draw = np.asarray(k.constraint(t, np.r_[x, lam], p), dtype=float)
+        hold = np.minimum(g_draw, -0.05 * np.abs(g_draw))
+
+        def all_rows(xx):
+            g = np.asarray(k.constraint(t, np.r_[xx, lam], p), dtype=float)
+            r = g - hold
+            r[c] = g[c]
+            return r
+
+        # A limit moved by the same combination of states as c (its opposite, for a
+        # torque) cannot be held: drop the rows whose gradient is parallel to c's.
+        r0 = all_rows(x)
+        G = np.zeros((len(r0), len(movable)))
+        for jj, i in enumerate(movable):
+            h = 1e-7 * max(1.0, abs(x[i]))
+            xh = x.copy()
+            xh[i] += h
+            G[:, jj] = (all_rows(xh) - r0) / h
+        gc = G[c] / max(float(np.linalg.norm(G[c])), 1e-300)
+        keep = [j for j in range(len(r0)) if j == c or
+                abs(float(G[j] @ gc)) < 0.999 * max(float(np.linalg.norm(G[j])), 1e-300)]
+
+        def state_rows(xx):
+            return all_rows(xx)[keep]
+
+        r = state_rows(x)
+        for _ in range(iterations):
+            if np.max(np.abs(r)) < self.tol:
+                break
+            J = np.zeros((len(r), len(movable)))
+            for jj, i in enumerate(movable):
+                h = 1e-7 * max(1.0, abs(x[i]))
+                xh = x.copy()
+                xh[i] += h
+                J[:, jj] = (state_rows(xh) - r) / h
+            step = np.linalg.lstsq(J, -r, rcond=None)[0]
+            x[movable] += step
+            r = state_rows(x)
+        else:
+            raise Rejected("no anchor", "the state does not reach the limit")
+        # 2. The riding control there is the target; it must be inside its bounds. Large
+        # costates push it to them, so the draw is shrunk along its ray until it is not
+        # (step 3 then restores H = 0).
+        for shrink in 10.0 ** -np.arange(0, 10):
+            zz = np.r_[x, shrink * lam]
+            try:
+                target = np.asarray(k.boundary_control(c, t, zz, p), dtype=float)
+            except _FAILURES:
+                continue
+            lo, hi = (np.asarray(b, dtype=float) for b in k.control_bounds(t, zz, p))
+            margin = 1e-3 * np.maximum(hi - lo, 1e-12)
+            if np.all(target > lo + margin) and np.all(target < hi - margin):
+                lam = shrink * lam
+                break
+        else:
+            raise Rejected("no anchor", "riding there needs a control at its bound")
+
+        # 3. Costates whose free control is the target, on H = 0.
+        def rows(l):
+            zl = np.r_[x, l]
+            r = np.asarray(k.control(t, zl, p), dtype=float) - target
+            if self.free_time:
+                r = np.r_[r, k.hamiltonian(t, zl, p)]
+            return r
+
+        scale = max(float(np.sqrt(np.mean(lam ** 2))), 1e-6)
+        r = rows(lam)
+        for _ in range(iterations):
+            if np.max(np.abs(r)) < self.tol:
+                break
+            J = np.zeros((len(r), n))
+            for i in range(n):
+                h = 1e-7 * max(scale, abs(lam[i]))
+                lh = lam.copy()
+                lh[i] += h
+                J[:, i] = (rows(lh) - r) / h
+            step = np.linalg.lstsq(J, -r, rcond=None)[0]
+            for _ in range(20):
+                rt = rows(lam + step)
+                if rt @ rt < r @ r:
+                    lam, r = lam + step, rt
+                    break
+                step = step / 2
+            else:
+                raise Rejected("no anchor", "no costates give that control on H = 0")
+        else:
+            raise Rejected("no anchor", "no costates give that control on H = 0")
+        return np.r_[x, lam]
+
+    def anchor(self, c, z, t=None, iterations=200):
+        """``z = (x, lam)`` moved (minimum norm) onto the entry conditions of limit ``c``.
+
+        These conditions involve one point only, so they need no integration.
+        Raises :class:`Rejected` if they cannot be met, if another limit is
+        broken there, or if the free motion would not arrive from inside."""
+        k, p = self.kernels, self.params
+        t = self.t0 if t is None else float(t)
+        z = np.asarray(z, dtype=float).copy()
+        n = k.N_STATES
+        built = False
+        if self.regular:
+            try:
+                z, built = self._construct_anchor(c, t, z), True
+            except Rejected:
+                pass                      # fall back to projecting the draw itself
+        # One scale for the states and one for the costates: per-component scales make
+        # small components (often the ones the limit depends on) too dear to move.
+        scale = np.r_[np.full(n, max(float(np.sqrt(np.mean(z[:n] ** 2))), 1e-3)),
+                      np.full(n, max(float(np.sqrt(np.mean(z[n:] ** 2))), 1e-3))]
+
+        def rows(zz, gap):
+            try:
+                r = self._entry_rows(c, t, zz, gap)
+            except _FAILURES:
+                return None
+            return r if np.all(np.isfinite(r)) else None
+
+        # First with the gap (it moves with saturated controls), then with dg/dt itself.
+        phases = ((True, 1e-12), (False, self.tol)) if self.regular and not built else ((False, self.tol),)
+        for gap, tol in phases:
+            r = rows(z, gap)
+            if r is None:
+                raise Rejected("no anchor", "the limit cannot be ridden at the draw")
+            damping = 1e-6
+            for _ in range(iterations):
+                if np.max(np.abs(r)) < tol:
+                    break
+                J = np.zeros((len(r), len(z)))
+                for i in range(len(z)):
+                    h = 1e-7 * max(1.0, abs(z[i]))
+                    zh = z.copy()
+                    zh[i] += h
+                    rh = rows(zh, gap)
+                    J[:, i] = 0.0 if rh is None else (rh - r) / h
+                A = J * scale
+                for _ in range(20):
+                    aug = np.vstack([A, np.sqrt(damping) * np.eye(len(z))])
+                    y = np.linalg.lstsq(aug, np.r_[-r, np.zeros(len(z))], rcond=None)[0]
+                    zt = z + scale * y
+                    rt = rows(zt, gap)
+                    if rt is not None and rt @ rt < r @ r:
+                        z, r, damping = zt, rt, max(damping / 10, 1e-12)
+                        break
+                    damping *= 10
+                else:
+                    raise Rejected("no anchor", f"entry residual {np.max(np.abs(r)):.1e}")
+            else:
+                raise Rejected("no anchor", f"entry residual {np.max(np.abs(r)):.1e}")
+        g = k.constraint(t, z, p)
+        others = [j for j in range(k.N_CONSTRAINTS) if j != c]
+        if others and np.max(g[others]) > -1e-9:
+            raise Rejected("anchor breaks another limit")
+        # The free motion must reach the limit from inside: just before, g < 0.
+        h = 1e-4
+        r = k.propagate(t, z, t - h, p, constraint_events=False, **self.options)
+        if r["status"] != 0 or k.constraint(t - h, r["z"], p)[c] >= 0:
+            raise Rejected("anchor not reached from inside")
+        return z
+
+    def generate_anchored(self, c, z, before, after, rng=None):
+        """An extremal through an entry onto limit ``c`` at ``z = (x, lam)`` (anchored first).
+
+        From the anchor the free equations integrate backward for ``before``,
+        which gives the start (cut short at the latest broken limit, so the
+        start is wherever the motion can begin), and the arc and the rest of
+        the motion run forward for ``after``, its jump chosen for an arc of a
+        length drawn from :attr:`arc_fraction`. The entry is exact by
+        construction, so the saturated controls and the out-of-reach peaks that
+        stop :meth:`generate` do not arise there; later limits are handled as
+        there. Requires a free final time."""
+        k, p, n = self.kernels, self.params, self.kernels.N_STATES
+        if not self.free_time:
+            raise NotImplementedError("anchored generation needs a free final time")
+        self._rng = np.random.default_rng(rng)
+        self._deadline = (time.perf_counter() + self.max_seconds if self.max_seconds
+                          else np.inf)
+        za = self.anchor(c, z)
+        t_a = self.t0 + float(before)
+        # Backward to the start. Events are not used: integrating backward a limit is
+        # crossed the other way. Instead the stretch is sampled, and the motion starts
+        # just after the last point where a limit is broken.
+        eps = 1e-7 * before
+        r = k.propagate(t_a, za, t_a - eps, p, constraint_events=False, **self.options)
+        rb = k.propagate(t_a - eps, r["z"], self.t0, p, constraint_events=False, **self.options)
+        if rb["status"] != 0:
+            raise Rejected("propagation failed", f"status {rb['status']}")
+        ts = np.linspace(self.t0, t_a - eps, 400)
+        tr = k.trajectory(self.t0, rb["z"], t_a - eps, p, t_eval=ts, constraint_events=False,
+                          **self.options)
+        tol_g = 1e-9 * np.maximum(1.0, np.abs(tr["g"]).max(axis=0))
+        broken = np.flatnonzero((tr["g"] > tol_g).any(axis=1))
+        t_start = self.t0
+        if len(broken):
+            lo, hi = ts[broken[-1]], ts[min(broken[-1] + 1, len(ts) - 1)]
+            for _ in range(50):                      # the last crossing, by bisection
+                mid = 0.5 * (lo + hi)
+                zm = k.propagate(t_a - eps, r["z"], mid, p, constraint_events=False,
+                                 **self.options)["z"]
+                if (k.constraint(mid, zm, p) > tol_g).any():
+                    lo = mid
+                else:
+                    hi = mid
+            t_start = hi + 1e-3 * (t_a - hi)
+            if t_a - t_start < 1e-3 * before:
+                raise Rejected("violated just before the anchor")
+            rb = k.propagate(t_a - eps, r["z"], t_start, p, constraint_events=False, **self.options)
+        # Shift time so the motion starts at t0 (the problem does not depend on time).
+        shift = t_start - self.t0
+        x0, lam0 = rb["z"][:n], rb["z"][n:]
+        t_in = t_a - shift
+        tf = t_in + float(after)
+        arcs = [(c, t_in, np.nan, 0.0)]
+        span = tf - self.t0
+        target = self._rng.uniform(*self.arc_fraction) * span
+        pi = self._jump_for_length(x0, lam0, arcs, tf, 0, min(target, 0.9 * (tf - t_in)))
+        arcs, _ = self._settle_exits(x0, lam0, [(c, t_in, t_in + 1e-6 * span, pi)], tf)
+        ext = self._grow(x0, lam0, arcs, tf)
+        # The anchored arc, if it survived the rest of the motion (later limits can close it).
+        kept = [val for (kind, cc), val in zip([a for a in ext.arcs if a[0] == "enter"], ext.values)
+                if cc == c and abs(val[0] - t_in) < 1e-6 * span]
+        ext.checks["anchored"] = k.CONSTRAINT_NAMES[c] if kept else None
+        return ext
 
     def _birth(self, x0, lam0, arcs, tf, c, peak, tp, rng=None):
         """Arcs with a new one of limit ``c``, whose free trajectory peaks above it at ``tp``.
