@@ -217,6 +217,21 @@ def test_anchored_extremals_start_on_an_exact_entry(smooth):
         assert abs(np.atleast_1d(k.constraint_rate(t_in, before[-1]["z"], p))[c]) < 1e-7
 
 
+def test_a_constructed_anchor_is_a_peak_of_the_limit(smooth):
+    # Drawn costates saturate the free jerk, and half the draws would bend the wrong
+    # way; the anchor is built so the free motion meets the limit from inside.
+    gen = ExtremalGenerator.from_homotopy(smooth, params(np.zeros(3), np.zeros(3)))
+    k, p = gen.kernels, gen.params
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        c = int(rng.integers(2))
+        z = gen._construct_anchor(c, 0.0, np.r_[0.0, rng.uniform(-0.5, 0.5, 2), rng.normal(size=3)])
+        assert abs(k.constraint(0.0, z, p)[c]) < 1e-9
+        assert abs(np.atleast_1d(k.constraint_rate(0.0, z, p))[c]) < 1e-9
+        assert abs(k.hamiltonian(0.0, z, p)) < 1e-9
+        assert gen._curvature(c, 0.0, z) < 0
+
+
 def test_the_quasimetric_obeys_the_triangle_inequality_untrained():
     torch = pytest.importorskip("torch")
     from auto_optimal_control import learn

@@ -766,53 +766,81 @@ class ExtremalGenerator:
         else:
             raise Rejected("no anchor", "the state does not reach the limit")
         # 2. The riding control there is the target; it must be inside its bounds. Large
-        # costates push it to them, so the draw is shrunk along its ray until it is not
-        # (step 3 then restores H = 0).
-        for shrink in 10.0 ** -np.arange(0, 10):
+        # costates push it to them, so the draw is shrunk along its ray until it is not,
+        # and until the free control is inside too: where it is saturated it does not
+        # move with the costates, and step 3 could not steer it (step 3 then restores
+        # H = 0).
+        def inside(u, lo, hi):
+            margin = 1e-3 * np.maximum(hi - lo, 1e-12)
+            return np.all(u > lo + margin) and np.all(u < hi - margin)
+
+        for shrink in 10.0 ** -np.arange(0, 10, 0.5):
             zz = np.r_[x, shrink * lam]
             try:
                 target = np.asarray(k.boundary_control(c, t, zz, p), dtype=float)
+                free = np.asarray(k.control(t, zz, p), dtype=float)
             except _FAILURES:
                 continue
             lo, hi = (np.asarray(b, dtype=float) for b in k.control_bounds(t, zz, p))
-            margin = 1e-3 * np.maximum(hi - lo, 1e-12)
-            if np.all(target > lo + margin) and np.all(target < hi - margin):
+            if inside(target, lo, hi) and inside(free, lo, hi):
                 lam = shrink * lam
                 break
         else:
             raise Rejected("no anchor", "riding there needs a control at its bound")
 
         # 3. Costates whose free control is the target, on H = 0.
-        def rows(l):
+        def rows(l, bend=None):
             zl = np.r_[x, l]
             r = np.asarray(k.control(t, zl, p), dtype=float) - target
             if self.free_time:
                 r = np.r_[r, k.hamiltonian(t, zl, p)]
+            if bend is not None:
+                r = np.r_[r, (self._curvature(c, t, zl) - bend) / bend_scale]
             return r
 
-        scale = max(float(np.sqrt(np.mean(lam ** 2))), 1e-6)
-        r = rows(lam)
-        for _ in range(iterations):
-            if np.max(np.abs(r)) < self.tol:
-                break
-            J = np.zeros((len(r), n))
-            for i in range(n):
-                h = 1e-7 * max(scale, abs(lam[i]))
-                lh = lam.copy()
-                lh[i] += h
-                J[:, i] = (rows(lh) - r) / h
-            step = np.linalg.lstsq(J, -r, rcond=None)[0]
-            for _ in range(20):
-                rt = rows(lam + step)
-                if rt @ rt < r @ r:
-                    lam, r = lam + step, rt
+        def solve(lam, bend=None):
+            scale = max(float(np.sqrt(np.mean(lam ** 2))), 1e-6)
+            r = rows(lam, bend)
+            for _ in range(iterations):
+                if np.max(np.abs(r)) < self.tol:
+                    return lam
+                J = np.zeros((len(r), n))
+                for i in range(n):
+                    h = 1e-7 * max(scale, abs(lam[i]))
+                    lh = lam.copy()
+                    lh[i] += h
+                    J[:, i] = (rows(lh, bend) - r) / h
+                step = np.linalg.lstsq(J, -r, rcond=None)[0]
+                for _ in range(20):
+                    rt = rows(lam + step, bend)
+                    if rt @ rt < r @ r:
+                        lam, r = lam + step, rt
+                        break
+                    step = step / 2
+                else:
                     break
-                step = step / 2
-            else:
-                raise Rejected("no anchor", "no costates give that control on H = 0")
-        else:
             raise Rejected("no anchor", "no costates give that control on H = 0")
+
+        bend_scale = 1.0
+        lam = solve(lam)
+        # 4. A peak, not a trough. With g = 0 and dg/dt = 0 the free motion meets the
+        # limit from inside only if d2g/dt2 < 0; at a trough it arrives from outside.
+        # The costates left free by step 3 (all but m + 1 of them) can bend it: the
+        # curvature is mirrored, so the entry keeps its scale.
+        bend = self._curvature(c, t, np.r_[x, lam])
+        if bend >= 0:
+            bend_scale = max(abs(bend), 1e-6)
+            lam = solve(lam, -bend_scale)
         return np.r_[x, lam]
+
+    def _curvature(self, c, t, z):
+        """``d2g/dt2`` of limit ``c`` along the free flow at ``(t, z)``."""
+        k, p = self.kernels, self.params
+        f = np.asarray(k.rhs(t, z, p), dtype=float)
+        h = 1e-6 / max(float(np.linalg.norm(f)), 1e-12) * max(1.0, float(np.linalg.norm(z)))
+        up = np.atleast_1d(k.constraint_rate(t + h, z + h * f, p))[c]
+        down = np.atleast_1d(k.constraint_rate(t - h, z - h * f, p))[c]
+        return float((up - down) / (2 * h))
 
     def anchor(self, c, z, t=None, iterations=200):
         """``z = (x, lam)`` moved (minimum norm) onto the entry conditions of limit ``c``.

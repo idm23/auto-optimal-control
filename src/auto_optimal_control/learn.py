@@ -159,7 +159,7 @@ def train_flow(C, Y, *, epochs=300, batch=256, lr=2e-3, seed=0, verbose=False, *
             loss.backward()
             nn.utils.clip_grad_norm_(flow.parameters(), 10.0)
             opt.step()
-            total += float(loss) * len(idx)
+            total += float(loss.detach()) * len(idx)
         sched.step()
         if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
             print(f"flow epoch {epoch}: nll {total / len(Yt):.3f}")
@@ -249,7 +249,7 @@ def train_jepa(S, Y, E, *, epochs=300, batch=256, lr=1e-3, decay=0.996, reg=1.0,
             nn.utils.clip_grad_norm_(params, 10.0)
             opt.step()
             model.update_ema(decay)
-            total += float(loss) * len(idx)
+            total += float(loss.detach()) * len(idx)
         sched.step()
         if verbose and (epoch % 50 == 0 or epoch == epochs - 1):
             print(f"jepa epoch {epoch}: loss {total / len(Yt):.4f}")
