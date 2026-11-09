@@ -78,7 +78,7 @@ fixed end state that already violates a limit is reported the same way, at once.
 import itertools
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import sympy as sp
@@ -278,6 +278,8 @@ class Homotopy:
         self.active_set_backtracks = 8     # structures the active-set route may back out of
         self.penalty_seconds = 300.0       # time budget of the penalty route
         self.path_options = dict(rtol=rtol, atol=atol)    # along the active-set route
+        self.path_evaluations = 240        # MINPACK evaluations per solve on that route
+        self.path_fallback = 1e-2          # a chord step that ends below this earns MINPACK
         self.bang_bang = bang_bang_controls(problem)
         self.regularized, self.eps_symbol, self.rho_symbols = regularize(problem, self.bang_bang)
         # Limits ridden at run time have no penalty route, and a penalty's tape in every
@@ -1342,8 +1344,21 @@ class Homotopy:
                 if arcs and (shoot._open or shoot._started):
                     sol = shoot.solve_damped(v, tol=tol, max_seconds=60.0)
                 else:
+                    # A good path solution is one or two Newton steps away; MINPACK can
+                    # throw it far off.
                     sol = shoot.solve(v, method=method, tol=tol,
                                       options=_budget(method, 4 * self.attempt_evaluations))
+                    if not sol.success and method == "hybr" and kx.system.riding is not None:
+                        other = shoot.solve_chord(v, tol=tol)
+                        sol = other if other.residual_norm < sol.residual_norm else sol
+                if not sol.success and sol.residual_norm < SEED_ACCEPT * tol:
+                    polished = shoot.solve_damped(sol.v, tol=tol, max_steps=10, max_seconds=30.0)
+                    if polished.residual_norm < sol.residual_norm:
+                        sol = polished
+                    if not sol.success:
+                        sol = replace(sol, success=True)   # stalled at the integrator's rounding
+                if sol.success:
+                    sol = replace(sol, max_violation=shoot._max_violation(sol.v))
                 if self._accept(shoot, sol, tol):
                     return self.objective(shoot, sol.v), shoot, sol
                 self._detail(f"  exact solve: residual {sol.residual_norm:.1e} (max |v| "
@@ -1412,7 +1427,13 @@ class Homotopy:
                 # On an arc that reaches a fixed end on the limit, the terminal row and the
                 # riding say the same thing: rank-deficient, which needs the damped solver.
                 return sh, sh.solve_damped(guess, tol=path_tol, max_steps=40, max_seconds=30.0)
-            options = _budget("hybr", 4 * self.attempt_evaluations)
+            options = _budget("hybr", self.path_evaluations)
+            if self.kr.system.riding is not None:
+                # Limits ridden at run time make every evaluation dear: a cheap attempt
+                # first, and only a step that gets close earns the slower solve.
+                r = sh.solve_chord(guess, tol=path_tol)
+                if r.success or not r.residual_norm < self.path_fallback:
+                    return sh, r
             r = sh.solve(guess, tol=path_tol, options=options)
             if (not r.success and r.residual_norm < 1e-2 and arcs and sh.tangent_junctions):
                 # A control at its bound at a junction jumps there: H continuity, not tangency.

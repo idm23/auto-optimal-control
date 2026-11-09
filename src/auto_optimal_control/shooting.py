@@ -301,6 +301,57 @@ class SingleShooting:
                                 nfev=int(getattr(sol, "nfev", 0)), result=sol,
                                 max_violation=violation)
 
+    def solve_chord(self, guess, tol=1e-10, max_iterations=12, contraction=0.5):
+        """Newton with one Jacobian reused while the residual falls by ``contraction``.
+
+        On a path with a good predictor a step needs one Jacobian and a few
+        residuals, and a hopeless one stops after a fresh Jacobian fails to
+        contract, where a quasi-Newton iteration would use its whole budget.
+        Returns a ``ShootingSolution`` (``max_violation`` is not computed)."""
+        from scipy.linalg import lu_factor, lu_solve
+        v = np.asarray(guess, dtype=float).copy()
+        R, J = self._safe(v)
+        err = float(np.linalg.norm(R))
+        fresh = True
+        nfev = 1
+        lu = None if not np.isfinite(err) else lu_factor(J)
+        for _ in range(max_iterations):
+            if err < tol or lu is None:
+                break
+            dv = lu_solve(lu, -R)
+            if not np.all(np.isfinite(dv)):
+                break
+            Rt = self._safe_residual(v + dv)
+            nfev += 1
+            trial = float(np.linalg.norm(Rt))
+            if np.isfinite(trial) and trial < contraction * err:
+                v, R, err, fresh = v + dv, Rt, trial, False
+                continue
+            if fresh:
+                # Backtrack along the fresh Newton direction before giving up.
+                step, moved = 0.5, False
+                for _ in range(4):
+                    Rt = self._safe_residual(v + step * dv)
+                    nfev += 1
+                    trial = float(np.linalg.norm(Rt))
+                    if np.isfinite(trial) and trial < (1 - 0.25 * step) * err:
+                        v, R, err, moved = v + step * dv, Rt, trial, True
+                        break
+                    step *= 0.5
+                if not moved:
+                    break
+                R, J = self._safe(v)
+                nfev += 1
+                lu = lu_factor(J)
+                continue
+            R, J = self._safe(v)
+            nfev += 1
+            lu, fresh = lu_factor(J), True
+        x0, lam0, nu, tf = self.unpack(v)
+        return ShootingSolution(v=v, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
+                                residual_norm=err, success=err < tol, nfev=nfev, result=None,
+                                max_violation=0.0)
+
     def multistart(self, sample, n_tries=50, seed=0, **solve_options):
         """Solve from random guesses ``sample(rng) -> v`` until one succeeds.
 
