@@ -26,9 +26,10 @@ initial costates (and of ``t_f`` when it is free). Everything else is found:
    - each limit's offset starts just above the unconstrained solution and
      falls to zero in adaptive steps (a secant predictor starts each solve);
    - when a free arc starts to violate a limit, the structure changes
-     there: a newborn touch point (order 2) or short boundary arc (order
-     1) with zero jump; a touch point violated beside it grows into a
-     boundary arc or splits into two; neighbouring arcs of one limit merge;
+     there: a newborn touch point (order 2 or more) or short boundary arc
+     (order 1) with zero jump; a touch point violated beside it grows into a
+     boundary arc or splits into two (order 3 or more: another touch point,
+     since such limits have no arcs with a smooth control law); neighbouring arcs of one limit merge;
      an arc that shrinks to nothing, or a touch point whose jump turns
      negative, is retired;
    - then ``eps`` falls, in decades, with the structure following, and the
@@ -49,7 +50,7 @@ initial costates (and of ``t_f`` when it is free). Everything else is found:
    starts each solve.
 5. **Read the structure and jump** (penalty route). After each step the
    regularized solution is read: the intervals where each limit is violated
-   become boundary arcs (or touch points, for order 2), and stretches where
+   become boundary arcs (or touch points, for order 2 or more), and stretches where
    a bang-bang control stays strictly between its bounds become singular
    arcs (or, when short, the ramps of ordinary switches). Each reading
    gives candidate structures for
@@ -68,7 +69,7 @@ Bang-bang switches need no reading at all: on free arcs they are events of
 the integration. Without bang-bang controls or path constraints the
 regularized problem is the exact one and step 2 is the whole solve.
 
-When no candidate is accepted (a limit of order 3 or more, a structure outside
+When no candidate is accepted (a limit of order 4 or more, a structure outside
 what :class:`MultiArcShooting` represents, a search out of time),
 :func:`solve` returns the last regularized solution with ``exact = False``. A
 fixed end state that already violates a limit is reported the same way, at once.
@@ -84,7 +85,7 @@ import sympy as sp
 
 from auto_optimal_control.build import build_kernels
 from auto_optimal_control.policy import Lexicographic, SecondaryCost, analyze, resolve
-from auto_optimal_control.pontryagin import bang_bang_controls, derive
+from auto_optimal_control.pontryagin import OUTLINE_ABOVE_OPS, bang_bang_controls, derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
 from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting
 
@@ -242,10 +243,13 @@ class Homotopy:
         ``"as_stated"``, ``"strict"`` (raise), or a ``SecondaryCost`` or
         ``Lexicographic``. ``analysis`` holds what was found and
         ``problem`` the problem actually solved.
+    outline_above : int or None
+        Path constraints with more operations than this go on a tape and
+        their arcs are solved at run time (:func:`~auto_optimal_control.pontryagin.derive`).
     """
 
     def __init__(self, problem, *, cache_dir=None, rtol=1e-12, atol=1e-12, verbose=False,
-                 policy="auto"):
+                 policy="auto", outline_above=OUTLINE_ABOVE_OPS):
         self.stated = problem
         self.analysis = analyze(problem)
         self.policy = resolve(policy, self.analysis)
@@ -256,7 +260,8 @@ class Homotopy:
         elif isinstance(self.policy, Lexicographic):
             parts, problem = self.policy.stages(problem, self.analysis)
             self._stages = [(Homotopy(sub, cache_dir=cache_dir, rtol=rtol, atol=atol,
-                                      verbose=verbose, policy="as_stated"), idx)
+                                      verbose=verbose, policy="as_stated",
+                                      outline_above=outline_above), idx)
                             for sub, idx in parts]
         if self.policy is not None and policy == "auto":
             name = self.stated.name or "problem"
@@ -276,8 +281,9 @@ class Homotopy:
         self.regularized, self.eps_symbol, self.rho_symbols = regularize(problem, self.bang_bang)
         # Limits ridden at run time have no penalty route, and a penalty's tape in every
         # kernel takes most of the compile.
-        self.kr = build_kernels(derive(self.regularized, penalties_when_riding=False),
-                                cache_dir=cache_dir)
+        self.outline_above = outline_above
+        self.kr = build_kernels(derive(self.regularized, penalties_when_riding=False,
+                                       outline_above=outline_above), cache_dir=cache_dir)
         if self.kr.system.riding is not None:
             self.active_set_seconds = 300.0     # many arcs, and no penalty route to fall back on
         self.nc = len(problem.path_constraints)
@@ -304,7 +310,8 @@ class Homotopy:
         they are the exact ones)."""
         if self._kx is None:
             if self.bang_bang:
-                self._kx = build_kernels(derive(exact(self.problem), singular=True),
+                self._kx = build_kernels(derive(exact(self.problem), singular=True,
+                                                outline_above=self.outline_above),
                                          cache_dir=self.cache_dir)
             else:
                 self._kx = self.kr
@@ -675,6 +682,8 @@ class Homotopy:
                 kinds = ["boundary"]
                 if kx.CONSTRAINT_ORDERS[c] == 2:
                     kinds = ["touch", "boundary"] if b - a < 0.05 * T else ["boundary", "touch"]
+                elif kx.CONSTRAINT_ORDERS[c] >= 3:
+                    kinds = ["touch"]          # no arcs at order 3 or more
                 options.append([(k, c, a, b) for k in kinds])
         limited = [(a, b) for spans in read["violated"] for a, b in spans]
 
@@ -1076,7 +1085,8 @@ class Homotopy:
         """Structures that bring the violated limits in, most likely first.
 
         A violation away from the limit's arcs becomes a newborn touch point
-        (order 2) or a short boundary arc (order 1), with zero jump. A
+        (order 2; always for order 3 or more, which has no arcs) or a short
+        boundary arc (order 1), with zero jump. A
         violation beside arcs of the same limit widens them into one
         boundary arc that covers it: a boundary arc widens, a touch point
         grows into a boundary arc (its jump kept as the first ``pi``), and
@@ -1098,8 +1108,13 @@ class Homotopy:
         for c, a, b, _ in violations:
             hits = {i for i, (_, cc) in enumerate(arcs)
                     if cc == c and a - near <= span(i)[1] and b + near >= span(i)[0]}
+            q = kr.CONSTRAINT_ORDERS[c]
+            if q >= 3:
+                # Order 3 or more: touch points only (no boundary arcs with a smooth
+                # control law; Jacobson, Lele & Speyer 1971), so each violation is one more.
+                born.append((("touch", c), (0.5 * (a + b), 0.0)))
+                continue
             if not hits:
-                q = kr.CONSTRAINT_ORDERS[c]
                 if q == 2:
                     born.append((("touch", c), (0.5 * (a + b), 0.0)))
                 else:
@@ -1135,7 +1150,7 @@ class Homotopy:
                 out.append((entry, (lo, hi, val[2])))
             return out
 
-        def build(split, newborn=None):
+        def build(split, newborn=None, narrow=False):
             replaced = {}                  # arc index -> what stands in its place
             for idx, spans in groups:
                 lo_i = min(idx)
@@ -1162,6 +1177,12 @@ class Homotopy:
                         pi += np.asarray(values[i][2], dtype=float)
                 lo = min([span(i)[0] for i in idx] + [x for x, _ in spans])
                 hi = max([span(i)[1] for i in idx] + [y for _, y in spans])
+                if narrow and len(idx) == 1 and kind == "touch":
+                    # A touch point becomes a short arc about its time: at order 2 the
+                    # arc born is much shorter than the stretch first violated.
+                    tc = val[0]
+                    w = 0.1 * max(min(tc - lo, hi - tc), 1e-6 * T)
+                    lo, hi = tc - w, tc + w
                 replaced[lo_i] = [(("boundary", c), (lo, hi, pi))]
             out = []
             for i, item in enumerate(zip(arcs, values)):
@@ -1184,11 +1205,12 @@ class Homotopy:
             alternative = build(True)
             if alternative[0] != options[0][0]:
                 options.append(alternative)
+            options.append(build(False, narrow=True))
         return options
 
     def _retire(self, shoot, v):
         """The structure without arcs that have died: a boundary arc shrunk to
-        nothing becomes a touch point (order 2) or goes (order 1), and a touch
+        nothing becomes a touch point (order 2 or more) or goes (order 1), and a touch
         point whose jump has the wrong sign goes. ``None`` if nothing changes."""
         arcs, values = self._arcs_of(shoot, v)
         if not arcs:
@@ -1198,7 +1220,7 @@ class Homotopy:
         for (kind, c), val in zip(arcs, values):
             if kind == "boundary" and val[1] - val[0] < 1e-6 * T:
                 changed = True
-                if self.kr.CONSTRAINT_ORDERS[c] == 2:
+                if self.kr.CONSTRAINT_ORDERS[c] >= 2:
                     out_a.append(("touch", c))
                     out_v.append((0.5 * (val[0] + val[1]), float(val[2][0])))
                 continue
@@ -1243,7 +1265,12 @@ class Homotopy:
             d = shoot.diagnostics(sol.v)
         except _FAILURES as exc:
             return f"diagnostics failed: {exc}"
-        return (f"touch nu {np.round(d['touch_nu'], 6).tolist()}, mu ranges "
+        names = shoot.kernels.CONSTRAINT_NAMES
+        violated = {names[c]: round(float(g), 6) for c, g in enumerate(d["free_arc_violation"])
+                    if g > 1e-8}
+        return (f"violated off their arcs {violated}, controls past their bounds on arcs "
+                f"{np.round(d['boundary_bound_violation'], 6).tolist()}, touch nu "
+                f"{np.round(d['touch_nu'], 6).tolist()}, mu ranges "
                 f"{[(round(a, 6), round(b, 6)) for a, b in d['boundary_mu']]}")
 
     def _active_set(self, sol, eps0, s_max, steps, tol, max_solves=400):
@@ -1255,7 +1282,10 @@ class Homotopy:
         deadline = time.perf_counter() + self.active_set_seconds
         shoot = self._smoothed([], eps0, np.zeros(self.nc))
         (_, g, _), = self._free_samples(shoot, sol.v)
-        scale = np.maximum(g.max(axis=0) - g.min(axis=0), 1e-12)
+        # Violations are measured against how much each limit's g moves along the
+        # unconstrained solution, or, when it hardly moves there (a joint the motion
+        # barely uses), how far that solution is from the limit.
+        scale = np.maximum(np.maximum(g.max(axis=0) - g.min(axis=0), np.abs(g.max(axis=0))), 1e-12)
         off0 = np.maximum(g.max(axis=0), 0.0) + 1e-3 * scale
         state = {"shoot": shoot, "v": sol.v, "le": np.log10(eps0) if self.bang_bang else 0.0,
                  "off": off0.copy(), "solves": 0}
@@ -1279,13 +1309,20 @@ class Homotopy:
             """Bring in violated limits and retire dead arcs until the solution at
             (le, off) is consistent; ``(shoot, sol)`` or None."""
             last = None
+            changed = False
             for _ in range(2 * self.nc + 4):
                 viol = self._free_violations(sh, r.v, scale)
                 if viol:
                     worst = max(peak / scale[c] for c, _, _, peak in viol)
-                    if worst > 1e-3:
-                        self._detail("    violation too large: a shorter step")
+                    if worst > 1e-3 and not changed:
+                        self._detail("    violation too large: a shorter step ("
+                                     + ", ".join(f"{self.kr.CONSTRAINT_NAMES[c]} {peak / scale[c]:.1e}"
+                                                 f" at [{a:.5f}, {b:.5f}]"
+                                                 for c, a, b, peak in viol) + ")")
                         return None        # too far in: take a shorter step
+                    # After a structure change a large violation is that change's doing
+                    # (new arcs move the motion), which no shorter step undoes: it is
+                    # brought in as it is.
                     if last is not None and last[0] == self._arcs_of(sh, r.v)[0] \
                             and worst < 1e-4 and worst > 0.5 * last[1]:
                         # The same structure again, and the violation did not
@@ -1313,6 +1350,7 @@ class Homotopy:
                 else:
                     return None
                 sh, r = nsh, nr
+                changed = True
                 self._say(f"  structure: {self._names(arcs)}")
             return None
 

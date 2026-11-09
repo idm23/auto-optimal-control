@@ -363,16 +363,18 @@ class MultiArcShooting(SingleShooting):
     them and at both ends. Each entry is one of:
 
     - ``("boundary", c)``: the extremal rides path constraint ``c`` (``g = 0``),
-      for a constraint of order 1 or 2. Unknowns: the entry and exit times
+      for a constraint of order 1 to 3. Unknowns: the entry and exit times
       and the jump multipliers ``pi`` (one per order). Conditions:
       ``N = (g, ..., g^(q-1)) = 0`` at the entry, and ``H`` continuous at both
       junctions. The costates jump by ``-dN/dx^T pi`` at the entry and are
       continuous at the exit (indirect adjoining, Bryson, Denham & Dreyfus
       1963; Maurer 1977).
-    - ``("touch", c)``: an isolated contact with an order-2 constraint.
-      Unknowns: the contact time and the jump ``nu`` (``lambda+ = lambda- -
-      nu dg/dx``). Conditions: ``g = g' = 0`` there. ``nu >= 0`` is
-      necessary for optimality; see :meth:`diagnostics`.
+    - ``("touch", c)``: an isolated contact with a constraint of order 2
+      or more. Unknowns: the contact time and the jump ``nu`` (``lambda+ =
+      lambda- - nu dg/dx``). Conditions: ``g = g' = 0`` there. ``nu >= 0`` is
+      necessary for optimality; see :meth:`diagnostics`. With a smooth
+      control law an odd-order constraint of order 3 or more has no boundary
+      arcs, only touch points (Jacobson, Lele & Speyer 1971).
     - ``("singular", u, before, after)``: switching function ``S`` of the
       bang-bang control ``u`` vanishes on an interval, an order-1 singular
       arc (kernels from ``derive(problem, singular=True)``). ``before`` and
@@ -491,8 +493,8 @@ class MultiArcShooting(SingleShooting):
                     why = k.system.path_constraints[c].unsupported
                     raise ValueError(f"path constraint {k.CONSTRAINT_NAMES[c]!r}: {why}")
                 q = k.CONSTRAINT_ORDERS[c]
-                if kind == "touch" and q != 2:
-                    raise ValueError("touch points are supported for order-2 constraints")
+                if kind == "touch" and q < 2:
+                    raise ValueError("touch points are for constraints of order 2 or more")
                 if kind == "boundary":
                     self.events += [("in", len(self.arcs)), ("out", len(self.arcs))]
                 else:

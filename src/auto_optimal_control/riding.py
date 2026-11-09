@@ -1,10 +1,11 @@
-"""One kernel for every set of order-1 limits ridden at once, solved at run time.
+"""One kernel for every set of limits ridden at once, solved at run time.
 
 Generating an arc's kernels symbolically needs its controls and multipliers in
 closed form, once per set of limits. A six-joint arm has 728 sets, each with
 the inverse of a matrix of mass-matrix entries in it. But the equations are
 linear in the controls and multipliers, so C can solve them where they are
-needed. For limits ``g_i^(1) = A_i(x) u + b_i(x)`` and a Hamiltonian
+needed. For limits of order ``q_i``, ``g_i^(q_i) = A_i(x) u + b_i(x)`` (a torque
+limit with jerk control has order 1, a rate limit 2, a position limit 3), and a Hamiltonian
 quadratic in ``u`` with ``d2H/du2 = R``::
 
     [ R  A^T ] [ u  ]     [ -dH/du at u = 0 ]
@@ -23,7 +24,7 @@ Everything about the limits comes from :class:`~auto_optimal_control.tape.Tape`
 steps of their state parts, the *roots* (``tau`` for both ``tau - tau_max`` and
 ``-tau - tau_max``): the rate along the dynamics in one forward pass, its
 gradient in one reverse pass, and the second derivatives of
-``sum_k mu_k h_k^(1)``, one scalar however many limits are active.
+``sum_k mu_k h_k^(q_k)``, one scalar however many limits are active.
 """
 
 import sympy as sp
@@ -107,14 +108,21 @@ def riding_kernels(pmp, P, make_function, mapping):
     un = [s.name for s in u]
     seeds = {s.name: tape.from_sympy(e) for s, e in zip(x, f)}
     seeds0 = {s.name: tape.from_sympy(e.subs(at0)) for s, e in zip(x, f)}
-    rates = [tape.directional(r, seeds) for r in system.roots]
-    b = [tape.directional(r, seeds0) for r in system.roots]
+    # A root of order q is ridden through g^(q): its first q - 1 derivatives are free
+    # of the controls (taken at u = 0, which is the same), the q-th is affine in them.
+    lowered = []
+    for r, q in zip(system.roots, system.orders or (1,) * nr):
+        for _ in range(q - 1):
+            r = tape.directional(r, seeds0)
+        lowered.append(r)
+    rates = [tape.directional(r, seeds) for r in lowered]
+    b = [tape.directional(r, seeds0) for r in lowered]
     A = []
     for a in u:
         slope = {s.name: tape.from_sympy(sp.diff(e, a)) for s, e in zip(x, f)}
-        A.append([tape.directional(r, slope) for r in system.roots])
+        A.append([tape.directional(r, slope) for r in lowered])
 
-    # sum_k mu_k h_k^(1): one scalar, so its gradient is one reverse pass.
+    # sum_k mu_k h_k^(q_k): one scalar, so its gradient is one reverse pass.
     total = tape.zero
     for k, rate in enumerate(rates):
         total = tape.add(total, tape.mul(tape.input(f"mu_root_{k}"), rate))

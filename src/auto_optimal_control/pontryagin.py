@@ -194,18 +194,21 @@ class BoundaryConditions:
 
 @dataclass(frozen=True)
 class RidingSystem:
-    """Boundary arcs of large order-1 limits, solved at run time (:mod:`~auto_optimal_control.riding`).
+    """Boundary arcs of large limits, solved at run time (:mod:`~auto_optimal_control.riding`).
 
     Each limit is ``sign_of[c] * root + (terms free of the states)``, with
     ``roots[root_of[c]]`` a step of ``tape``: both limits on one torque share
-    its root. The set of limits ridden is chosen when the kernels are called,
-    so there is one kernel for all of them.
+    its root. A root of order ``q`` (``orders``) is ridden through its
+    ``q``-th derivative, the first that involves the controls. The set of
+    limits ridden is chosen when the kernels are called, so there is one
+    kernel for all of them.
     """
 
     tape: Tape
     roots: tuple
     root_of: tuple
     sign_of: tuple
+    orders: tuple = ()             # per root: the order of its limits (1 when empty)
 
 
 class _RiddenAtRunTime:
@@ -506,8 +509,8 @@ def _boundary_arc(problem, H, costates, derivatives):
     """The :class:`BoundaryArc` of a constraint with ``g^(q) = derivatives[-1]``,
     or ``(None, reason)``."""
     order = len(derivatives) - 1
-    if order > 2:
-        return None, f"order {order}: exact arcs are supported for orders 1 and 2"
+    if order > 3:
+        return None, f"order {order}: exact arcs are supported for orders 1 to 3"
     if any(isinstance(cs, UnitVector) for cs in problem.control_sets):
         return None, "unit-vector control sets are not supported with exact arcs"
     if any(problem.time in e.free_symbols for e in derivatives[:order]):
@@ -743,8 +746,8 @@ def _rides_at_run_time(problem, derivatives_of):
     if any((cs.lower.free_symbols | cs.upper.free_symbols) & z_free_bounds
            for cs in problem.control_sets):
         return "limits this large need control bounds free of the states and time"
-    if any(len(d) != 2 for d in derivatives_of):
-        return "limits this large are supported at order 1"
+    if any(not 2 <= len(d) <= 4 for d in derivatives_of):
+        return "limits this large are supported at orders 1 to 3"
     t, u = problem.time, problem.controls
     z_free = {problem.time, *problem.states}
     H_like = [problem.running_cost, *problem.dynamics]
@@ -760,17 +763,32 @@ def _rides_at_run_time(problem, derivatives_of):
     return ""
 
 
-def _sets_at_run_time(root_of, n_controls, simultaneous):
-    """Each set of up to ``simultaneous`` limits, at most one per root and per control."""
+# Sets of limits ridden at once, solved at run time, beyond which a larger set size is
+# not derived by default (the table of sets goes into the compiled module).
+MAX_RUN_TIME_SETS = 4096
+
+
+def _sets_at_run_time(root_of, n_controls, simultaneous, orders=()):
+    """Each set of up to ``simultaneous`` limits, at most one per root and per control.
+
+    Limits of order 3 or more are left out: they are only touched, never ridden.
+    ``simultaneous=None`` takes sets as large as the controls allow, but stops
+    before the size whose sets would take the count past :data:`MAX_RUN_TIME_SETS`
+    (with rate and torque limits on six joints, sets of three)."""
     by_root = {}
     for c, k in enumerate(root_of):
+        if orders and orders[k] >= 3:
+            continue
         by_root.setdefault(k, []).append(c)
-    largest = min(simultaneous, n_controls, len(by_root))
+    largest = min(n_controls if simultaneous is None else simultaneous, n_controls, len(by_root))
     out = []
     for size in range(2, largest + 1):
-        for chosen in itertools.combinations(sorted(by_root), size):
-            for limits in itertools.product(*[by_root[k] for k in chosen]):
-                out.append((tuple(sorted(limits)), None))
+        these = [(tuple(sorted(limits)), None)
+                 for chosen in itertools.combinations(sorted(by_root), size)
+                 for limits in itertools.product(*[by_root[k] for k in chosen])]
+        if simultaneous is None and len(out) + len(these) > MAX_RUN_TIME_SETS:
+            break
+        out += these
     return tuple(out)
 
 
@@ -781,10 +799,10 @@ def _state_constraints(problem, H=None, costates=(), outlined=None):
     why_not = _rides_at_run_time(problem, derivatives_of) if outlined is not None else ""
     for c, expr, derivatives in zip(problem.path_constraints, exprs, derivatives_of):
         order = len(derivatives) - 1
-        if order >= 3:
+        if order >= 4:
             warnings.warn(
                 f"path constraint {c.name!r} has order {order}. Optimal solutions that ride a "
-                "constraint of order 3 or more generally chatter (infinitely many touch points), "
+                "constraint of order 4 or more can chatter (infinitely many touch points), "
                 "so only its penalty and termination are meaningful", stacklevel=3)
         if outlined is not None:
             arc, why = (None, why_not) if why_not else (_RiddenAtRunTime(), "")
@@ -856,8 +874,9 @@ def derive(problem, singular=False, simultaneous=None, outline_above=OUTLINE_ABO
     control (:class:`SingularArc`), for exact shooting over structures with
     singular arcs. ``simultaneous`` is the largest number of path
     constraints an exact arc may ride at once (:attr:`PontryaginSystem.boundary_sets`);
-    1 derives single limits only; by default it is 2, or every set when
-    the arcs are solved at run time. A path constraint with more than
+    1 derives single limits only; by default it is 2, or, when the arcs are
+    solved at run time, as many as the controls allow while the sets number at
+    most :data:`MAX_RUN_TIME_SETS`. A path constraint with more than
     ``outline_above`` operations written out goes on a tape
     (:mod:`~auto_optimal_control.tape`), and its arcs, when they qualify, are
     solved at run time (:mod:`~auto_optimal_control.riding`); ``None`` keeps
@@ -900,9 +919,12 @@ def derive(problem, singular=False, simultaneous=None, outline_above=OUTLINE_ABO
                                                for c in constraints)
     riding = None
     if at_run_time:
-        riding = RidingSystem(*outlined[1:])
-        sets = _sets_at_run_time(riding.root_of, len(problem.controls),
-                                 len(problem.controls) if simultaneous is None else simultaneous)
+        orders = [1] * len(outlined[2])
+        for c, k in enumerate(outlined[3]):
+            orders[k] = constraints[c].order
+        riding = RidingSystem(*outlined[1:], orders=tuple(orders))
+        sets = _sets_at_run_time(riding.root_of, len(problem.controls), simultaneous,
+                                 riding.orders)
     elif outlined is not None:
         sets = ()
     else:

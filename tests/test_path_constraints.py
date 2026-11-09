@@ -60,7 +60,8 @@ def test_order_is_the_number_of_derivatives_until_a_control_appears():
     prob = jerk_chain(lambda p, v, a: a - 1, lambda p, v, a: v - 2, lambda p, v, a: p - 3)
     orders = [len(constraint_derivatives(prob, c.expr)) - 1 for c in prob.path_constraints]
     assert orders == [1, 2, 3]
-    with pytest.warns(UserWarning, match="order 3"):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")          # order 3 is supported now: no warning
         pmp = derive(prob)
     assert [c.order for c in pmp.path_constraints] == [1, 2, 3]
     assert [c.name for c in pmp.path_constraints] == ["g0", "g1", "g2"]

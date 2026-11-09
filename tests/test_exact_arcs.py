@@ -143,14 +143,23 @@ def test_saturation_guards(compiled):
 
 
 def test_unsupported_constraints_say_why():
-    t, p, v, a, j = sp.symbols("t p v a j", real=True)
+    t, p, v, a, j, s = sp.symbols("t p v a j s", real=True)
+    # A position limit with jerk control has order 3: supported (touched, not ridden).
     prob = OptimalControlProblem(
         name="jerk", time=t, states=[p, v, a], controls=[j], dynamics=[v, a, j],
         running_cost=j ** 2 / 2, initial_state=[0, 0, 0], final_state={p: 1, v: 0, a: 0},
         final_time=5, path_constraints=[PathConstraint(p - 3, "p_max")])
-    with pytest.warns(UserWarning):
+    sc = derive(prob).path_constraints[0]
+    assert sc.order == 3 and sc.boundary is not None
+    # With snap control it has order 4: not supported, and it says so.
+    prob = OptimalControlProblem(
+        name="snap", time=t, states=[p, v, a, j], controls=[s], dynamics=[v, a, j, s],
+        running_cost=s ** 2 / 2, initial_state=[0, 0, 0, 0],
+        final_state={p: 1, v: 0, a: 0, j: 0}, final_time=5,
+        path_constraints=[PathConstraint(p - 3, "p_max")])
+    with pytest.warns(UserWarning, match="order 4"):
         sc = derive(prob).path_constraints[0]
-    assert sc.boundary is None and "order 3" in sc.unsupported
+    assert sc.boundary is None and "order 4" in sc.unsupported
     ux, uy = sp.symbols("u_x u_y", real=True)
     x, y = sp.symbols("x y", real=True)
     prob = OptimalControlProblem(
