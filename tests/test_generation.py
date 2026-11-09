@@ -152,6 +152,24 @@ def test_rest_to_rest_from_the_embedding_matches_the_s_curve(bang, bang_set, D):
     assert abs(res.tf - tf) < 1e-8
 
 
+def test_the_structure_at_a_query_is_voted_by_its_neighbours(bang_set):
+    _, samples = bang_set
+    data = ExtremalSet.from_extremals(samples)
+    held, rest = data.extremal(0), ExtremalSet.from_extremals(samples[1:])
+    index = EndpointIndex(rest, invariant=[0])
+    ranked = index.structures(held.x0, held.xf)
+    assert abs(sum(p for _, p in ranked) - 1.0) < 1e-12
+    assert all(a[1] >= b[1] for a, b in zip(ranked, ranked[1:]))
+    hits = 0
+    for i in range(1, 41):                     # leave one out over 40 samples
+        e = data.extremal(i)
+        others = ExtremalSet.from_extremals(samples[:i] + samples[i + 1:])
+        hits += EndpointIndex(others, invariant=[0]).structures(e.x0, e.xf)[0][0] == tuple(e.arcs)
+    assert hits >= 28
+    arcs = ranked[0][0]
+    assert all(tuple(rest.arcs[j]) == arcs for j in index.nearest_with(held.x0, held.xf, arcs, k=3))
+
+
 def test_a_set_of_extremals_saves_and_loads(bang_set, tmp_path):
     _, samples = bang_set
     data = ExtremalSet.from_extremals(samples)

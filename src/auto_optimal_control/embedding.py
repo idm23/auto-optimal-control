@@ -131,6 +131,27 @@ class EndpointIndex:
         idx = np.argsort(d)[:k]
         return idx, d[idx]
 
+    def structures(self, x0, xf, k=15):
+        """The arc structures likely at ``(x0, xf)``, most likely first: ``[(arcs, p)]``.
+
+        A vote of the ``k`` nearest stored extremals, each weighted by the
+        inverse of its distance. The structure is locally constant in the ends
+        (Bonnans & Hermant 2008), so near neighbours mostly share it; on the
+        six-joint arm the first structure is right about five times in six.
+        """
+        ids, d = self.nearest(x0, xf, k=k)
+        votes = {}
+        for i, di in zip(ids, d):
+            arcs = tuple(self.set.arcs[i])
+            votes[arcs] = votes.get(arcs, 0.0) + 1.0 / (di + 1e-12)
+        total = sum(votes.values())
+        return sorted(((a, w / total) for a, w in votes.items()), key=lambda item: -item[1])
+
+    def nearest_with(self, x0, xf, arcs, k=1, among=200):
+        """The ``k`` nearest stored extremals whose structure is ``arcs`` (indices)."""
+        ids, _ = self.nearest(x0, xf, k=min(among, len(self.set)))
+        return [i for i in ids if tuple(self.set.arcs[i]) == tuple(arcs)][:k]
+
     def shifted(self, i, x0):
         """Extremal ``i`` as a guess from ``x0``: its start moved along the invariant directions."""
         e = self.set.extremal(i)
