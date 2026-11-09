@@ -40,6 +40,7 @@ a smoothed problem, given the structure.
 
 from dataclasses import dataclass
 
+import time
 import numpy as np
 
 
@@ -450,9 +451,12 @@ class MultiArcShooting(SingleShooting):
     _SIZES = {"touch": 2, "singular": 2, "singular_joined": 1, "switch": 1}
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
-                 atol=1e-12, max_nfev=200000, junctions="auto", open_end=False):
+                 atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1):
         super().__init__(kernels, params, x0=x0, method=method, rtol=rtol, atol=atol,
                          n_interior=0)
+        self.nodes = int(nodes)
+        if self.nodes < 1:
+            raise ValueError("nodes must be at least 1")
         if junctions not in ("auto", "hamiltonian"):
             raise ValueError("junctions must be 'auto' or 'hamiltonian'")
         self.junctions = junctions
@@ -571,7 +575,15 @@ class MultiArcShooting(SingleShooting):
             size = (1 if i in self._open else 2) + q if kind == "boundary" else self._SIZES[kind]
             self._arc_slices.append(slice(off, off + size))
             off += size
+        self.n_arcs_end = off
+        if self.nodes > 1 and self._legacy:
+            raise ValueError("nodes > 1 needs a structure of enter, exit and touch entries")
+        # Multiple shooting: each stretch between events is cut into `nodes` pieces at
+        # fixed fractions of it, so a node moves with the events and cannot cross one.
+        self.n_nodes = (self.nodes - 1) * (len(self.events) + 1)
+        off += self.n_nodes * 2 * k.N_STATES
         self.n_unknowns = off
+        self._filling = None             # a list while with_nodes reads a forward sweep
         self.options = dict(method=method, rtol=rtol, atol=atol)
         self.max_nfev = int(max_nfev)
 
@@ -619,6 +631,29 @@ class MultiArcShooting(SingleShooting):
             else:
                 parts.append(np.asarray(val, dtype=float).reshape(self._SIZES[kind]))
         return np.concatenate(parts)
+
+    def with_nodes(self, v, z_nodes=None):
+        """``v`` (from :meth:`pack_arcs`, or with nodes already) with the node unknowns set.
+
+        ``z_nodes`` is ``(n_nodes, 2 n)``, in time order; by default each node
+        takes the value a forward sweep from ``v`` reaches there."""
+        v = np.asarray(v, dtype=float).reshape(-1)[:self.n_arcs_end]
+        full = np.concatenate([v, np.zeros(self.n_nodes * 2 * self.kernels.N_STATES)])
+        if not self.n_nodes:
+            return full
+        if z_nodes is None:
+            self._filling = []
+            try:
+                self._evaluate_events(full, False)
+                z_nodes = np.array(self._filling)
+            finally:
+                self._filling = None
+        full[self.n_arcs_end:] = np.asarray(z_nodes, dtype=float).reshape(-1)
+        return full
+
+    def nodes_of(self, v):
+        """The node values ``(n_nodes, 2 n)`` in ``v``."""
+        return np.asarray(v, dtype=float)[self.n_arcs_end:].reshape(self.n_nodes, -1)
 
     def unpack_arcs(self, v):
         """Per arc, ``(t_in, t_out, pi)``, ``(t_c, nu)``, ``(t_in, t_out)``, or
@@ -807,6 +842,38 @@ class MultiArcShooting(SingleShooting):
         z, D, t, dt = z0, D0, self.t0, np.zeros(N)
         flags = dict(self.frozen)
         active = set()
+        node_index = [0]
+
+        def stretch(seg, aid, t, dt, z, D, t_end, d_end):
+            """From ``(t, z)`` to ``t_end``, through the stretch's nodes."""
+            ta, dta = t, dt
+            for j in range(1, self.nodes):
+                frac = j / self.nodes
+                t_j, d_j = ta + frac * (t_end - ta), (1 - frac) * dta + frac * d_end
+                r, D = self._segment(seg, aid, t, dt, z, D, t_j, d_j, jac, record, flags)
+                segments.append((seg, aid, t, t_j, z, dict(flags) if aid is None else None, r))
+                start = self.n_arcs_end + 2 * n * node_index[0]
+                node_index[0] += 1
+                if self._filling is not None:
+                    self._filling.append(r["z"].copy())
+                    z = r["z"]
+                else:
+                    z_next = v[start:start + 2 * n]
+                    rows.extend(r["z"] - z_next)
+                    if jac:
+                        G = D.copy()
+                        G[np.arange(2 * n), start + np.arange(2 * n)] -= 1.0
+                        grads.extend(G)
+                        D = np.zeros((2 * n, N))
+                        D[np.arange(2 * n), start + np.arange(2 * n)] = 1.0
+                    else:
+                        grads.extend([None] * (2 * n))
+                    z = z_next.copy()
+                t, dt = t_j, d_j
+            r, D = self._segment(seg, aid, t, dt, z, D, t_end, d_end, jac, record, flags)
+            segments.append((seg, aid, t, t_end, z, dict(flags) if aid is None else None, r))
+            return r, D
+
         for ev, i in self.events:
             kind, c, q = self.arcs[i]
             sl = self._arc_slices[i]
@@ -817,8 +884,7 @@ class MultiArcShooting(SingleShooting):
                 t_ev, d_ev = w[0], unit(sl.start)
             aid = self._arc_id(active)
             seg = None if aid is None else "boundary"
-            r, D = self._segment(seg, aid, t, dt, z, D, t_ev, d_ev, jac, record, flags)
-            segments.append((seg, aid, t, t_ev, z, dict(flags) if aid is None else None, r))
+            r, D = stretch(seg, aid, t, dt, z, D, t_ev, d_ev)
             z = r["z"]
             t, dt = t_ev, d_ev
             if ev == "out":
@@ -876,8 +942,7 @@ class MultiArcShooting(SingleShooting):
         # The last segment: free, or the limits still ridden at t_f (open_end).
         aid = self._arc_id(active)
         seg = None if aid is None else "boundary"
-        r, D = self._segment(seg, aid, t, dt, z, D, tf, d_tf, jac, record, flags)
-        segments.append((seg, aid, t, tf, z, dict(flags) if aid is None else None, r))
+        r, D = stretch(seg, aid, t, dt, z, D, tf, d_tf)
         zf = r["z"]
         base_rows = k.residual(z0, zf, nu, tf, p)[self._rows]
         fix = None
@@ -1032,6 +1097,59 @@ class MultiArcShooting(SingleShooting):
     def guess_multipliers(self, *args, **kwargs):
         raise NotImplementedError("use MultiArcShooting.from_penalty or from_smoothed for a "
                                   "starting point")
+
+    def solve_damped(self, guess, tol=1e-10, max_steps=80, max_seconds=np.inf):
+        """Levenberg-Marquardt with the exact Jacobian and scaled columns: for node problems.
+
+        A step counts only if it lowers ``||R||``; a step that fails to propagate
+        or puts events out of order raises the damping instead. With hundreds of
+        unknowns this is what keeps a guess with large defects from diverging,
+        where ``"hybr"``'s Broyden updates do not. Returns a ``ShootingSolution``."""
+        v = np.asarray(guess, dtype=float).copy()
+        failures = (ShootingError, RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError)
+        damping, steps = 1e-6, 0
+        try:
+            R, J = self.residual_jacobian(v)
+            err = float(np.linalg.norm(R))
+        except failures:
+            R, J, err, max_steps = None, None, float("inf"), 0
+        if not np.isfinite(err):
+            max_steps = 0
+        deadline = time.perf_counter() + max_seconds
+        for steps in range(max_steps):
+            if err < tol or time.perf_counter() > deadline:
+                break
+            scale = np.maximum(np.linalg.norm(J, axis=0), 1e-12)
+            A = J / scale
+            moved = False
+            for _ in range(24):
+                aug = np.vstack([A, np.sqrt(damping) * np.eye(A.shape[1])])
+                dv = np.linalg.lstsq(aug, np.concatenate([-R, np.zeros(A.shape[1])]), rcond=None)[0] / scale
+                try:
+                    Rt = self.residual(v + dv)
+                    trial = float(np.linalg.norm(Rt))
+                except failures:
+                    damping *= 10
+                    continue
+                if np.isfinite(trial) and trial < err:
+                    v, moved = v + dv, True
+                    damping = max(damping / 10, 1e-14)
+                    break
+                damping *= 10
+            if not moved:
+                break
+            R, J = self.residual_jacobian(v)
+            err = float(np.linalg.norm(R))
+        x0, lam0, nu, tf = self.unpack(v)
+        violation = 0.0
+        if err < tol:
+            try:
+                violation = self._max_violation(v)
+            except failures:
+                err = violation = float("inf")
+        return ShootingSolution(v=v, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
+                                residual_norm=err, success=err < tol, nfev=steps, result=None,
+                                max_violation=violation)
 
     def solve(self, guess, method=None, tol=1e-10, options=None):
         """As :meth:`SingleShooting.solve`. ``method`` defaults to ``"hybr"``,

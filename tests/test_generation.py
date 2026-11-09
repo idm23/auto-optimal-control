@@ -261,6 +261,59 @@ def test_an_integration_past_its_evaluation_budget_rejects_the_draw(smooth):
             gen.generate_anchored(0, z, 1.0, 2.0, rng=rng)
 
 
+def test_multiple_shooting_has_an_exact_jacobian_and_the_same_answer(smooth):
+    gen, samples = generate(smooth, 40, seed=1)
+    e = max((s for s in samples if s.arcs and s.arcs[-1][0] == "exit"),
+            key=lambda s: min(b - a for a, b, _ in s.values))
+    pol = Polisher(smooth, params)
+    pol.nodes, pol.continuation = 3, False
+    shoot = pol._shooting(e.x0, e.xf, e.arcs)
+    v = pol.carried(shoot, e, e.x0, e.xf)
+    assert shoot.n_nodes == 2 * (len(e.arcs) + 1) and len(v) == shoot.n_unknowns
+    assert np.max(np.abs(shoot.residual(v))) < 1e-7        # nodes on the trajectory: no defects
+    w = v + 1e-6 * np.random.default_rng(0).normal(size=len(v)) * np.abs(v).clip(1e-3)
+    R, J = shoot.residual_jacobian(w)
+    FD = np.zeros_like(J)
+    for i in range(len(w)):
+        h = 1e-6 * max(1.0, abs(w[i]))
+        a, b = w.copy(), w.copy()
+        a[i] += h
+        b[i] -= h
+        FD[:, i] = (shoot.residual(a) - shoot.residual(b)) / (2 * h)
+    assert np.allclose(J, FD, rtol=1e-3, atol=2e-4)
+    out, msg = pol._attempt(e.x0, e.xf, e, 1)
+    assert out is not None, msg
+    assert abs(out.tf - e.tf) < 1e-8
+
+
+def test_an_answer_can_join_the_set_it_came_from(bang, bang_set):
+    _, samples = bang_set
+    e = next(s for s in samples if s.arcs and s.arcs[-1][0] == "exit")
+    pol = Polisher(bang, params)
+    res = pol.solve(e.x0, e.xf, [e])
+    data = ExtremalSet.from_extremals(samples)
+    grown = data + pol.extremal_of(res, e.x0, e.xf)
+    assert len(grown) == len(data) + 1 and grown.arcs[-1] == tuple(e.arcs)
+    assert abs(grown.tf[-1] - e.tf) < 1e-8
+
+
+def test_an_anchored_extremal_can_be_made_to_start_at_rest(smooth):
+    gen = ExtremalGenerator.from_homotopy(smooth, params(np.zeros(3), np.zeros(3)))
+    rng = np.random.default_rng(3)
+    kept = []
+    for _ in range(40):
+        z = np.r_[0.0, rng.uniform(-0.5, 0.5, 2), rng.normal(size=3)]
+        T = rng.uniform(1, 5)
+        try:
+            kept.append(gen.generate_anchored(int(rng.integers(2)), z, 0.4 * T, 0.6 * T, rng=rng,
+                                              start={1: 0.0, 2: 0.0}))
+        except Rejected:
+            pass
+    assert kept
+    assert_valid(kept)
+    assert max(np.abs(e.x0[1:]).max() for e in kept) < 1e-8
+
+
 def test_the_quasimetric_obeys_the_triangle_inequality_untrained():
     torch = pytest.importorskip("torch")
     from auto_optimal_control import learn

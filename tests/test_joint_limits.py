@@ -64,6 +64,15 @@ def test_an_arm_rides_its_rate_limit(arm):
     assert r.solution.tf > 4.164857446
 
 
+def test_an_overlap_needing_too_much_jerk_is_shortened(arm):
+    # At 90% of the shoulder's peak rate the route reaches a stretch riding both torques
+    # that needs jerk 1.51 against a bound of 1: the overlap must give way.
+    w_max = 0.9 * 0.6979
+    r, z = solve(arm, ARM, [w_max, 100.0], LOOSE_ANGLES)
+    assert abs(r.solution.tf - 4.192579166) < 1e-6
+    assert abs(np.abs(z[:, 2]).max() - w_max) < 1e-8
+
+
 def test_an_arm_touches_its_angle_limit(arm):
     # Rest to rest with the elbow back at 0: it swings out to +-0.049 on the way.
     base = ARM[:5] + [0.0] + ARM[6:]

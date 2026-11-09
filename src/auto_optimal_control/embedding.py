@@ -200,28 +200,67 @@ class Polisher:
         # query's, halving the step at most this many times.
         self.continuation = True
         self.max_halvings = 64
+        # Pieces per stretch between events (multiple shooting); with more than one, a
+        # stored extremal's own trajectory is the starting guess at its nodes.
+        self.nodes = 1
+        self.solve_seconds = 60.0        # per damped solve, when nodes > 1
 
     def _shooting(self, x0, xf, arcs):
         h = self.h
         h.params = np.asarray(self.params_of(x0, xf), dtype=float)
         kx, px = h.exact_kernels, h.exact_params()
-        shoot = MultiArcShooting(kx, px, arcs, x0=x0, open_end=True, **h.options)
+        shoot = MultiArcShooting(kx, px, arcs, x0=x0, open_end=True, nodes=self.nodes, **h.options)
         if not kx.N_SWITCHING:
             shoot.tangent_junctions = True
         shoot.max_nfev = h.attempt_nfev
         return shoot
 
     def guess(self, shoot, e):
+        """``v`` from extremal ``e``, integrated forward through any nodes."""
+        return shoot.with_nodes(self._base_guess(shoot, e))
+
+    def _base_guess(self, shoot, e):
         """``v`` from extremal ``e``, with the terminal multipliers fitted (they enter linearly)."""
         k = shoot.kernels
         base = shoot.pack(e.lam0, None, e.tf if k.FREE_FINAL_TIME else None)
         q = {i: shoot.arcs[i][2] for i in range(len(shoot.arcs))}
         v = shoot.pack_arcs(base, [(a, b, [p] * q[i]) for i, (a, b, p) in enumerate(e.values)])
         if k.N_MULTIPLIERS:
-            R, J = shoot.residual_jacobian(v)
+            R, J = shoot.residual_jacobian(shoot.with_nodes(v))
             cols = slice(shoot.n_free + k.N_STATES, shoot.n_free + k.N_STATES + k.N_MULTIPLIERS)
             v[cols] += np.linalg.lstsq(J[:, cols], -R, rcond=None)[0]
         return v
+
+    def carried(self, shoot, e, x0, xf):
+        """``v`` for a query's ``shoot`` from extremal ``e``: its costates, arcs and nodes.
+
+        The nodes are ``e``'s own trajectory, solved at its own ends; their
+        states shift by the change in the ends, blended along the motion. No
+        integration of the guessed costates is involved, so a guess far from
+        the query's costates still starts with small defects."""
+        if self.nodes == 1 or getattr(e, "xf", None) is None:
+            return self.guess(shoot, e)
+        own = self._shooting(e.x0, e.xf, e.arcs)
+        v = own.with_nodes(self._base_guess(own, e))
+        segs = own._evaluate(v, False)[2]
+        times = [sg[3] for j, sg in enumerate(segs) if (j + 1) % self.nodes]
+        Z = own.nodes_of(v).copy()
+        n = own.kernels.N_STATES
+        for i, t in enumerate(times):
+            frac = (t - segs[0][2]) / (segs[-1][3] - segs[0][2])
+            Z[i, :n] += (1 - frac) * (x0 - e.x0) + frac * (xf - e.xf)
+        return shoot.with_nodes(v, Z)
+
+    def extremal_of(self, polished, x0, xf):
+        """An accepted answer as an :class:`ExtremalSet` of one, to add to the set it came from."""
+        shoot, v = polished.shooting, polished.solution.v
+        zf = shoot._evaluate(v, False)[2][-1][-1]["z"]
+        n = shoot.kernels.N_STATES
+        return ExtremalSet(shoot.t0, np.atleast_2d(x0), polished.lam0[None], np.array([polished.tf]),
+                           np.atleast_2d(xf), zf[n:][None], np.array([polished.tf - shoot.t0]),
+                           [tuple(polished.arcs)],
+                           [tuple((float(a), float(b), float(np.atleast_1d(p)[0]))
+                                  for a, b, p in shoot.unpack_arcs(v))])
 
     def checks(self, shoot, v):
         d = shoot.diagnostics(v)
@@ -254,6 +293,8 @@ class Polisher:
 
     def _solve_at(self, x0, xf, arcs, v):
         shoot = self._shooting(x0, xf, arcs)
+        if self.nodes > 1:
+            return shoot, shoot.solve_damped(v, tol=self.tol, max_seconds=self.solve_seconds)
         options = {"maxfev": self.evaluations} if not shoot.kernels.N_SWITCHING else None
         return shoot, shoot.solve(v, tol=self.tol, options=options)
 
@@ -279,7 +320,8 @@ class Polisher:
     def _attempt(self, x0, xf, e, tried):
         last = f"guess {tried}: failed"
         try:
-            shoot, sol = self._solve_at(x0, xf, e.arcs, self.guess(self._shooting(x0, xf, e.arcs), e))
+            at_query = self._shooting(x0, xf, e.arcs)
+            shoot, sol = self._solve_at(x0, xf, e.arcs, self.carried(at_query, e, x0, xf))
         except _FAILURES as exc:
             shoot, sol = None, None
             last = f"guess {tried}: {exc}"
