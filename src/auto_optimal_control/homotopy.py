@@ -983,7 +983,8 @@ class Homotopy:
     def _smoothed(self, arcs, eps, off):
         """Shooting on the regularized kernels with exact arcs ``arcs`` and penalties off."""
         p = self.regularized_params(eps, np.zeros(self.nc), off)
-        shoot = (MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, **self.path_options)
+        shoot = (MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, open_end=True,
+                                  **self.path_options)
                  if arcs else SingleShooting(self.kr, p, **self.path_options))
         shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
         shoot.fast_residuals = True
@@ -1056,20 +1057,25 @@ class Homotopy:
         # A predictor can carry a short arc past zero length: it stays an arc, just
         # barely, and the solve or the retirement rule decides what becomes of it.
         values = [(v[0], max(v[1], v[0] + 1e-10 * max(1.0, abs(v[0]))), *v[2:])
-                  if kind == "boundary" else v for (kind, _), v in zip(arcs, values)]
+                  if kind == "boundary" and np.isfinite(v[0]) else v
+                  for (kind, _), v in zip(arcs, values)]
         events = []
         for i, ((kind, c), val) in enumerate(zip(arcs, values)):
             if kind == "touch":
                 events.append((float(val[0]), 1, "touch", i))
             else:
-                events += [(float(val[0]), 1, "enter", i), (float(val[1]), 0, "exit", i)]
+                events.append((float(val[0]), 1, "enter" if np.isfinite(val[0]) else "start", i))
+                if np.isfinite(val[1]):
+                    events.append((float(val[1]), 0, "exit", i))
         events.sort(key=lambda e: (e[0], e[1]))
         label = (lambda c: self.kr.CONSTRAINT_NAMES[c]) if names else (lambda c: c)
         depth, overlap = 0, False
         for _, _, ev, _ in events:
             if ev != "exit" and depth > 0:
                 overlap = True             # an entry or touch while an arc is ridden
-            depth += 1 if ev == "enter" else -1 if ev == "exit" else 0
+            depth += 1 if ev in ("enter", "start") else -1 if ev == "exit" else 0
+        if any(ev == "start" for _, _, ev, _ in events) or depth > 0:
+            overlap = True                 # only the event list can say "start" or leave one open
         order = [i for _, _, ev, i in events if ev != "exit"]
         if not overlap:
             # Plain sequence: the compact entries.
@@ -1084,7 +1090,14 @@ class Homotopy:
         """The structure and its values, as MultiArcShooting entries (``[]`` for none)."""
         if not isinstance(shoot, MultiArcShooting):
             return [], []
-        return [(kind, c) for kind, c, _ in shoot.arcs], list(shoot.unpack_arcs(v))
+        # An arc ridden from the start has t_in = -inf, one ridden to the end t_out = inf.
+        values = []
+        for i, val in enumerate(shoot.unpack_arcs(v)):
+            if shoot.arcs[i][0] == "boundary":
+                val = (-np.inf if i in shoot._started else val[0],
+                       np.inf if np.isnan(val[1]) else val[1], val[2])
+            values.append(val)
+        return [(kind, c) for kind, c, _ in shoot.arcs], values
 
     def _activate(self, shoot, v, violations):
         """Structures that bring the violated limits in, most likely first.
@@ -1104,6 +1117,10 @@ class Homotopy:
         arcs, values = self._arcs_of(shoot, v)
         T = shoot.unpack(v)[3] - shoot.t0
         near = 0.05 * T
+        t_start = shoot.t0
+
+        def on_limit(c, which):
+            return self._on_limit(shoot, v, c, which)
 
         def span(i):
             kind, val = arcs[i][0], values[i]
@@ -1114,6 +1131,14 @@ class Homotopy:
             hits = {i for i, (_, cc) in enumerate(arcs)
                     if cc == c and a - near <= span(i)[1] and b + near >= span(i)[0]}
             q = kr.CONSTRAINT_ORDERS[c]
+            if q == 1 and not hits:
+                # On the limit at an end of the motion: the arc reaches that end.
+                if a <= t_start + near and on_limit(c, 0):
+                    born.append((("boundary", c), (-np.inf, b, np.zeros(1))))
+                    continue
+                if b >= t_start + T - near and on_limit(c, -1):
+                    born.append((("boundary", c), (a, np.inf, np.zeros(1))))
+                    continue
             if q >= 3:
                 # Order 3 or more: touch points only (no boundary arcs with a smooth
                 # control law; Jacobson, Lele & Speyer 1971), so each violation is one more.
@@ -1149,7 +1174,7 @@ class Homotopy:
                 if other is None:
                     out.append((entry, val))
                     continue
-                inset = 1e-3 * (other[1] - other[0])
+                inset = 1e-3 * min(other[1] - other[0], T)
                 lo = max(val[0], other[0] + inset) if entry_in else val[0]
                 hi = min(val[1], other[1] - inset) if exit_in else val[1]
                 out.append((entry, (lo, hi, val[2])))
@@ -1212,6 +1237,36 @@ class Homotopy:
                 options.append(alternative)
             options.append(build(False, narrow=True))
         return options
+
+    def _on_limit(self, shoot, v, c, which):
+        """Whether the true limit ``c`` holds at the start (0) or the end (-1) of the motion."""
+        p = np.array(shoot.params, dtype=float)
+        p[len(p) - self.nc:] = 0.0                 # the offsets come last
+        _, _, segs = shoot._evaluate(np.asarray(v, dtype=float), jac=False)
+        t, z = (shoot.t0, segs[0][4]) if which == 0 else (segs[-1][3], segs[-1][-1]["z"])
+        return abs(float(shoot.kernels.constraint(t, z, p)[c])) < 1e-5
+
+    def _end_structure(self, shoot, v):
+        """The structure with arcs next to an end of the motion running out to it.
+
+        As the offsets reach zero with an end state on a limit, the free stretch
+        between that arc and the end shrinks to nothing, which no step can
+        cross: the arc must become one ridden from the start or to the end.
+        Returns ``(arcs, values)``, or None if no arc qualifies."""
+        if not isinstance(shoot, MultiArcShooting) or shoot.kernels.N_SWITCHING:
+            return None
+        arcs, values = self._arcs_of(shoot, v)
+        tf = shoot.unpack(v)[3]
+        near = 0.1 * (tf - shoot.t0)
+        out, changed = [], False
+        for (kind, c), val in zip(arcs, values):
+            if kind == "boundary" and shoot.kernels.CONSTRAINT_ORDERS[c] == 1:
+                if np.isfinite(val[1]) and tf - val[1] < near and self._on_limit(shoot, v, c, -1):
+                    val, changed = (val[0], np.inf, val[2]), True
+                if np.isfinite(val[0]) and val[0] - shoot.t0 < near and self._on_limit(shoot, v, c, 0):
+                    val, changed = (-np.inf, val[1], val[2]), True
+            out.append(val)
+        return (arcs, out) if changed else None
 
     def _bound_options(self, shoot, v):
         """Structures that undo an overlap of arcs whose riding control leaves its bounds.
@@ -1277,14 +1332,18 @@ class Homotopy:
         for tangent in ((True, False) if kx.system.riding is not None else (False,)):
             try:
                 if arcs:
-                    shoot = MultiArcShooting(kx, px, arcs, max_nfev=self.attempt_nfev, **self.options)
+                    shoot = MultiArcShooting(kx, px, arcs, max_nfev=self.attempt_nfev, open_end=True,
+                                             **self.options)
                     method = "lm" if kx.N_SWITCHING else "hybr"
                 else:
                     shoot = SingleShooting(kx, px, **self.options)
                     method = "hybr"
                 shoot.tangent_junctions = tangent
-                sol = shoot.solve(v, method=method, tol=tol,
-                                  options=_budget(method, 4 * self.attempt_evaluations))
+                if arcs and (shoot._open or shoot._started):
+                    sol = shoot.solve_damped(v, tol=tol, max_seconds=60.0)
+                else:
+                    sol = shoot.solve(v, method=method, tol=tol,
+                                      options=_budget(method, 4 * self.attempt_evaluations))
                 if self._accept(shoot, sol, tol):
                     return self.objective(shoot, sol.v), shoot, sol
                 self._detail(f"  exact solve: residual {sol.residual_norm:.1e} (max |v| "
@@ -1323,7 +1382,7 @@ class Homotopy:
         separates the events. When none can move, the route returns to the
         last change of structure and rules out the structure chosen there."""
         deadline = time.perf_counter() + self.active_set_seconds
-        banned, checkpoints = set(), []
+        banned, checkpoints, ended = set(), [], set()
 
         def key(arcs, values):
             return tuple(self._mas_entries(arcs, values, True)[0])
@@ -1349,8 +1408,20 @@ class Homotopy:
             sh = self._smoothed(entries, 10.0 ** le if self.bang_bang else None, off)
             guess = sh.pack_arcs(base, values) if arcs else np.asarray(base, dtype=float)
             state["solves"] += 1
-            r = sh.solve(guess, tol=path_tol,
-                         options=_budget("hybr", 4 * self.attempt_evaluations))
+            if isinstance(sh, MultiArcShooting) and (sh._open or sh._started):
+                # On an arc that reaches a fixed end on the limit, the terminal row and the
+                # riding say the same thing: rank-deficient, which needs the damped solver.
+                return sh, sh.solve_damped(guess, tol=path_tol, max_steps=40, max_seconds=30.0)
+            options = _budget("hybr", 4 * self.attempt_evaluations)
+            r = sh.solve(guess, tol=path_tol, options=options)
+            if (not r.success and r.residual_norm < 1e-2 and arcs and sh.tangent_junctions):
+                # A control at its bound at a junction jumps there: H continuity, not tangency.
+                state["solves"] += 1
+                sh.tangent_junctions = False
+                alt = sh.solve(guess, tol=path_tol, options=options)
+                if alt.success:
+                    return sh, alt
+                sh.tangent_junctions = True
             return sh, r
 
         def settle(sh, r, le, off):
@@ -1441,6 +1512,16 @@ class Homotopy:
                         done = None
                     if done is not None:
                         break
+                if done is None and f >= 1.0 and not np.any(target_off) and tuple(map(tuple, arcs)) not in ended:
+                    ended.add(tuple(map(tuple, arcs)))
+                    converted = self._end_structure(sh0, v0)
+                    if converted is not None:
+                        try:
+                            sh, r = solve_structure(*converted, v0[:sh0.n_base], le, off)
+                            self._detail(f"  arcs run out to the ends: residual {r.residual_norm:.1e}")
+                            done = settle(sh, r, le, off) if r.success else None
+                        except _FAILURES as exc:
+                            self._detail(f"  arcs run out to the ends: {exc}")
                 if done is None:
                     ds *= 0.5
                     continue
@@ -1516,6 +1597,20 @@ class Homotopy:
             return None
         if try_exact():
             return found[0]
+        converted = self._end_structure(state["shoot"], state["v"])
+        if converted is not None:
+            try:
+                sh, r = solve_structure(*converted, state["v"][:state["shoot"].n_base], state["le"],
+                                        state["off"])
+            except _FAILURES as exc:
+                sh, r = None, None
+                self._detail(f"  arcs run out to the ends: {exc}")
+            if r is not None:
+                self._detail(f"  arcs run out to the ends: residual {r.residual_norm:.1e}")
+                if r.success:
+                    state.update(shoot=sh, v=r.v)
+                    if try_exact():
+                        return found[0]
         if not self.bang_bang:
             return None
         if advance(log_eps_min, np.zeros(self.nc), on_step=try_exact) and found:
