@@ -53,6 +53,15 @@ class ShootingError(FloatingPointError):
     """The extremal could not be propagated from these unknowns."""
 
 
+class EdgeReached(ShootingError):
+    """A boundary arc's riding stopped being feasible at ``t_edge`` in ``[ta, tb]``:
+    past it no admissible control holds the limits (the edge of the holdable set)."""
+
+    def __init__(self, message, t_edge, ta, tb):
+        super().__init__(message)
+        self.t_edge, self.ta, self.tb = t_edge, ta, tb
+
+
 @dataclass
 class ShootingSolution:
     """The result of :meth:`SingleShooting.solve`.
@@ -519,6 +528,7 @@ class MultiArcShooting(SingleShooting):
             raise ValueError("junctions must be 'auto' or 'hamiltonian'")
         self.junctions = junctions
         self.rate_junctions = MultiArcShooting.rate_junctions_default
+        self._find_edges = False
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -815,6 +825,11 @@ class MultiArcShooting(SingleShooting):
                                          max_nfev=self.max_nfev, **self.options)
                 Fa = k.singular_rhs(c, ta, z, p)
         except RuntimeError as exc:
+            if kind == "boundary" and self._find_edges:
+                edge = self._riding_edge(c, ta, z, tb)
+                if edge is not None:
+                    raise EdgeReached(f"riding failed past {edge} on [{ta}, {tb}]: {exc}",
+                                      edge, ta, tb) from exc
             raise ShootingError(f"propagation failed on [{ta}, {tb}]: {exc}") from exc
         if r["status"] != 0:
             raise ShootingError(f"propagation failed with status {r['status']}")
@@ -830,6 +845,58 @@ class MultiArcShooting(SingleShooting):
         if len(active) == 1:
             return next(iter(active))
         return self.kernels.boundary_set(sorted(active))
+
+    def _riding_edge(self, c, ta, z, tb, rounds=30):
+        """The last time in ``[ta, tb]`` to which riding ``c`` from ``(ta, z)`` propagates
+        (by bisection), or None if it fails at once."""
+        k, p = self.kernels, self.params
+        z = np.asarray(z, dtype=float)[:2 * k.N_STATES]
+        lo, hi = ta, tb
+        for _ in range(rounds):
+            mid = 0.5 * (lo + hi)
+            try:
+                k.propagate_boundary(c, ta, z, mid, p, max_nfev=self.max_nfev, **self.options)
+                lo = mid
+            except RuntimeError:
+                hi = mid
+            if hi - lo <= 1e-9 * max(1.0, abs(tb - ta)):
+                break
+        return lo if lo > ta else None
+
+    def pull_in_exits(self, v, max_rounds=6):
+        """``v`` with boundary arcs' exits moved back to where their riding stops being
+        feasible, or None if nothing moved or it still does not propagate.
+
+        By Lemma I of ``docs/notes/structure_certificates.md`` an arc lies where its
+        limits can be held, so an exit past the edge of that set is no answer's; the
+        exit is pulled to just inside the edge, where Lemma J's exit row is valid."""
+        v = np.asarray(v, dtype=float).copy()
+        moved = False
+        self._find_edges = True
+        try:
+            for _ in range(max_rounds):
+                try:
+                    self.residual(v)
+                    return v if moved else None
+                except EdgeReached as e:
+                    span = max(1.0, abs(e.tb))
+                    hit = None
+                    for i, ((kind, _, _), sl) in enumerate(zip(self.arcs, self._arc_slices)):
+                        if kind != "boundary" or i in self._open:
+                            continue
+                        at = sl.start if i in self._started else sl.start + 1
+                        if abs(v[at] - e.tb) <= 1e-9 * span:
+                            hit = at
+                            break
+                    if hit is None:
+                        return None
+                    v[hit] = e.t_edge - 1e-6 * (e.t_edge - e.ta)
+                    moved = True
+                except ShootingError:
+                    return None
+            return None
+        finally:
+            self._find_edges = False
 
     def _regular_junction(self, kind, q, side, t, z):
         """Whether a boundary arc's junction drops ``H`` continuity: an order-1
