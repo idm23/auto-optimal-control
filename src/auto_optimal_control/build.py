@@ -27,6 +27,7 @@ from pathlib import Path
 
 import Cython
 import numpy as np
+import sympy as sp
 
 import fast_numerical_integration
 from auto_optimal_control.codegen import c_identifier, generate_c
@@ -228,6 +229,7 @@ class Kernels:
         self.header = header
         self.source = source
         self.path = path
+        self._initial_state_fn = None
 
     def __getattr__(self, attr):
         if attr.startswith("_"):
@@ -254,17 +256,15 @@ class Kernels:
 
     def initial_state(self, params=()):
         """The fixed initial state, with NaN for free components."""
-        problem = self.system.problem
-        values = dict(zip(self.system.params, np.asarray(params, dtype=float).reshape(-1)))
-        # A solve asks often, and subs is slow even on a constant.
-        t0 = float(problem.initial_time) if problem.initial_time.is_number \
-            else float(problem.initial_time.subs(values))
-        out = np.full(len(self.system.states), np.nan)
-        for i, s in enumerate(self.system.states):
-            if s in problem.initial_state:
-                e = problem.initial_state[s]
-                out[i] = float(e) if e.is_number else float(e.subs({**values, problem.time: t0}))
-        return out
+        # A solve asks often (every shooting built), and subs is slow even on a symbol,
+        # so the expressions are compiled once, on first use.
+        if self._initial_state_fn is None:
+            problem = self.system.problem
+            exprs = [sp.sympify(problem.initial_state[s]).subs(problem.time, problem.initial_time)
+                     if s in problem.initial_state else sp.nan for s in self.system.states]
+            self._initial_state_fn = sp.lambdify(list(self.system.params), exprs, modules="numpy")
+        values = np.asarray(params, dtype=float).reshape(-1)
+        return np.array(self._initial_state_fn(*values), dtype=float).reshape(len(self.system.states))
 
     def z0(self, lam0, params=(), x0=None):
         """``[x0, lam0]``; ``x0`` defaults to the problem's fixed initial state."""
