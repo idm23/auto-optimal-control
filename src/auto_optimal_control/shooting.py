@@ -516,6 +516,9 @@ class MultiArcShooting(SingleShooting):
     #: Junction rows of order-1 arcs from the limit's rate (Lemma J): ``dg/dt = 0``
     #: under the arriving control at an entry and the departing control at an exit.
     rate_junctions_default = True
+    #: Past the edge of the holdable set, continue an exit-bound arc on the free law
+    #: (rule R9 of docs/notes/structure_certificates.md).
+    past_edge_default = False           # rule R9: tried, worse on the census (see the note)
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1):
@@ -529,6 +532,7 @@ class MultiArcShooting(SingleShooting):
         self.junctions = junctions
         self.rate_junctions = MultiArcShooting.rate_junctions_default
         self._find_edges = False
+        self.past_edge = MultiArcShooting.past_edge_default
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -1038,7 +1042,25 @@ class MultiArcShooting(SingleShooting):
                 t_ev, d_ev = w[0], unit(sl.start)
             aid = self._arc_id(active)
             seg = None if aid is None else "boundary"
-            r, D = stretch(seg, aid, t, dt, z, D, t_ev, d_ev)
+            try:
+                r, D = stretch(seg, aid, t, dt, z, D, t_ev, d_ev)
+            except ShootingError:
+                # Riding past the edge of the holdable set (Lemma I) has no control. Up
+                # to an exit there, R7's row is -margin under the corner control; past
+                # it the motion continues on that control's free law (rule R9), so the
+                # residual is defined on both sides and crosses zero at the edge.
+                if not (self.past_edge and ev == "out" and kind == "boundary" and q == 1
+                        and active == {c} and self.nodes == 1):
+                    raise
+                t_e = self._riding_edge(c, t, z, t_ev)
+                if t_e is None:
+                    raise
+                zero = np.zeros(N)
+                r1, D = self._segment("boundary", c, t, dt, z, D, t_e, zero, jac, record, flags)
+                segments.append(("boundary", c, t, t_e, z, None, r1))
+                r, D = self._segment(None, None, t_e, zero, r1["z"], D, t_ev, d_ev, jac, record,
+                                     flags)
+                segments.append((None, None, t_e, t_ev, r1["z"], dict(flags), r))
             z = r["z"]
             t, dt = t_ev, d_ev
             if ev == "out":
