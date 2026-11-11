@@ -545,75 +545,129 @@ is the square-root law of Lemma E: near its birth or death an arc's width
 moves like the square root of the homotopy parameter, so Newton in the
 junction times overshoots zero width. It points to continuing in the width.
 
-## Lemma E (birth of an arc: normal form). Statement and plan of proof
+## Lemma E (birth of an arc: normal form)
 
 This is the result behind continuing in an arc's width rather than in $s$.
-The statement is standard in kind (compare Bonnans & Hermant 2008 for limits
-of order one). It has to be proved for our shooting formulation, and that
-proof is not done yet. Below are the statement and the plan.
+It is standard in kind; compare Bonnans & Hermant (2008) for limits of order
+one. Here it is proved for this shooting formulation: an arc of an order-1
+limit, ridden at run time, with the entry rows $g = 0$ and $\dot g = 0$ and
+the exit row $\mu = 0$, with $\mu(t_{\rm in}^+) = \pi$.
 
-*Setting.* At $s = s^*$ the extremal has structure $\mathcal{S}$ (possibly
-with other arcs; for a nested birth, $c$ comes into play while a set $S$ is
-ridden). Let $\Phi(v, s) = 0$ be the shooting equations for $\mathcal{S}$.
-Limit $c$ is inactive except at one time $t^*$, where its peak touches its
-offset.
+*Setting.* At $s = s^*$ the extremal has structure $\mathcal{S}$, which may
+have other arcs. Its shooting equations are $\Phi(v, s) = 0$, at a solution
+$v^*$. Limit $c$, with offset $o_c(s)$, is inactive except at one time $t^*$,
+where its peak touches the offset: $g_c(t^*) = o_c(s^*)$ and
+$\dot g_c(t^*) = 0$.
 
 *Hypotheses.*
 
-- (H0) C2, C3, C4 hold, so the motion on either side of $t^*$, free or riding
-  $S$, is smooth (Lemma B, needing $S \cap B = \emptyset$ there).
-- (L1, local) the peak is nondegenerate: $\ddot g_c(t^*) < 0$ along the motion
-  at $t^*$. For a nested birth this curvature is along the riding motion of $S$,
-  not the free motion.
-- (L2, local) $\partial \Phi / \partial v$ is nonsingular at $(v^*, s^*)$.
-- (L3, local) the peak value $\pi_c(s) = \max_t g_c - o_c(s)$ crosses zero
-  transversally: $d\pi_c / ds \ne 0$ at $s^*$.
-- the jerks are strictly inside their bounds at $t^*$ (so C5 holds there and the
-  entry is tangential).
+- (H0) C2, C3 and C4 hold, and the jerks are strictly inside their bounds at
+  $t^*$. So the free and riding flows are smooth near $z(t^*)$: Lemma B, and
+  the riding control exists near $z(t^*)$ by Lemma I's margin, which is
+  positive there.
+- (L1) the peak is nondegenerate: $\ddot g_c(t^*) < 0$ along the motion.
+- (L2) $\Phi_v(v^*, s^*)$ is nonsingular.
+- (L3) the peak excess $\pi_c(s) = \max_t g_c - o_c(s)$, along the branch
+  $v(s)$ of L2, crosses zero transversally: $\pi_c'(s^*) \ne 0$.
 
-*Claim.* For $s$ on the side where $\pi_c > 0$ and close to $s^*$, there is a
-unique nearby extremal with structure $\mathcal{S}$ plus one arc of $c$ around
-$t^*$. Its width $w$ satisfies $s - s^* = \kappa\, w^2 + O(w^3)$ with
-$\kappa \ne 0$, and all its unknowns are $C^1$ functions of $w$ near $w = 0$.
-Continuing in $w$ is therefore regular, while continuing in $s$ is not:
-$dw/ds \sim (s - s^*)^{-1/2}$.
+*Claim.* Write the arc as $[t_m - w/2,\ t_m + w/2]$ with jump
+$\pi = w\,\tilde p$. Near $w = 0$ there are unique smooth functions
+$(v, t_m, s, \tilde p)(w)$ that solve the shooting equations of $\mathcal{S}$
+plus this arc. At $w = 0$ they equal $(v^*, t^*, s^*, \tilde p_0)$ with
+$\tilde p_0 = -\dot\mu_c$, and
+$$s(w) - s^* = \kappa\, w^2 + O(w^3), \qquad
+  \kappa = -\frac{\ddot g_c(t^*)}{8\, \pi_c'(s^*)} \ne 0 .$$
+So $w \sim \sqrt{(s - s^*) / \kappa}$. Continuing in $s$ has
+$dw/ds \to \infty$, while continuing in $w$ is regular.
 
-*Plan of proof.* Write the arc's entry and exit as $t_m \mp w/2$ and its jump
-as $\pi = w\, \tilde p$; the unknowns become $(v, t_m, \tilde p, s)$ and $w$
-becomes the parameter. The new rows are the entry conditions $g_c = 0$ and
-$\dot g_c = 0$ (tangential) and the exit condition $\mu_c = 0$. At $w = 0$:
+**Proof.**
 
-1. The old rows reduce to $\Phi(v, s) = 0$: an arc of zero width with zero jump
-   changes nothing.
-2. The entry rows reduce to "the motion touches the offset at $t_m$":
-   $\dot g_c(t_m) = 0$ fixes $t_m$ (nondegenerate by L1), and $g_c(t_m) = o_c(s)$
-   fixes $s$ (by L3).
-3. The exit row: $\mu_c(t_m^+) = \pi$ for this formulation, so
-   $\mu_c(t_m + w/2) = w\,(\tilde p + \dot\mu_c) + O(w^2)$. Divided by $w$, it
-   gives $\tilde p = -\dot\mu_c$ at $w = 0$: a regular equation for $\tilde p$.
+1. *The rows are smooth in $w$, including $w = 0$ and $w < 0$.* The state at the
+   exit is $\varphi_{\rm ride}(t_m + \tfrac w2, t_m - \tfrac w2,
+   J_{w \tilde p}(\varphi_{\rm free}(t_m - \tfrac w2)))$, with $J_\pi$ the
+   costate jump. By H0 each piece is smooth in its times and initial values on a
+   neighbourhood. The riding flow may run backward (for $w < 0$), since its
+   vector field is smooth there too. So every old row,
+   $\tilde\Phi(v, s, t_m, \tilde p, w)$, is smooth. At $w = 0$ the arc has zero
+   length and zero jump, so $\tilde\Phi(\cdot, w = 0) = \Phi(v, s)$, whatever
+   $t_m$ and $\tilde p$ are.
 
-With those rows rescaled, the Jacobian at $w = 0$ is block triangular, with
-nonsingular diagonal blocks (L2, L1, L3, and the identity block for
-$\tilde p$). The implicit function theorem gives the $C^1$ dependence on $w$.
-The relation $s - s^* = \kappa w^2$ then follows by expanding $g_c$ to second
-order about $t_m$, using L1.
+2. *Entry rows.* $E_1 = g_c(x(t_m - \tfrac w2)) - o_c(s)$ and
+   $E_2 = \dot g_c$ under the free law there. At $w = 0$ they are
+   $g_c(t_m) - o_c(s)$ and $\dot g_c(t_m)$.
 
-*To make rigorous:*
+3. *Exit row.* With jerks interior, the riding equations for one limit give
+   $\mu_{\rm ride}(z) = \alpha(z)\, \dot g_{\rm free}(z)$, with
+   $\alpha = 1/(a^\top R^{-1} a) > 0$. Indeed $u_{\rm ride} = u_{\rm free} -
+   R^{-1} a\, \mu$, and $a^\top u_{\rm ride} + d = 0$. So the exit row
+   $X = \mu_{\rm ride}(z(t_{\rm out}))$ satisfies, at $w = 0$, $X = \alpha E_2$
+   *identically* in the other unknowns. By Hadamard's lemma,
+   $\hat X = (X - \alpha E_2)/w$ is smooth. Moreover
+   $\partial X / \partial \tilde p = w\, \partial \mu(t_{\rm out}) / \partial \pi$,
+   and a jump $\pi \nabla g$ shifts $a^\top u$ by exactly
+   $\pi\, a^\top R^{-1} a$. Hence $\partial \mu / \partial \pi = 1$ at $w = 0$,
+   and $\partial \hat X / \partial \tilde p = 1$ there.
 
-- the smoothness in $w$ at $w = 0$ of the flow composed through an arc of
-  width $w$;
-- the exact form of the rescaled rows in our implementation (`shooting.py`
-  uses $\pi$ as the costate jump with $\mu_c(t_{\rm in}^+) = \pi$);
-- the block-triangular structure, entry by entry;
-- that the solution found is the one with $\mu_c \ge 0$ on the arc (the sign
-  of $\tilde p$).
+4. *The Jacobian at $w = 0$ is nonsingular.* Order the unknowns
+   $(v, t_m, s, \tilde p)$ and the rows $(\Phi, E_2, E_1, \hat X)$. The rows
+   $\Phi$ involve only $(v, s)$, $E_2$ only $(v, t_m)$, and
+   $\partial E_1 / \partial t_m = \dot g_c(t_m) = 0$. Eliminate $dv =
+   -\Phi_v^{-1}\Phi_s\, ds$ (L2). Then $E_2$'s pivot in $t_m$ is
+   $\ddot g_c(t^*) \ne 0$ (L1). $E_1$'s pivot in $s$ is
+   $\partial_s E_1 - \partial_v E_1 \Phi_v^{-1} \Phi_s = \pi_c'(s^*)$, by the
+   envelope theorem, since $\dot g_c = 0$ at the peak (L3). $\hat X$'s pivot in
+   $\tilde p$ is 1. The determinant is
+   $\det \Phi_v \cdot \ddot g_c \cdot \pi_c' \cdot 1 \ne 0$, so the implicit
+   function theorem gives the smooth branch in $w$.
+
+5. *The square-root law.* Expand $E_1$. Riding keeps $g_c$ equal to its entry
+   value over the arc, and the entry value is where the free motion meets the
+   offset, $\tfrac w2$ before $t_m$. To leading order
+   $g_c(t_m \pm \tfrac w2) = g_{\rm peak} + \tfrac12 \ddot g_c (w/2)^2$, so
+   $\pi_c(s) = -\ddot g_c\, w^2 / 8 + O(w^3)$. With
+   $\pi_c(s) = \pi_c'(s^*)(s - s^*) + O((s - s^*)^2)$, this gives $\kappa$.
+   The $O(w)$ term vanishes because $\dot g_c(t_m) = 0$ (step 2). $\square$
+
+*What is used, and what is not.* Interior jerks at $t^*$ (H0) are used in
+step 3, for the explicit $\mu_{\rm ride} = \alpha\, \dot g_{\rm free}$. At a
+birth where jerks sit at bounds, Lemma J still makes the junction
+tangential, but $\alpha$ changes with the held set, and this proof does not
+cover that case. With R7's exit row in place of $\mu = 0$, step 3 is the same
+up to the factor $-a^\top R^{-1} a$ (Lemma J). The local checks L1 to L3 are
+not verified by the solver. R2 uses the lemma only to choose the parameter of
+continuation, never to accept an answer.
+
+### Rule R2 (step in the width at a stalled birth or death)
+
+*Rule:* when a step in the route's parameter fails with $ds < 10^{-3}$, and
+the solution has a finite order-1 arc of width under $5\%$ of $T$, solve
+$[\Phi(v; s),\ w - w_{\rm target}] = 0$ for $(v, s)$. Try
+$w_{\rm target} = 1.5\,w$ (a birth) and then $0.5\,w$ (a death). The
+Jacobian's $s$ column is a finite difference. The result is accepted as a
+step only if $s$ moves forward, and it goes through `settle` and the usual
+checks (`Homotopy.width_steps`).
+
+*Why it is sound:* by Lemma E the branch is smooth in $w$, where it is not
+in $s$, so the augmented Newton iteration is regular near the event. The rule
+changes only how the route moves along its own path, never what is accepted.
+
+*Result: off by default, for now.* On the census (with R1, R4, R5, R6 and
+R7) it solved 26 of 45 against 27. It gained goal 9 at 70%, and lost rest 5
+and goal 5 at 90% (noise). Width steps fired 52 times in 9 cases. At deaths
+(goal 0 at 80%, goal 6 at 90%) halving the width moves $s$ forward only
+geometrically toward the death. Lemma E's $w^2 \propto (s^* - s)$ says to
+extrapolate to $s^*$ from two such points, retire the arc, and step past it.
+At the birth in rest 11, halving the width moves $s$ back from $0.00029$ to
+$-0.0103$, as the lemma predicts (giving $s^* \approx -0.014$). The growth step
+fails, because it lands near $s \approx 0.018$ without a predictor; the branch
+is smooth in $w$, so a secant in $w$ is the predictor to use.
 
 ## Rules these license
 
 | Rule | What the solver does | Needs |
 |---|---|---|
 | R1 | Start the offsets at $o_c(0) = p_c (1 + U_c) + \epsilon_c$ with random $U_c$, so that births do not coincide | Lemma D: C1-C5, plus its hypothesis on $\mathcal{E}_2$, which rests on Lemma E and the local checks |
-| R2 | At a birth, continue in the new arc's width $w$, starting at $w = 0$ with the unknowns of Lemma E, rather than stepping in $s$ | Lemma E: C2-C4 globally; L1-L3 checked at the event |
+| R2 | At a stalled birth or death, step in the young arc's width $w$ with $s$ solved for | Lemma E: C2-C4, interior jerks at the event; L1-L3 not checked (R2 only steers) |
 | R3 | A nested birth is R2 with the curvature in L1 taken along the riding motion of the arcs already active | as R2, with $S \cap B = \emptyset$ at the event (Lemma B) |
 | R4 | When a solve fails, solve the reversed problem and map its extremal back exactly | Lemma F: C6 |
 
