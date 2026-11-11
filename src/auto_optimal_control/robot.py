@@ -159,7 +159,34 @@ def _ends(q, w, a, moving_ends):
     return start, final, [*q0, *w0, *a0, *qf, *wf, *af]
 
 
-def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends=False):
+def joint_limits(q, w, *, rates=False, positions=False):
+    """Limits on the joint rates and angles: ``(constraints, params)``.
+
+    ``rates`` adds ``|w_i| <= w_max_i``, ``positions`` adds ``q_min_i <= q_i
+    <= q_max_i``, each with its bounds as params (``w_max1..n``, then
+    ``q_min1..n, q_max1..n``). With jerk control a rate limit has order 2
+    and an angle limit order 3: with a smooth control law the latter is only
+    ever touched, never ridden (Jacobson, Lele & Speyer 1971).
+    """
+    n = len(q)
+    constraints, params = [], []
+    if rates:
+        w_max = sp.symbols(f"w_max1:{n + 1}", positive=True)
+        for i in range(n):
+            constraints += [PathConstraint(w[i] - w_max[i], f"w{i + 1}_max"),
+                            PathConstraint(-w[i] - w_max[i], f"w{i + 1}_min")]
+        params += list(w_max)
+    if positions:
+        q_min, q_max = (sp.symbols(f"{s}1:{n + 1}", real=True) for s in ("q_min", "q_max"))
+        for i in range(n):
+            constraints += [PathConstraint(q[i] - q_max[i], f"q{i + 1}_max"),
+                            PathConstraint(q_min[i] - q[i], f"q{i + 1}_min")]
+        params += [*q_min, *q_max]
+    return constraints, params
+
+
+def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends=False,
+                     rate_limits=False, position_limits=False):
     """Rest to rest in minimum time, with bounded jerks and a limit on each joint's torque.
 
     ``min t_f`` subject to ``|j_i| <= j_max_i`` and ``|tau_i| <= tau_max_i``, from rest at
@@ -170,7 +197,9 @@ def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends
 
     params: the ``q0``, the ``qf``, the ``j_max``, the ``tau_max``. With
     ``moving_ends`` the motion runs between any two states instead of from
-    rest to rest: the params begin ``q0, w0, a0, qf, wf, af``.
+    rest to rest: the params begin ``q0, w0, a0, qf, wf, af``. With
+    ``rate_limits`` or ``position_limits`` the joint limits of
+    :func:`joint_limits` follow, with their params last.
     """
     n = len(links)
     t = sp.Symbol("t", real=True)
@@ -183,8 +212,9 @@ def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends
     for i in range(n):
         constraints += [PathConstraint(tau[i] - limits[i], f"tau{i + 1}_max"),
                         PathConstraint(-tau[i] - limits[i], f"tau{i + 1}_min")]
+    more, more_params = joint_limits(q, w, rates=rate_limits, positions=position_limits)
     return OptimalControlProblem(
         name=name, time=t, states=[*q, *w, *a], controls=list(j),
-        params=[*ends, *j_max, *limits], dynamics=[*w, *a, *j], running_cost=1,
-        initial_state=start, final_state=final, path_constraints=constraints,
+        params=[*ends, *j_max, *limits, *more_params], dynamics=[*w, *a, *j], running_cost=1,
+        initial_state=start, final_state=final, path_constraints=constraints + more,
         control_sets=[Box(u, -m, m) for u, m in zip(j, j_max)])

@@ -64,3 +64,9 @@ each carries its own docstring: use `help(kernels.propagate)`.
 ```{eval-rst}
 .. automodule:: auto_optimal_control.examples
 ```
+
+## Robot arms
+
+```{eval-rst}
+.. automodule:: auto_optimal_control.robot
+```

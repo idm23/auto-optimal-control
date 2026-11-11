@@ -8,7 +8,8 @@ import numpy as np
 import sympy as sp
 
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint, UnitVector
-from auto_optimal_control.robot import SIX_JOINT_LINKS, jerk_controlled_arm, jerk_limited_arm
+from auto_optimal_control.robot import (SIX_JOINT_LINKS, jerk_controlled_arm, jerk_limited_arm,
+                                        joint_limits)
 
 
 def zermelo():
@@ -373,7 +374,7 @@ def two_link_arm():
 TWO_LINK_ARM_PARAMS = (1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 1.0)   # m1, m2, l1, l2, T, q1f, q2f
 
 
-def two_link_arm_min_time():
+def two_link_arm_min_time(rate_limits=False, position_limits=False):
     """The arm of :func:`two_link_arm` in minimum time, with bounded jerks.
 
     ``min t_f`` subject to ``|j_i| <= j_max`` and the torque limits
@@ -383,8 +384,11 @@ def two_link_arm_min_time():
     does not set the time has a whole family of optimal motions.
     :class:`~auto_optimal_control.homotopy.Homotopy` adds a secondary cost
     by default, ``w int ((j1 / j_max)^2 + (j2 / j_max)^2) / 2``.
+    ``rate_limits`` and ``position_limits`` add joint limits
+    (:func:`~auto_optimal_control.robot.joint_limits`).
 
-    params: ``m1, m2, l1, l2, q1f, q2f, j_max, tau1_max, tau2_max``.
+    params: ``m1, m2, l1, l2, q1f, q2f, j_max, tau1_max, tau2_max``, then
+    ``w_max1, w_max2`` and ``q_min1, q_min2, q_max1, q_max2`` when asked for.
     """
     t = sp.Symbol("t", real=True)
     q1, q2, w1, w2, a1, a2, j1, j2 = sp.symbols("q1 q2 w1 w2 a1 a2 j1 j2", real=True)
@@ -392,16 +396,20 @@ def two_link_arm_min_time():
         "m1 m2 l1 l2 j_max tau1_max tau2_max", positive=True)
     q1f, q2f = sp.symbols("q1f q2f", real=True)
     tau1, tau2 = two_link_arm_torques(m1, m2, l1, l2, q2, w1, w2, a1, a2)
+    more, more_params = joint_limits([q1, q2], [w1, w2], rates=rate_limits,
+                                     positions=position_limits)
+    name = "two_link_arm_min_time" + "".join(
+        tag for on, tag in ((rate_limits, "_rates"), (position_limits, "_positions")) if on)
     return OptimalControlProblem(
-        name="two_link_arm_min_time", time=t, states=[q1, q2, w1, w2, a1, a2],
-        controls=[j1, j2], params=[m1, m2, l1, l2, q1f, q2f, j_max, tau1_max, tau2_max],
+        name=name, time=t, states=[q1, q2, w1, w2, a1, a2], controls=[j1, j2],
+        params=[m1, m2, l1, l2, q1f, q2f, j_max, tau1_max, tau2_max, *more_params],
         dynamics=[w1, w2, a1, a2, j1, j2], running_cost=1, initial_state=[0] * 6,
         final_state={q1: q1f, q2: q2f, w1: 0, w2: 0, a1: 0, a2: 0},
         control_sets=[Box(j1, -j_max, j_max), Box(j2, -j_max, j_max)],
         path_constraints=[PathConstraint(tau1 - tau1_max, "tau1_max"),
                           PathConstraint(-tau1 - tau1_max, "tau1_min"),
                           PathConstraint(tau2 - tau2_max, "tau2_max"),
-                          PathConstraint(-tau2 - tau2_max, "tau2_min")])
+                          PathConstraint(-tau2 - tau2_max, "tau2_min"), *more])
 
 
 def two_axes_min_time():
@@ -434,16 +442,22 @@ def six_joint_arm():
     return jerk_controlled_arm(SIX_JOINT_LINKS, name="six_joint_arm")
 
 
-def six_joint_arm_min_time(moving_ends=False):
+def six_joint_arm_min_time(moving_ends=False, rate_limits=False, position_limits=False):
     """:func:`six_joint_arm` in minimum time with bounded jerks, torque limits as before.
 
     See :func:`~auto_optimal_control.robot.jerk_limited_arm`; ``moving_ends``
-    puts the rates and accelerations at both ends among the params too.
+    puts the rates and accelerations at both ends among the params too, and
+    ``rate_limits`` and ``position_limits`` add joint limits
+    (:func:`~auto_optimal_control.robot.joint_limits`).
 
-    params: ``q0_1..6``, ``qf_1..6``, ``j_max1..6``, ``tau_max1..6``.
+    params: ``q0_1..6``, ``qf_1..6``, ``j_max1..6``, ``tau_max1..6``, then
+    ``w_max1..6`` and ``q_min1..6, q_max1..6`` when asked for.
     """
-    return jerk_limited_arm(SIX_JOINT_LINKS, name="six_joint_arm_min_time" + ("_moving" if moving_ends else ""),
-                            moving_ends=moving_ends)
+    name = "six_joint_arm_min_time" + "".join(
+        tag for on, tag in ((moving_ends, "_moving"), (rate_limits, "_rates"),
+                            (position_limits, "_positions")) if on)
+    return jerk_limited_arm(SIX_JOINT_LINKS, name=name, moving_ends=moving_ends,
+                            rate_limits=rate_limits, position_limits=position_limits)
 
 
 def goddard(dynamic_pressure=False):

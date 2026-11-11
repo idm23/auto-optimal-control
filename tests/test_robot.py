@@ -1,7 +1,5 @@
 """Tapes, the run-time riding kernels, and a six-joint arm."""
 
-import functools
-
 import numpy as np
 import pytest
 import sympy as sp
@@ -254,11 +252,10 @@ def test_bounded_jerks_at_run_time_agree_with_the_clipped_law(clipped_two_ways):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("taus, t_f", [((2.2, 2.0), 3.656661), ((1.5, 0.4), 4.164857)])
-def test_minimum_time_through_run_time_arcs(monkeypatch, kernel_cache, taus, t_f):
+def test_minimum_time_through_run_time_arcs(kernel_cache, taus, t_f):
     # The same answers as the symbolic route: the benchmark's times, seeded with no draws.
-    monkeypatch.setattr(homotopy, "derive", functools.partial(derive, outline_above=0))
     with pytest.warns(UserWarning, match="not unique"):
-        h = Homotopy(examples.two_link_arm_min_time(), cache_dir=kernel_cache)
+        h = Homotopy(examples.two_link_arm_min_time(), cache_dir=kernel_cache, outline_above=0)
     assert h.kr.system.riding is not None
     r = h.solve([1, 1, 1, 1, 1.5, 1.0, 1.0, *taus], ([-3] * 6, [3] * 6), (1.0, 20.0))
     assert r.exact and r.tries == 0
