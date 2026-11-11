@@ -1993,6 +1993,14 @@ class Homotopy:
                     new_arcs, new_values = self._arcs_of(done[0], done[1].v)
                     checkpoints.append((dict(state), key(new_arcs, new_values)))
                 state.update(shoot=done[0], v=done[1].v, le=le, off=off)
+                if self.check_lemmas:
+                    from auto_optimal_control.lemmas import check
+                    try:
+                        for lemma, n_bad in check(done[0], done[1].v).items():
+                            if n_bad:
+                                self.diagnostics.oracle(lemma)
+                    except _FAILURES:
+                        self.diagnostics.oracle("check failed")
                 if changed:
                     prev = None            # the structure changed: no secant across it
                 frac, ds = f, min(ds * 1.5, 0.25)

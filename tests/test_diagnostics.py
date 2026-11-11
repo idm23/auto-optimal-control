@@ -54,3 +54,19 @@ def test_snapshots_are_capped_per_class(tmp_path):
              for i in range(4)]
     assert sum(p is not None for p in paths) == 2
     assert len(d.snapshots) == 2
+
+
+def test_every_rule_can_be_switched(axis):
+    from auto_optimal_control.rules import RULES, enabled, set_rule
+    h, _ = axis
+    before = enabled(h)
+    try:
+        for r in RULES:
+            set_rule(h, r.name, True)
+            assert enabled(h)[r.name]
+            set_rule(h, r.name, False)
+            assert not enabled(h)[r.name]
+    finally:
+        for name, on in before.items():
+            set_rule(h, name, on)
+    assert enabled(h) == before

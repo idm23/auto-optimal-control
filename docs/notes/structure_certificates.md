@@ -677,6 +677,52 @@ higher-order contact); of L2, a turning point (pseudo-arclength continuation
 is the tool there, and it is not part of this note); of L3, an offset path
 tangent to the event; of $S \cap B = \emptyset$, the corner case below.
 
+## How a rule is specified
+
+A lemma proves something about the answers (a necessary condition) or about
+the solution set along the route (regularity, symmetry). A rule changes the
+solver. Soundness, that no invalid answer gets through, is the easy part,
+because acceptance checks every condition. What a lemma about the answers does
+not give is a reason the rule should *help*: it says what the answer looks
+like, not how Newton or the route gets there. So each rule now states:
+
+| Field | Content |
+|---|---|
+| Hook | where in the route it acts: route start, newborn arc, seed failed, consistent step, step stalled, junction rows, evaluation, solve failed |
+| Trigger | the observable event, decided from the solver's state |
+| Hypotheses | certificates (exact or by construction) and local conditions checked at the event |
+| Action | the one thing it changes: acceptance, proposed structures, seed, rows, or the parameter of continuation |
+| Soundness | what it preserves, from which lemma |
+| Effectiveness | a lemma about the solver's own problem (regularity, convergence from the seed, a predictor's error), or "heuristic" |
+| Prediction | the failure class it should reduce (`Diagnostics`), written down before the run |
+
+The rules as they stand, in `auto_optimal_control.rules`:
+
+| Rule | Hook | Lemmas | Effectiveness | Targets | Measured | Default |
+|---|---|---|---|---|---|---|
+| R1 | route start | C, D | Lemma D | coincident births | 22 → 25 solved | opt-in |
+| R2 | step stalled | E | Lemma E | stalled steps | 27 → 26; predictor missing | off |
+| R4 | solve failed | F | heuristic | not exact | 25 → 26 | on |
+| R5 | consistent step | H | heuristic | mu rises | 26 → 29 | on |
+| R6 | newborn arc | I | heuristic | seed failed: riding | removed rest 4's crashes; 29 → 28 | on |
+| R7 | junction rows | J | heuristic | (rows degenerate at bounds) | 28 → 27; rest 0 solved | on |
+| R8 | seed failed | I, J | heuristic | seed failed: riding | no gain | off |
+| R9 | evaluation | K | heuristic | riding failed | 27 → 24 | off |
+
+Only R1 and R2 have an effectiveness lemma. The two most useful rules, R5 and
+the Lemma H acceptance check, worked without one. That is not a reason to skip
+effectiveness lemmas. It says that a necessary condition is most valuable in
+acceptance and in pruning structures, and that rules which change the route's
+geometry need a lemma about the route.
+
+*The tools.* `HomotopyResult.diagnostics` counts failed evaluations by class,
+steps by outcome, rejections by check and rules fired.
+`Homotopy.snapshot_dir` saves failed steps, and `diagnostics.replay` reruns
+one in seconds. `lemmas.check` runs the oracles for Lemmas H, I, J and E on a
+solution, and `Homotopy.check_lemmas` runs them on every path step.
+`lemmas.LimitObjects` gives the lemmas' quantities ($a$, $d$, the margin,
+$\alpha$, the free rate) from the kernels and the expressions of C1 and C2.
+
 ## What this note does not cover
 
 - **Jerk saturation.** C5 fails where a jerk reaches its bound. The control law

@@ -2,6 +2,7 @@
 
     python benchmarks/arm_census.py OUT.jsonl [--workers 14] [--cases goal4@90 rest11 ...]
         [--seconds 300] [--solves N] [--snapshots DIR] [--set name=value ...]
+        [--rule R2=on ...]
 
 Cases: 10 goals from rest at the origin, each with torque limits at 90%, 80% and
 70% of the way from the ends' torques to the free motion's peak (``goal<i>@<pct>``),
@@ -12,7 +13,8 @@ route steps by outcome, converged answers rejected by check, and rules fired.
 ``--solves`` caps the route's path solves (``Homotopy.max_path_solves``), a budget
 that does not depend on the machine or its load. ``--set`` sets a Homotopy attribute
 (``--set offset_start=staggered --set width_steps=True``); ``--set
-MultiArcShooting.rate_junctions_default=False`` sets a class default. The summary
+MultiArcShooting.rate_junctions_default=False`` sets a class default; ``--rule
+R2=on`` turns a rule of ``auto_optimal_control.rules`` on or off. The summary
 at the end adds the counters up over all cases.
 """
 
@@ -29,7 +31,7 @@ import sympy as sp
 from auto_optimal_control import examples
 from auto_optimal_control.homotopy import Homotopy
 from auto_optimal_control.robot import GRAVITY, SIX_JOINT_LINKS, joint_torques
-from auto_optimal_control import shooting
+from auto_optimal_control import rules, shooting
 
 TAU = np.array([5.0, 87.3, 28.5, 2.5, 0.7, 0.2])
 J = np.full(6, 30.0)
@@ -61,6 +63,10 @@ def setup(args):
             setattr(shooting.MultiArcShooting, name.split(".", 1)[1], value)
         else:
             setattr(H, name, value)
+    for item in args.rule or []:
+        name, state = item.split("=", 1)
+        rules.set_rule(H, name, state.lower() in ("on", "1", "true"))
+    print("rules on:", ", ".join(n for n, on in rules.enabled(H).items() if on), flush=True)
 
 
 def params(name, free_cache={}):
@@ -121,6 +127,7 @@ def main(argv=None):
     ap.add_argument("--snapshots", default=None)
     ap.add_argument("--cache", default=None)
     ap.add_argument("--set", action="append")
+    ap.add_argument("--rule", action="append")
     args = ap.parse_args(argv)
     setup(args)
     names = args.cases or ([f"goal{i}@{p}" for i in range(10) for p in (90, 80, 70)]
