@@ -50,7 +50,17 @@ MAX_NFEV = 1000000                 # right-hand-side evaluations per propagation
 
 
 class ShootingError(FloatingPointError):
-    """The extremal could not be propagated from these unknowns."""
+    """The extremal could not be propagated from these unknowns.
+
+    ``failure`` names the class of failure, for the solver's diagnostics:
+    ``"negative_width"`` (an arc's exit before its entry), ``"riding_failed"``
+    (a boundary arc's riding could not be integrated, as past the edge of the
+    holdable set), ``"free_failed"``, ``"singular_failed"``, ``"bad_final_time"``,
+    ``"violated"`` or ``"other"``."""
+
+    def __init__(self, message="", failure="other"):
+        super().__init__(message)
+        self.failure = failure
 
 
 class EdgeReached(ShootingError):
@@ -58,7 +68,7 @@ class EdgeReached(ShootingError):
     past it no admissible control holds the limits (the edge of the holdable set)."""
 
     def __init__(self, message, t_edge, ta, tb):
-        super().__init__(message)
+        super().__init__(message, "riding_failed")
         self.t_edge, self.ta, self.tb = t_edge, ta, tb
 
 
@@ -111,6 +121,7 @@ class SingleShooting:
     def __init__(self, kernels, params=(), *, x0=None, method="DOP853", rtol=1e-12, atol=1e-12,
                  max_switches=10000, terminate=False, n_interior=4):
         self.kernels = k = kernels
+        self.failures = {}                 # failed evaluations by class (ShootingError.failure)
         self.params = np.asarray(params, dtype=float).reshape(-1)
         if len(self.params) != k.N_PARAMS:
             raise ValueError(f"expected {k.N_PARAMS} parameters {k.param_names}, "
@@ -204,15 +215,16 @@ class SingleShooting:
 
     def _propagate(self, z0, tf, stm):
         if not tf > self.t0:
-            raise ShootingError(f"final time {tf} is not after the initial time {self.t0}")
+            raise ShootingError(f"final time {tf} is not after the initial time {self.t0}",
+                                "bad_final_time")
         # A bound on the work: coincident saturation corners can otherwise never finish.
         tolerance = {"stm_rtol": self.jacobian_rtol} if stm else {}
         r = self.kernels.propagate(self.t0, z0, tf, self.params, stm=stm, **tolerance,
                                    max_nfev=self.max_nfev, **self.options)
         if r["status"] == self.kernels.STATUS_VIOLATED:
-            raise ShootingError(f"path constraint violated at t = {r['t']}")
+            raise ShootingError(f"path constraint violated at t = {r['t']}", "violated")
         if r["status"] != 0:
-            raise ShootingError(f"propagation failed with status {r['status']}")
+            raise ShootingError(f"propagation failed with status {r['status']}", "free_failed")
         return r
 
     def residual(self, v):
@@ -260,10 +272,22 @@ class SingleShooting:
 
     # -- solving ------------------------------------------------------------
 
+    #: A dict that every instance's failed evaluations are also counted in (the
+    #: solver sets it for the length of a solve; see ``Homotopy.diagnostics``).
+    sink = None
+
+    def _failed(self, exc):
+        """Count a failed evaluation by its class (see :class:`ShootingError`)."""
+        failure = getattr(exc, "failure", "other")
+        self.failures[failure] = self.failures.get(failure, 0) + 1
+        if SingleShooting.sink is not None:
+            SingleShooting.sink[failure] = SingleShooting.sink.get(failure, 0) + 1
+
     def _safe(self, v):
         try:
             return self.residual_jacobian(v)
-        except (ShootingError, RuntimeError, ValueError):
+        except (ShootingError, RuntimeError, ValueError) as exc:
+            self._failed(exc)
             # A large residual makes MINPACK step back without stopping it.
             m = len(v)
             return np.full(m, 1e6), np.eye(m)
@@ -271,7 +295,8 @@ class SingleShooting:
     def _safe_residual(self, v):
         try:
             return self.residual(v)
-        except (ShootingError, RuntimeError, ValueError):
+        except (ShootingError, RuntimeError, ValueError) as exc:
+            self._failed(exc)
             return np.full(len(v), 1e6)
 
     def solve(self, guess, method="hybr", tol=1e-10, options=None):
@@ -811,7 +836,7 @@ class MultiArcShooting(SingleShooting):
         """Propagate a free (``kind is None``), boundary or singular arc; chain ``D = dz/dv``."""
         k, p = self.kernels, self.params
         if not tb > ta:
-            raise ShootingError(f"arc times out of order: {ta} then {tb}")
+            raise ShootingError(f"arc times out of order: {ta} then {tb}", "negative_width")
         tolerance = {"stm_rtol": self.jacobian_rtol} if jac else {}
         try:
             if kind is None:
@@ -834,9 +859,12 @@ class MultiArcShooting(SingleShooting):
                 if edge is not None:
                     raise EdgeReached(f"riding failed past {edge} on [{ta}, {tb}]: {exc}",
                                       edge, ta, tb) from exc
-            raise ShootingError(f"propagation failed on [{ta}, {tb}]: {exc}") from exc
+            failure = {None: "free_failed", "boundary": "riding_failed"}.get(kind, "singular_failed")
+            raise ShootingError(f"propagation failed on [{ta}, {tb}]: {exc}", failure) from exc
         if r["status"] != 0:
-            raise ShootingError(f"propagation failed with status {r['status']}")
+            raise ShootingError(f"propagation failed with status {r['status']}",
+                                {None: "free_failed", "boundary": "riding_failed"}.get(
+                                    kind, "singular_failed"))
         if jac:
             Phi = r["stm"]
             D = Phi @ D + np.outer(r["dz_dt1"], dtb) - np.outer(Phi @ Fa, dta)
@@ -1369,7 +1397,8 @@ class MultiArcShooting(SingleShooting):
                 R, J = self.residual_jacobian(v)
                 w = v - np.linalg.lstsq(J, R, rcond=None)[0]
                 err = float(np.linalg.norm(self.residual(w)))
-            except (ShootingError, RuntimeError, ValueError, np.linalg.LinAlgError):
+            except (ShootingError, RuntimeError, ValueError, np.linalg.LinAlgError) as exc:
+                self._failed(exc)
                 break
             if not err < best:
                 break
