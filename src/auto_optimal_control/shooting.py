@@ -504,6 +504,10 @@ class MultiArcShooting(SingleShooting):
 
     _SIZES = {"touch": 2, "singular": 2, "singular_joined": 1, "switch": 1}
 
+    #: Junction rows of order-1 arcs from the limit's rate (Lemma J): ``dg/dt = 0``
+    #: under the arriving control at an entry and the departing control at an exit.
+    rate_junctions_default = True
+
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1):
         super().__init__(kernels, params, x0=x0, method=method, rtol=rtol, atol=atol,
@@ -514,6 +518,7 @@ class MultiArcShooting(SingleShooting):
         if junctions not in ("auto", "hamiltonian"):
             raise ValueError("junctions must be 'auto' or 'hamiltonian'")
         self.junctions = junctions
+        self.rate_junctions = MultiArcShooting.rate_junctions_default
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -842,7 +847,10 @@ class MultiArcShooting(SingleShooting):
                 and not self.kernels.N_SWITCHING):
             return False
         k, p = self.kernels, self.params
-        if not k.system.problem.control_sets or self.tangent_junctions:
+        if not k.system.problem.control_sets or self.tangent_junctions or self.rate_junctions:
+            # With a cost strictly convex in the controls and a convex control set, the
+            # control is continuous at both junctions of an order-1 arc, bounds or not
+            # (Lemma J of docs/notes/structure_certificates.md).
             return True
         u = k.control(t, z, p) if side is None else k.boundary_control(side, t, z, p)
         lo, hi = k.control_bounds(t, z, p)
@@ -967,7 +975,16 @@ class MultiArcShooting(SingleShooting):
             z = r["z"]
             t, dt = t_ev, d_ev
             if ev == "out":
-                if self._regular_junction(kind, q, self._arc_id(active - {c}), t, z):
+                after = self._arc_id(active - {c})
+                if self.rate_junctions and self._regular_junction(kind, q, after, t, z):
+                    # The departure is tangential: under the control that follows the
+                    # exit, dg/dt = 0 (Lemma J). Where that control is strictly inside its
+                    # bounds this is a nonzero multiple of mu_c; at the edge of the
+                    # holdable set it holds with mu_c > 0, where mu_c = 0 cannot.
+                    val, gt, gz = self._rate_of(c, after, t, z, flags)
+                    rows.append(val)
+                    grads.append(gt * d_ev + gz @ D if jac else None)
+                elif self._regular_junction(kind, q, after, t, z):
                     # mu_c vanishes at the exit of an order-1 limit when H is
                     # regular: a simple root, where H continuity has a double one.
                     val, Mt, Mz = self._multiplier_of(aid, c, t, z)

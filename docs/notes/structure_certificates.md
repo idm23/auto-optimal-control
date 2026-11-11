@@ -403,6 +403,73 @@ event that could be watched during the integration. The edge is where every
 jerk with $a_k \ne 0$ is at a bound, which is outside Lemma B
 ($S \cap B \ne \emptyset$).
 
+### Lemma J (junctions of an order-1 arc are tangential, bounds or not)
+
+*Assume C1 and C2 (the running cost is strictly convex in the control, with
+constant Hessian $R \succ 0$) and a convex control set $U$. Let $g$ be an
+order-1 limit with $\dot g = a(x)^\top u + d(x)$. At an exit $\tau$ of a
+boundary arc of $g$ (with $g < 0$ just after), and at an entry (with
+$g < 0$ just before), the control is continuous, and
+$a^\top u(\tau^\pm) + d = 0$ on the free side as well. This holds whether or
+not the control is at a bound there. No other limit may change at $\tau$.*
+
+**Proof.** Use the direct formulation (Hartl, Sethi & Vickson 1995). The
+control minimizes $H = L + \lambda f$ over $U$ at almost every time, and at
+the one-sided limits by continuity. The costate may jump at $\tau$ by an atom
+$\nu = \eta(\{\tau\}) \ge 0$ of the multiplier:
+$\lambda(\tau^+) = \lambda(\tau^-) - \nu \nabla g$. Both sides minimize
+$\tfrac12 u^\top R u + q^\top u$ over $U$. Since $G^\top \nabla g = a$, the
+linear terms differ by $q^+ = q^- - \nu a$.
+
+Write the two optimality conditions: $(R u^- + q^-)^\top (u^+ - u^-) \ge 0$
+and $(R u^+ + q^+)^\top (u^- - u^+) \ge 0$. Adding them gives
+$$\nu\, a^\top (u^+ - u^-) \ge \|u^+ - u^-\|_R^2 .$$
+At an exit, $a^\top u^- + d = 0$ on the arc and $a^\top u^+ + d \le 0$ just
+after (the limit is left), so $a^\top(u^+ - u^-) \le 0$. With $\nu \ge 0$ the
+left side is $\le 0$, hence $u^+ = u^-$ and $a^\top u^+ + d = 0$. At an
+entry the signs swap: $a^\top u^- + d \ge 0$ just before and $= 0$ just after,
+and the same inequality, with $u^\pm$ exchanged, gives the same conclusion.
+$\square$
+
+**What it changes.** The solver used $\mu = 0$ at an exit, and $\dot g = 0$
+at an entry, only when the free-side controls are strictly inside their
+bounds (the regular case of Jacobson, Lele & Speyer 1971). Otherwise it used
+continuity of $H$. Lemma J removes the restriction. At a junction where the
+control is at a bound, $H$ continuity holds identically, since the control is
+continuous and $\dot g = 0$, so it is a degenerate row. The rate row
+$a^\top u + d = 0$, under the control of the side that is not the arc, is the
+condition that fixes the junction. In the regular case it is a nonzero
+multiple of $\mu$ (at an exit,
+$\dot g_{\rm free} = -a^\top R^{-1} a\, \mu$), so nothing changes there.
+
+At the edge of the holdable set of Lemma I, every control with $a_k \ne 0$
+is at a bound. There the exit can carry $\mu(\tau^-) = \nu > 0$: the box's
+corner absorbs $\nu a$, so the same vertex minimizes both sides. The rate row
+still holds, and $\mu = 0$ does not. An arc forced off its limit at the edge
+is therefore an extremal the old exit row could not represent.
+
+*Observed.* In rest-to-rest case 11 the riding of `tau1_min` drives the
+jerks of joints 2 and 3, then 1, to their bounds at $t \approx 0.333$, with
+$\mu = 3.6 \times 10^{-4} > 0$ and falling. Past that point the riding solve
+can hold the limit only with jerks of $\pm 30$ on joints 4 and 5, whose
+coefficients are $0.016$ and $-0.007$. There $\mu$ turns negative
+($-0.0196$), so no extremal rides there.
+
+### Rule R7 (rate rows at every junction of an order-1 arc)
+
+*Hypotheses:* C1, C2, a box of controls (or none), an order-1 limit, and no
+bang-bang control (C2 excludes it).
+
+*Rule:* the junction rows of an order-1 boundary arc are
+$a^\top u + d = 0$, under the arriving control at the entry and the departing
+control at the exit, in place of $\mu = 0$ or $H$ continuity
+(`MultiArcShooting.rate_junctions`).
+
+*Why it is sound:* by Lemma J these rows are necessary conditions at every
+such junction, and in the regular case they have the same roots as the old
+rows. Acceptance is unchanged: $\mu \ge 0$, $\dot\mu \le 0$ (Lemma H) and
+the jump signs are still checked.
+
 ## Lemma E (birth of an arc: normal form). Statement and plan of proof
 
 This is the result behind continuing in an arc's width rather than in $s$.
