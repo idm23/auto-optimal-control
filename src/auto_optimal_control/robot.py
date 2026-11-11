@@ -144,7 +144,22 @@ def jerk_controlled_arm(links, *, gravity=GRAVITY, name="arm"):
         final_time=T, path_constraints=constraints)
 
 
-def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time"):
+def _ends(q, w, a, moving_ends):
+    """Initial and final states, and the parameters they add: rest at ``q0`` and ``qf``,
+    or any state at both ends (``w0, a0, wf, af`` too) with ``moving_ends``."""
+    n = len(q)
+    q0, qf = (sp.symbols(f"{s}1:{n + 1}", real=True) for s in ("q0_", "qf_"))
+    if not moving_ends:
+        start = {**dict(zip(q, q0)), **{s: 0 for s in (*w, *a)}}
+        final = {**dict(zip(q, qf)), **{s: 0 for s in (*w, *a)}}
+        return start, final, [*q0, *qf]
+    w0, a0, wf, af = (sp.symbols(f"{s}1:{n + 1}", real=True) for s in ("w0_", "a0_", "wf_", "af_"))
+    start = {**dict(zip(q, q0)), **dict(zip(w, w0)), **dict(zip(a, a0))}
+    final = {**dict(zip(q, qf)), **dict(zip(w, wf)), **dict(zip(a, af))}
+    return start, final, [*q0, *w0, *a0, *qf, *wf, *af]
+
+
+def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends=False):
     """Rest to rest in minimum time, with bounded jerks and a limit on each joint's torque.
 
     ``min t_f`` subject to ``|j_i| <= j_max_i`` and ``|tau_i| <= tau_max_i``, from rest at
@@ -153,12 +168,14 @@ def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time"):
     default policy of :class:`~auto_optimal_control.homotopy.Homotopy` adds a small
     jerk cost.
 
-    params: the ``q0``, the ``qf``, the ``j_max``, the ``tau_max``.
+    params: the ``q0``, the ``qf``, the ``j_max``, the ``tau_max``. With
+    ``moving_ends`` the motion runs between any two states instead of from
+    rest to rest: the params begin ``q0, w0, a0, qf, wf, af``.
     """
     n = len(links)
     t = sp.Symbol("t", real=True)
     q, w, a, j = (sp.symbols(f"{s}1:{n + 1}", real=True) for s in ("q", "w", "a", "j"))
-    q0, qf = (sp.symbols(f"{s}1:{n + 1}", real=True) for s in ("q0_", "qf_"))
+    start, final, ends = _ends(q, w, a, moving_ends)
     j_max = sp.symbols(f"j_max1:{n + 1}", positive=True)
     limits = sp.symbols(f"tau_max1:{n + 1}", positive=True)
     tau = joint_torques(links, q, w, a, gravity)
@@ -166,10 +183,8 @@ def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time"):
     for i in range(n):
         constraints += [PathConstraint(tau[i] - limits[i], f"tau{i + 1}_max"),
                         PathConstraint(-tau[i] - limits[i], f"tau{i + 1}_min")]
-    start = {**dict(zip(q, q0)), **{s: 0 for s in (*w, *a)}}
-    final = {**dict(zip(q, qf)), **{s: 0 for s in (*w, *a)}}
     return OptimalControlProblem(
         name=name, time=t, states=[*q, *w, *a], controls=list(j),
-        params=[*q0, *qf, *j_max, *limits], dynamics=[*w, *a, *j], running_cost=1,
+        params=[*ends, *j_max, *limits], dynamics=[*w, *a, *j], running_cost=1,
         initial_state=start, final_state=final, path_constraints=constraints,
         control_sets=[Box(u, -m, m) for u, m in zip(j, j_max)])

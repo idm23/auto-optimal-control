@@ -72,6 +72,8 @@ if gradients, Jacobians and Hessians are familiar.
 | 18 | {doc}`18_minimum_time_several_axes` | the fastest motion of several axes | non-unique optima; vanishing costates and singular Jacobians; a secondary cost, a two-stage solve, a fixed path |
 | 19 | {doc}`19_choosing_among_equal_motions` | a two-link arm in minimum time, with bounded jerks and torque limits | non-uniqueness read from the statement; selectable policies; riding a limit with bounded controls |
 | 20 | {doc}`20_six_joints` | what breaks at six joints? | the bottlenecks, measured; the recursive Newton–Euler algorithm; tapes; arcs solved at run time; a survey of random motions; minimum time with bounded jerks, and where the time goes; why a limit on a control's rate must make that control a state |
+| 21 | {doc}`21_extremals_without_a_solve` | exact extremals without solving a boundary-value problem | which conditions hold at fixed ends; integrating from one end; an arc's free parameter going forward and backward; local junctions; arcs born at a peak; failures that cannot give a wrong extremal |
+| 22 | {doc}`22_an_embedding_of_extremals` | from any start to any goal, when generation cannot choose the end | a set of extremals as a map of motions; nearest endpoints, polishing and continuation; learned proposals: a conditional normalizing flow and a JEPA |
 
 To run the notebooks yourself, clone the repository and run
 `uv sync --group docs`, then open them in Jupyter. They need a C compiler,
@@ -103,6 +105,8 @@ p1_jacobians_and_hessians
 18_minimum_time_several_axes
 19_choosing_among_equal_motions
 20_six_joints
+21_extremals_without_a_solve
+22_an_embedding_of_extremals
 ```
 
 ## Sources
