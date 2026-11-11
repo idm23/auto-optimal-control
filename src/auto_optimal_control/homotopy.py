@@ -1564,7 +1564,8 @@ class Homotopy:
             sh.tangent_junctions = True
         return sh, r
 
-    def _width_step(self, shoot, v, frac, point, factor, tol, iterations=10):
+    def _width_step(self, shoot, v, frac, point, factor, tol, iterations=10, guess=None,
+                    arc=None):
         """Rule R2: a step in a young arc's width, with the route's parameter solved for.
 
         Near a birth (or death) of an order-1 arc its width moves like the square root
@@ -1572,13 +1573,16 @@ class Homotopy:
         in the width are regular. The narrowest finite order-1 arc's width is set to
         ``factor`` times its current value and the system ``[Phi(v; s), w - w_target]``
         is solved for ``(v, s)``, with ``point(s) = (le, off)`` the route's line.
-        Returns ``(v, s)`` or None."""
+        ``guess`` is a predicted ``(v, s)`` to start from, ``arc`` the arc's index.
+        Returns ``(v, s, arc, w, w_target)`` or None."""
         if not isinstance(shoot, MultiArcShooting):
             return None
         T = shoot.unpack(v)[3] - shoot.t0
         best = None
         for i, ((kind, c, q), sl) in enumerate(zip(shoot.arcs, shoot._arc_slices)):
             if kind != "boundary" or q != 1 or i in shoot._started or i in shoot._open:
+                continue
+            if arc is not None and i != arc:
                 continue
             w = v[sl.start + 1] - v[sl.start]
             if 0 < w < 0.05 * T and (best is None or w < best[1]):
@@ -1603,7 +1607,10 @@ class Homotopy:
             row = x[sl.start + 1] - x[sl.start] - target
             return np.append(R, row), J
 
-        x = np.append(np.asarray(v, dtype=float), frac)
+        if guess is not None:
+            x = np.append(np.asarray(guess[0], dtype=float), float(guess[1]))
+        else:
+            x = np.append(np.asarray(v, dtype=float), frac)
         mid = 0.5 * (x[sl.start] + x[sl.start + 1])
         x[sl.start], x[sl.start + 1] = mid - 0.5 * target, mid + 0.5 * target
         try:
@@ -1646,7 +1653,42 @@ class Homotopy:
         self.diagnostics.fired("R2")
         self._detail(f"    width step: arc {i} from {w:.3e} to {target:.3e}, route parameter "
                      f"{frac:.6f} -> {x[-1]:.6f}")
-        return x[:-1], float(x[-1])
+        return x[:-1], float(x[-1]), i, w, target
+
+    def _width_moves(self, shoot, v, frac, point, tol):
+        """Rule R2's moves at a stall, from Lemma E's normal form ``s = s* + kappa w^2``.
+
+        A step to half the young arc's width tells which side of the event the route is
+        on. If ``s`` moves forward the arc is dying: ``w^2`` is linear in ``s``, so the
+        death is at ``s* = s_half + (s_half - s) / 3``; the moves are the structure
+        without the arc just past ``s*``, then the half step. If ``s`` moves back the
+        arc is being born: ``kappa`` and ``s*`` from the two points predict ``s`` at
+        ``1.5 w``, and ``v`` is predicted linearly in ``w`` (the branch is smooth in
+        ``w``). Yields ``(v, s, dropped arc or None)``, best first."""
+        half = self._width_step(shoot, v, frac, point, 0.5, tol)
+        if half is None:
+            return
+        v_h, s_h, i, w0, w_h = half
+        if s_h > frac:
+            s_star = s_h + (s_h - frac) * w_h ** 2 / (w0 ** 2 - w_h ** 2)
+            beyond = s_star + 0.25 * (s_star - frac)
+            if s_star < 1.0:
+                self.diagnostics.fired("R2 death")
+                self._detail(f"    width steps: arc {i} dies at s = {s_star:.6f}; past it without")
+                yield v, min(beyond, 1.0), i
+            yield v_h, s_h, None
+            return
+        kappa = (frac - s_h) / (w0 ** 2 - w_h ** 2)
+        if not kappa > 0:
+            return
+        s_star = frac - kappa * w0 ** 2
+        w_t = 1.5 * w0
+        s_t = s_star + kappa * w_t ** 2
+        v_t = v + (v - v_h) * (w_t - w0) / (w0 - w_h)
+        grown = self._width_step(shoot, v, frac, point, 1.5, tol, guess=(v_t, s_t), arc=i)
+        if grown is not None and frac < grown[1] <= 1.0:
+            self.diagnostics.fired("R2 birth")
+            yield grown[0], grown[1], None
 
     def _split_rising(self, shoot, v, n_points=801):
         """Structures with an order-1 boundary arc split where its multiplier rises.
@@ -1831,6 +1873,7 @@ class Homotopy:
                                      + ", ".join(f"{self.kr.CONSTRAINT_NAMES[c]} {peak / scale[c]:.1e}"
                                                  f" at [{a:.5f}, {b:.5f}]"
                                                  for c, a, b, peak in viol) + ")")
+                        state["why"] = "violation too large"
                         return None        # too far in: take a shorter step
                     # After a structure change a large violation is that change's doing
                     # (new arcs move the motion), which no shorter step undoes: it is
@@ -1865,6 +1908,7 @@ class Homotopy:
                 if self.parallel > 1 and options and not optional:
                     hit = self._speculate(options, base, le, off, solve_structure, state)
                     if hit is None:
+                        state["why"] = "no structure converged"
                         return None
                     (arcs, values), nsh, nr = hit
                     self._detail(f"    try in parallel: {self._mas_entries(arcs, values, True)[0]}")
@@ -1887,10 +1931,12 @@ class Homotopy:
                 else:
                     if optional:
                         return sh, r
+                    state["why"] = "no structure converged"
                     return None
                 sh, r = nsh, nr
                 changed = True
                 self._say(f"  structure: {self._names(arcs)}")
+            state["why"] = "structure changes did not settle"
             return None
 
         def advance(target_le, target_off, on_step=None, ds_min=1e-6):
@@ -1920,6 +1966,7 @@ class Homotopy:
                     vals = self._arcs_of(sh0, g)[1] if arcs else values
                     attempt = (arcs, vals, base)
                     before = dict(self.diagnostics.evaluations)
+                    state["why"] = None
                     try:
                         sh, r = solve_structure(arcs, vals, base, le, off)
                         self._detail(f"  step to {f:.6f} (ds {ds:.1e}): residual "
@@ -1927,7 +1974,8 @@ class Homotopy:
                                      f"{self._junction_text(sh, r.v)}")
                         done = settle(sh, r, le, off) if r.success else None
                         if r.success:
-                            outcome = "settle failed" if done is None else "converged"
+                            outcome = ("converged" if done is not None
+                                       else f"settle failed: {state.get('why') or 'other'}")
                         elif r.residual_norm >= 1e5:
                             new = {k_: n_ - before.get(k_, 0)
                                    for k_, n_ in self.diagnostics.evaluations.items()}
@@ -1968,14 +2016,13 @@ class Homotopy:
                     def point(sv, le0=le0, off_start=off_start):
                         return (le0 + sv * (target_le - le0),
                                 off_start + sv * (target_off - off_start))
-                    for factor in (1.5, 0.5):
-                        hit = self._width_step(sh0, v0, frac, point, factor, path_tol)
-                        if hit is None or not frac < hit[1] <= 1.0:
-                            continue
-                        vw, fw = hit
+                    for vw, fw, drop in self._width_moves(sh0, v0, frac, point, path_tol):
                         le_w, off_w = point(fw)
                         try:
                             arcs_w, vals_w = self._arcs_of(sh0, vw)
+                            if drop is not None:
+                                arcs_w = arcs_w[:drop] + arcs_w[drop + 1:]
+                                vals_w = vals_w[:drop] + vals_w[drop + 1:]
                             sh, r = solve_structure(arcs_w, vals_w, vw[:sh0.n_base], le_w, off_w)
                             done = settle(sh, r, le_w, off_w) if r.success else None
                         except _FAILURES:

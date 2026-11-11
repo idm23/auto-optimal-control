@@ -52,3 +52,29 @@ def test_the_oracles_catch_a_wrong_jump(axis):
     v[sl.stop - 1] *= 1.2
     bad = check(sh, v)
     assert bad["J"] + bad["E"] + bad["H"] > 0
+
+
+@pytest.fixture(scope="module")
+def drift(kernel_cache):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        h = Homotopy(examples.drift_limited_axis(), cache_dir=kernel_cache, policy=SecondaryCost(),
+                     outline_above=0)
+    h.check_lemmas = True
+    return h
+
+
+def test_the_drift_axis_has_a_velocity_dependent_margin(drift):
+    # tau = a + B v^2: d tau/dt = j + 2 B v a, so a = 1, d = 2 B v a and the margin
+    # is J - |2 B v a| (Lemma I): it closes at speed.
+    r = drift.solve([1.0, 0.5, 0.5, 2.0], ([-1.0] * 3, [1.0] * 3), (0.5, 40.0))
+    assert r.exact and ("boundary", "tau_max") in r.arcs
+    sh = r.shooting
+    obj = LimitObjects(sh.kernels, sh.params)
+    c = list(sh.kernels.CONSTRAINT_NAMES).index("tau_max")
+    z = np.array([0.3, 0.8, 0.4, 0.1, 0.2, -0.3])
+    a, d = obj.rate_parts(c, 0.0, z)
+    assert np.allclose(a, [1.0]) and abs(d - 2 * 0.5 * 0.8 * 0.4) < 1e-12
+    assert abs(obj.margin(c, 0.0, z) - (1.0 - 0.32)) < 1e-12
+    assert r.diagnostics["oracles"] == {}
+    assert check(sh, r.solution.v) == {"H": 0, "I": 0, "J": 0, "E": 0}
