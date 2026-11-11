@@ -944,7 +944,65 @@ class ExtremalGenerator:
             raise Rejected("anchor not reached from inside")
         return z
 
-    def generate_anchored(self, c, z, before, after, rng=None):
+    def _start_at(self, c, za, before, fixed, iterations=60):
+        """The entry onto limit ``c`` nearest ``za`` whose motion starts on ``fixed``.
+
+        ``fixed`` maps state indices to values at ``before`` ahead of the entry
+        (a rest start: rates and accelerations zero). Entry conditions and the
+        start's are solved together, minimum norm in scaled unknowns; the start's
+        rows differentiate through the state transition matrix of the backward run."""
+        k, p, n = self.kernels, self.params, self.kernels.N_STATES
+        idx = list(fixed)
+        target = np.array([fixed[i] for i in idx], dtype=float)
+        t_a = self.t0 + float(before)
+
+        def rows(z, jac):
+            e = self._entry_rows(c, self.t0, z)
+            r = k.propagate(t_a, z, self.t0, p, stm=jac, constraint_events=False, **self._capped)
+            if r["status"] != 0:
+                raise ShootingError(f"propagation failed with status {r['status']}")
+            R = np.r_[e, r["z"][idx] - target]
+            if not jac:
+                return R, None
+            J = np.zeros((len(e), 2 * n))
+            for i in range(2 * n):
+                h = 1e-7 * max(1.0, abs(z[i]))
+                zh = z.copy()
+                zh[i] += h
+                J[:, i] = (self._entry_rows(c, self.t0, zh) - e) / h
+            return R, np.vstack([J, np.asarray(r["stm"])[idx]])
+
+        z = za.copy()
+        scale = np.r_[np.full(n, max(float(np.sqrt(np.mean(z[:n] ** 2))), 1e-3)),
+                      np.full(n, max(float(np.sqrt(np.mean(z[n:] ** 2))), 1e-3))]
+        R, J = rows(z, True)
+        damping = 1e-8
+        for _ in range(iterations):
+            self._out_of_time()
+            if np.max(np.abs(R)) < self.tol:
+                break
+            A = J * scale
+            for _ in range(20):
+                aug = np.vstack([A, np.sqrt(damping) * np.eye(2 * n)])
+                y = np.linalg.lstsq(aug, np.r_[-R, np.zeros(2 * n)], rcond=None)[0]
+                try:
+                    Rt, _ = rows(z + scale * y, False)
+                except _FAILURES:
+                    damping *= 10
+                    continue
+                if Rt @ Rt < R @ R:
+                    z = z + scale * y
+                    R, J = rows(z, True)
+                    damping = max(damping / 10, 1e-12)
+                    break
+                damping *= 10
+            else:
+                raise Rejected("no start", f"residual {np.max(np.abs(R)):.1e}")
+        else:
+            raise Rejected("no start", f"residual {np.max(np.abs(R)):.1e}")
+        return z
+
+    def generate_anchored(self, c, z, before, after, rng=None, start=None):
         """An extremal through an entry onto limit ``c`` at ``z = (x, lam)`` (anchored first).
 
         From the anchor the free equations integrate backward for ``before``,
@@ -954,20 +1012,26 @@ class ExtremalGenerator:
         length drawn from :attr:`arc_fraction`. The entry is exact by
         construction, so the saturated controls and the out-of-reach peaks that
         stop :meth:`generate` do not arise there; later limits are handled as
-        there. Requires a free final time."""
+        there. Requires a free final time. ``start`` maps state indices to
+        values the motion must start on (for instance zero rates and
+        accelerations, for a start at rest); the anchor moves to meet them."""
         if not self.free_time:
             raise NotImplementedError("anchored generation needs a free final time")
         self._rng = np.random.default_rng(rng)
         self._deadline = (time.perf_counter() + self.max_seconds if self.max_seconds
                           else np.inf)
         try:
-            return self._generate_anchored(c, z, before, after)
+            return self._generate_anchored(c, z, before, after, start)
         except _FAILURES as exc:      # an integration that fails or runs past max_nfev
             raise Rejected("propagation failed", str(exc)) from exc
 
-    def _generate_anchored(self, c, z, before, after):
+    def _generate_anchored(self, c, z, before, after, start=None):
         k, p, n = self.kernels, self.params, self.kernels.N_STATES
         za = self.anchor(c, z)
+        if start:
+            za = self._start_at(c, za, before, start)
+            if self._curvature(c, self.t0, za) >= 0:
+                raise Rejected("anchor not reached from inside")
         t_a = self.t0 + float(before)
         # Backward to the start. Events are not used: integrating backward a limit is
         # crossed the other way. Instead the stretch is sampled, and the motion starts
@@ -994,6 +1058,8 @@ class ExtremalGenerator:
                 else:
                     hi = mid
             t_start = hi + 1e-3 * (t_a - hi)
+            if start:
+                raise Rejected("violated before the anchor", "the start is fixed")
             if t_a - t_start < 1e-3 * before:
                 raise Rejected("violated just before the anchor")
             rb = k.propagate(t_a - eps, r["z"], t_start, p, constraint_events=False, **self._capped)

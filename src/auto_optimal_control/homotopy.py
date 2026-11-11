@@ -1208,6 +1208,38 @@ class Homotopy:
             options.append(build(False, narrow=True))
         return options
 
+    def _bound_options(self, shoot, v):
+        """Structures that undo an overlap of arcs whose riding control leaves its bounds.
+
+        Riding as many limits as controls fixes every control, so a stretch that
+        needs more than the bound allows cannot be ridden. One arc must then end
+        before that stretch, or start after it; the junction there has a control
+        at its bound, so ``H`` continuity holds at it. Returns a list of
+        ``(arcs, values)``, or ``None`` when every riding control is in bounds."""
+        if not isinstance(shoot, MultiArcShooting) or len(shoot.arcs) < 2:
+            return None
+        arcs, values = self._arcs_of(shoot, v)
+        tr = shoot.trajectory(v, 801)
+        k, p = shoot.kernels, shoot.params
+        lo, hi = (np.array(b, dtype=float) for b in zip(*[k.control_bounds(t, z, p)
+                                                          for t, z in zip(tr["t"], tr["z"])]))
+        over = np.maximum(tr["u"] - hi, lo - tr["u"]).max(axis=1)
+        bad = (over > 1e-6 * np.maximum(hi - lo, 1e-12).max(axis=1)) & (tr["active"].sum(axis=1) >= 2)
+        if not bad.any():
+            return None
+        t_bad = tr["t"][bad]
+        ta, tb = float(t_bad[0]), float(t_bad[-1])
+        margin = 1e-3 * (tr["t"][-1] - tr["t"][0])
+        hit = [i for i, ((kind, _), val) in enumerate(zip(arcs, values))
+               if kind == "boundary" and val[0] <= tb and val[1] >= ta]
+        options = []
+        for i in hit:
+            a, b, pi = values[i]
+            for new in ((a, ta - margin, pi), (tb + margin, b, pi)):
+                if new[1] - new[0] > margin:
+                    options.append((arcs, [new if j == i else w for j, w in enumerate(values)]))
+        return options or None
+
     def _retire(self, shoot, v):
         """The structure without arcs that have died: a boundary arc shrunk to
         nothing becomes a touch point (order 2 or more) or goes (order 1), and a touch
@@ -1333,9 +1365,12 @@ class Homotopy:
                     options = self._activate(sh, r.v, viol)
                 else:
                     dead = self._retire(sh, r.v)
-                    if dead is None:
-                        return sh, r
-                    options = [dead]
+                    if dead is not None:
+                        options = [dead]
+                    else:
+                        options = self._bound_options(sh, r.v)
+                        if options is None:
+                            return sh, r
                 base = r.v[:sh.n_base] if isinstance(sh, MultiArcShooting) else r.v
                 for arcs, values in options:
                     try:
