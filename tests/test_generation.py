@@ -326,3 +326,32 @@ def test_the_quasimetric_obeys_the_triangle_inequality_untrained():
         dxz = model(x, px, z, pz)
         assert torch.all(dxz <= model(x, px, y, py) + model(y, py, z, pz) + 1e-5)
         assert torch.all(model(x, px, x, px) < 1e-5)
+
+
+def test_an_arc_ridden_from_the_start_matches_a_vanishing_free_stretch(smooth):
+    # On a_max at t0, a free stretch of 2e-9 s before the arc is the old way to say it.
+    start = np.array([0.0, 0.0, 1.0])
+    end = np.array([3.0, 0.0, 0.0])
+    r = smooth.solve(params(start, end), ([-1.0] * 3, [1.0] * 3), (0.5, 20.0))
+    assert r.exact, r.message
+    values = list(r.shooting.unpack_arcs(r.solution.v))
+    assert values[0][0] < 1e-6
+    kx, p = smooth.exact_kernels, smooth.exact_params()
+    shoot = MultiArcShooting(kx, p, [("start", "a_max"), ("exit", "a_max"), ("boundary", "a_min")])
+    shoot.tangent_junctions = True
+    v = shoot.pack_arcs(r.solution.v[:shoot.n_base], [(0.0, values[0][1], np.zeros(1)), values[1]])
+    w = v + 1e-5 * np.random.default_rng(0).normal(size=len(v)) * np.abs(v).clip(1e-3)
+    R, J = shoot.residual_jacobian(w)
+    FD = np.zeros_like(J)
+    for i in range(len(w)):
+        h = 1e-6 * max(1.0, abs(w[i]))
+        a, b = w.copy(), w.copy()
+        a[i] += h
+        b[i] -= h
+        FD[:, i] = (shoot.residual(a) - shoot.residual(b)) / (2 * h)
+    assert np.allclose(J, FD, rtol=1e-3, atol=2e-4)
+    sol = shoot.solve_damped(v, tol=1e-9)
+    assert sol.success, sol.residual_norm
+    assert abs(sol.tf - r.solution.tf) < 1e-6
+    d = shoot.diagnostics(sol.v)
+    assert min(lo for lo, _ in d["boundary_mu"]) > -1e-8

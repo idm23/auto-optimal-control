@@ -370,6 +370,9 @@ class MultiArcShooting(SingleShooting):
       junctions. The costates jump by ``-dN/dx^T pi`` at the entry and are
       continuous at the exit (indirect adjoining, Bryson, Denham & Dreyfus
       1963; Maurer 1977).
+    - ``("start", c)``: the start is on order-1 limit ``c`` and the motion
+      rides it from ``t0``; give an ``("exit", c)`` later, unless it is ridden
+      to the end. Unknown: the exit time. There is no entry or jump.
     - ``("touch", c)``: an isolated contact with a constraint of order 2
       or more. Unknowns: the contact time and the jump ``nu`` (``lambda+ =
       lambda- - nu dg/dx``). Conditions: ``g = g' = 0`` there. ``nu >= 0`` is
@@ -465,9 +468,25 @@ class MultiArcShooting(SingleShooting):
         self.arcs = []
         self.events = []                 # ("in" | "out" | "touch" | "legacy", arc index)
         open_arcs = {}                   # constraint -> index of its arc entered, not yet left
+        self._started = set()            # arcs ridden from t0: no entry, no jump
         sides = {}                       # singular control -> [(before, after)] in order
         for item in arcs:
             kind, c, *rest = item
+            if kind == "start":
+                # The start is on the limit and the motion rides it from t0 (order 1: the
+                # state already satisfies the one condition an entry would impose).
+                if rest:
+                    raise ValueError("a start entry is ('start', constraint)")
+                if isinstance(c, str):
+                    c = list(k.CONSTRAINT_NAMES).index(c)
+                c = int(c)
+                if not k.EXACT_ARCS[c] or k.CONSTRAINT_ORDERS[c] != 1:
+                    raise ValueError(f"path constraint {k.CONSTRAINT_NAMES[c]!r}: only order-1 "
+                                     "limits with exact arcs can be ridden from the start")
+                self._started.add(len(self.arcs))
+                open_arcs[c] = len(self.arcs)
+                self.arcs.append(("boundary", c, k.CONSTRAINT_ORDERS[c]))
+                continue
             if kind in ("enter", "exit"):
                 if rest:
                     raise ValueError(f"an {kind} entry is ({kind!r}, constraint)")
@@ -572,7 +591,10 @@ class MultiArcShooting(SingleShooting):
         self._arc_slices = []
         off = self.n_base
         for i, (kind, c, q) in enumerate(self.arcs):
-            size = (1 if i in self._open else 2) + q if kind == "boundary" else self._SIZES[kind]
+            if kind == "boundary" and i in self._started:
+                size = 0 if i in self._open else 1   # only the exit, if it has one
+            else:
+                size = (1 if i in self._open else 2) + q if kind == "boundary" else self._SIZES[kind]
             self._arc_slices.append(slice(off, off + size))
             off += size
         self.n_arcs_end = off
@@ -627,6 +649,9 @@ class MultiArcShooting(SingleShooting):
                 if pi.shape != (q,):
                     raise ValueError(f"pi must have {q} entries for an order-{q} constraint")
                 # An arc open at the end has no exit time; t_out is ignored.
+                if i in self._started:
+                    parts.append(np.zeros(0) if i in self._open else np.array([t_out]))
+                    continue
                 parts.append(np.concatenate([[t_in] if i in self._open else [t_in, t_out], pi]))
             else:
                 parts.append(np.asarray(val, dtype=float).reshape(self._SIZES[kind]))
@@ -662,7 +687,9 @@ class MultiArcShooting(SingleShooting):
         out = []
         for i, ((kind, _, _), sl) in enumerate(zip(self.arcs, self._arc_slices)):
             w = v[sl]
-            if kind == "boundary" and i in self._open:
+            if kind == "boundary" and i in self._started:
+                out.append((self.t0, np.nan if i in self._open else w[0], np.zeros(self.arcs[i][2])))
+            elif kind == "boundary" and i in self._open:
                 out.append((w[0], np.nan, w[1:].copy()))
             elif kind == "boundary":
                 out.append((w[0], w[1], w[2:].copy()))
@@ -841,7 +868,7 @@ class MultiArcShooting(SingleShooting):
         rows, grads, segments = [], [], []
         z, D, t, dt = z0, D0, self.t0, np.zeros(N)
         flags = dict(self.frozen)
-        active = set()
+        active = {self.arcs[i][1] for i in self._started}
         node_index = [0]
 
         def stretch(seg, aid, t, dt, z, D, t_end, d_end):
@@ -879,7 +906,8 @@ class MultiArcShooting(SingleShooting):
             sl = self._arc_slices[i]
             w = v[sl]
             if ev == "out":
-                t_ev, d_ev = w[1], unit(sl.start + 1)
+                at = 0 if i in self._started else 1
+                t_ev, d_ev = w[at], unit(sl.start + at)
             else:
                 t_ev, d_ev = w[0], unit(sl.start)
             aid = self._arc_id(active)
@@ -1121,6 +1149,19 @@ class MultiArcShooting(SingleShooting):
                 break
             scale = np.maximum(np.linalg.norm(J, axis=0), 1e-12)
             A = J / scale
+            # The minimum-norm Gauss-Newton step first: it converges fast even when the
+            # rows are redundant (an arc riding into an end state on its limit).
+            try:
+                dv = np.linalg.lstsq(A, -R, rcond=1e-8)[0] / scale
+                Rt = self.residual(v + dv)
+                trial = float(np.linalg.norm(Rt))
+            except failures:
+                trial = float("inf")
+            if np.isfinite(trial) and trial < 0.5 * err:
+                v = v + dv
+                R, J = self.residual_jacobian(v)
+                err = float(np.linalg.norm(R))
+                continue
             moved = False
             for _ in range(24):
                 aug = np.vstack([A, np.sqrt(damping) * np.eye(A.shape[1])])
