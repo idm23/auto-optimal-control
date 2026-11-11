@@ -662,6 +662,42 @@ $-0.0103$, as the lemma predicts (giving $s^* \approx -0.014$). The growth step
 fails, because it lands near $s \approx 0.018$ without a predictor; the branch
 is smooth in $w$, so a secant in $w$ is the predictor to use.
 
+### Rule R10 (integrate a negative-width arc backward)
+
+*Rule:* a segment whose end time comes before its start is integrated
+backward, not refused (`MultiArcShooting.backward_segments`). Answers whose
+junctions are out of order are rejected ("junctions out of order"). Along
+the route, `_retire` turns such a solution into a structure again: it
+removes an arc of negative width, or re-sorts crossed events.
+
+*Effectiveness:* step 1 of Lemma E. The shooting map is a composition of
+flows, smooth in every junction time whatever their order, as long as each
+flow is defined. So Newton sees a smooth residual through an arc's zero
+width instead of a wall of failed evaluations.
+
+*Its limit:* the flows must exist. Riding backward from an entry needs the
+riding control to exist there (H0: the margin of Lemma I positive). Newton's
+overshoots are not always small. On the drift-limited axis every
+negative-width failure became a riding failure instead (155, 241 and 348 of
+them): the backward ride left the holdable set. On the plain axis they
+disappeared (318 to 0), with 10% fewer steps and the same answers.
+
+*Census* (45 cases, 300 s, with R1, R2 and R4 to R7), compared with the
+same run without R10:
+
+| | Without R10 | With R10 |
+|---|---|---|
+| Solved | 28 | 28 (gained goal 0 at 90% and rest 9; lost goal 3 at 80% and goal 5 at 90%) |
+| Under 60 s | 12 | 17 |
+| Median time | 77.3 s | 48.8 s (0.89 on the 26 common cases, same answers to 1e-15) |
+| Failed evaluations | 70,296 negative width, 3,390 riding | 1,446 negative width, 15,749 riding |
+| Steps not converged / no structure converged | 1,892 / 1,169 | 936 / 692 |
+
+The prediction (negative widths fall sharply, the median falls) held. The
+cost is that riding failures are now the main class. They are backward rides
+that leave the holdable set, so the edge of Lemma I is now the obstacle on
+both sides of an arc. R10 is on by default.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

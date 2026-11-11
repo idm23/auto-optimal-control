@@ -78,3 +78,41 @@ def test_the_drift_axis_has_a_velocity_dependent_margin(drift):
     assert abs(obj.margin(c, 0.0, z) - (1.0 - 0.32)) < 1e-12
     assert r.diagnostics["oracles"] == {}
     assert check(sh, r.solution.v) == {"H": 0, "I": 0, "J": 0, "E": 0}
+
+
+def test_the_flow_through_an_arc_is_smooth_through_zero_width(drift):
+    # Rule R10 (Lemma E, step 1): riding for a width w then the free law to a fixed
+    # time is the flows composed, backward for w < 0, so it is smooth through w = 0.
+    from auto_optimal_control.shooting import MultiArcShooting
+    r = drift.solve([1.0, 0.5, 0.5, 2.0], ([-1.0] * 3, [1.0] * 3), (0.5, 40.0))
+    sh = r.shooting
+    assert isinstance(sh, MultiArcShooting) and sh.backward_segments
+    _, _, segs = sh._evaluate(np.asarray(r.solution.v), jac=False)
+    _, c, t_in, _, z_in, _, _ = next(sg for sg in segs if sg[0] == "boundary")
+    t1 = t_in + 0.05
+    zero = np.zeros(1)
+
+    def through(w):
+        ride, _ = sh._segment("boundary", c, t_in, zero, z_in, None, t_in + w, zero, False)
+        free, _ = sh._segment(None, None, t_in + w, zero, ride["z"], None, t1, zero, False,
+                              flags={})
+        return free["z"]
+
+    h = 1e-5
+    zs = {k: through(k * h) for k in (-2, -1, 1, 2)}
+    left = (zs[-1] - zs[-2]) / h
+    right = (zs[2] - zs[1]) / h
+    middle = (zs[1] - zs[-1]) / (2 * h)
+    assert np.allclose(middle, right, rtol=1e-3, atol=1e-7)
+    assert np.allclose(middle, left, rtol=1e-3, atol=1e-7)
+
+
+def test_an_answer_out_of_order_is_rejected(drift):
+    r = drift.solve([1.0, 0.5, 0.5, 2.0], ([-1.0] * 3, [1.0] * 3), (0.5, 40.0))
+    sh, sol = r.shooting, r.solution
+    assert drift._verdict(sh, sol) is None
+    assert sh.in_order(sol.v)
+    bad = sol.__class__(**{**sol.__dict__, "v": sol.v.copy()})
+    sl = sh._arc_slices[0]
+    bad.v[sl.start + 1] = bad.v[sl.start] - 1e-3
+    assert drift._verdict(sh, bad) == "junctions out of order"

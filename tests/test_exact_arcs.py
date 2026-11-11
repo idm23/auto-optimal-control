@@ -343,7 +343,13 @@ def test_validation(bd, compiled):
     with pytest.raises(ValueError, match="arc kind"):
         MultiArcShooting(bd, [0.1, 0.0], [("ride", 0)])
     shoot = MultiArcShooting(bd, [0.1, 0.0], [("boundary", "x_max")])
+    backward = shoot.pack_arcs([20, 6, 0, 0], [(0.7, 0.3, [0, 0])])
+    # Rule R10: an arc whose exit comes before its entry is integrated backward, so the
+    # residual is defined there; such unknowns are never an answer.
+    assert not shoot.in_order(backward)
+    shoot.residual(backward)
+    shoot.backward_segments = False
     with pytest.raises(ShootingError, match="out of order"):
-        shoot.residual(shoot.pack_arcs([20, 6, 0, 0], [(0.7, 0.3, [0, 0])]))
+        shoot.residual(backward)
     with pytest.raises(ValueError, match="pi must have 2"):
         shoot.pack_arcs([20, 6, 0, 0], [(0.3, 0.7, [0])])
