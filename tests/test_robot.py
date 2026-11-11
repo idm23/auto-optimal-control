@@ -262,6 +262,15 @@ def test_minimum_time_through_run_time_arcs(kernel_cache, taus, t_f):
     assert r.solution.tf == pytest.approx(t_f, abs=2e-6)
 
 
+def test_a_predicted_arc_past_zero_length_stays_an_arc(kernel_cache):
+    h = Homotopy(examples.two_link_arm_min_time(), cache_dir=kernel_cache, policy=SecondaryCost())
+    arcs = [("boundary", 0), ("boundary", 2)]
+    values = [(1.0, 0.999, np.zeros(1)), (0.5, 2.0, np.zeros(1))]
+    entries, kept = h._mas_entries(arcs, values)
+    assert entries == [("enter", 2), ("enter", 0), ("exit", 0), ("exit", 2)]
+    assert kept[1][1] > kept[1][0]
+
+
 def test_axes_with_exactly_tied_moves_solve(kernel_cache):
     # Their saturation corners coincide: integration used to run for ever there. The time
     # of one axis alone is (32 D / J)^(1/3), a little longer with the jerk cost shared.

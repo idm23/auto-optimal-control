@@ -275,6 +275,7 @@ class Homotopy:
         self.attempt_evaluations = 60      # MINPACK evaluations per exact attempt
         self.attempt_nfev = 50000          # right-hand-side evaluations per arc
         self.active_set_seconds = 60.0     # time budget of the active-set route (see below)
+        self.active_set_backtracks = 8     # structures the active-set route may back out of
         self.penalty_seconds = 300.0       # time budget of the penalty route
         self.path_options = dict(rtol=rtol, atol=atol)    # along the active-set route
         self.bang_bang = bang_bang_controls(problem)
@@ -1052,6 +1053,10 @@ class Homotopy:
         limit that comes into play while another is ridden becomes an arc
         inside or across that one; the values follow the order of entry.
         """
+        # A predictor can carry a short arc past zero length: it stays an arc, just
+        # barely, and the solve or the retirement rule decides what becomes of it.
+        values = [(v[0], max(v[1], v[0] + 1e-10 * max(1.0, abs(v[0]))), *v[2:])
+                  if kind == "boundary" else v for (kind, _), v in zip(arcs, values)]
         events = []
         for i, ((kind, c), val) in enumerate(zip(arcs, values)):
             if kind == "touch":
@@ -1305,13 +1310,24 @@ class Homotopy:
                 f"{np.round(d['touch_nu'], 6).tolist()}, mu ranges "
                 f"{[(round(a, 6), round(b, 6)) for a, b in d['boundary_mu']]}")
 
-    def _active_set(self, sol, eps0, s_max, steps, tol, max_solves=400):
+    def _active_set(self, sol, eps0, s_max, steps, tol, max_solves=1500):
         """The active-set route: from the unconstrained regularized solution ``sol``
         at ``eps0``, tighten every limit from just above the solution to its
         true value, bringing in arcs as limits come into play, then lower
         ``eps`` with the structure following, trying the exact problem at each
-        step. Returns ``(J, shoot, sol)`` or None."""
+        step. Returns ``(J, shoot, sol)`` or None.
+
+        Each limit has its own offset, so the offsets form a vector annealed to
+        zero. They first fall together; when that stalls, typically because
+        several limits come into play at once, each moves on alone, which
+        separates the events. When none can move, the route returns to the
+        last change of structure and rules out the structure chosen there."""
         deadline = time.perf_counter() + self.active_set_seconds
+        banned, checkpoints = set(), []
+
+        def key(arcs, values):
+            return tuple(self._mas_entries(arcs, values, True)[0])
+
         shoot = self._smoothed([], eps0, np.zeros(self.nc))
         (_, g, _), = self._free_samples(shoot, sol.v)
         # Violations are measured against how much each limit's g moves along the
@@ -1373,6 +1389,8 @@ class Homotopy:
                             return sh, r
                 base = r.v[:sh.n_base] if isinstance(sh, MultiArcShooting) else r.v
                 for arcs, values in options:
+                    if key(arcs, values) in banned:
+                        continue
                     try:
                         nsh, nr = solve_structure(arcs, values, base, le, off)
                     except _FAILURES as exc:
@@ -1389,12 +1407,14 @@ class Homotopy:
                 self._say(f"  structure: {self._names(arcs)}")
             return None
 
-        def advance(target_le, target_off, on_step=None):
+        def advance(target_le, target_off, on_step=None, ds_min=1e-6):
+            """Towards the target along a straight line; False, at the last solution
+            reached, if the step falls below ``ds_min``."""
             le0, off_start = state["le"], state["off"].copy()
             frac, ds = 0.0, 0.25
             prev = None                    # (frac, v, structure) of the solution before
             while frac < 1.0:
-                if (state["solves"] > max_solves or ds < 1e-6
+                if (state["solves"] > max_solves or ds < ds_min
                         or time.perf_counter() > deadline):
                     return False
                 f = min(frac + ds, 1.0)
@@ -1425,8 +1445,13 @@ class Homotopy:
                     ds *= 0.5
                     continue
                 prev = (frac, v0, arcs)
+                changed = self._arcs_of(done[0], done[1].v)[0] != arcs
+                if changed:
+                    # What to return to if this new structure leads nowhere.
+                    new_arcs, new_values = self._arcs_of(done[0], done[1].v)
+                    checkpoints.append((dict(state), key(new_arcs, new_values)))
                 state.update(shoot=done[0], v=done[1].v, le=le, off=off)
-                if self._arcs_of(done[0], done[1].v)[0] != arcs:
+                if changed:
                     prev = None            # the structure changed: no secant across it
                 frac, ds = f, min(ds * 1.5, 0.25)
                 if on_step is not None and on_step():
@@ -1452,8 +1477,41 @@ class Homotopy:
                 return True
             return False
 
+        def out_of_budget():
+            return state["solves"] > max_solves or time.perf_counter() > deadline
+
+        def anneal():
+            """The vector of offsets to zero: together, then one by one, then back up."""
+            backtracks = 0
+            while True:
+                if advance(state["le"], np.zeros(self.nc)):
+                    return True
+                if out_of_budget():
+                    return False
+                before = state["off"].copy()
+                order = np.argsort(-before / scale)
+                for c in order:
+                    if before[c] <= 0 or out_of_budget():
+                        continue
+                    target = state["off"].copy()
+                    target[c] = 0.0
+                    advance(state["le"], target, ds_min=1e-3)
+                moved = np.max(np.abs(state["off"] - before) / scale)
+                if moved > 1e-3:
+                    self._detail(f"    offsets moved one by one, by up to {moved:.1e} of their scale")
+                    continue
+                if not checkpoints or backtracks >= self.active_set_backtracks or out_of_budget():
+                    return False
+                saved, structure = checkpoints.pop()
+                banned.add(structure)
+                backtracks += 1
+                solves = state["solves"]
+                state.clear()
+                state.update(saved, solves=solves)
+                self._detail(f"    backing up: ruling out {structure}")
+
         self._say(f"active set: tightening the limits from offsets {np.round(off0, 6)}")
-        if not advance(state["le"], np.zeros(self.nc)):
+        if not anneal():
             self._say("active set: tightening stalled")
             return None
         if try_exact():
