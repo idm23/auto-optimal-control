@@ -26,6 +26,8 @@ The kernels are compiled when you first build them, so you need a C compiler
   trajectories and robot motion, with the history of each idea and every
   part of the package.
 - **{doc}`api`**: the package's modules, classes and functions.
+- **{doc}`notes/structure_certificates`**: a working note on the properties
+  of a problem's expressions that license continuation rules, with proofs.
 - **The README on [GitHub](https://github.com/idm23/auto-optimal-control)**:
   the benchmarks against the literature, the animations, and the current
   limitations.
@@ -41,4 +43,5 @@ The kernels are compiled when you first build them, so you need a C compiler
 
 notebooks/index
 api
+notes/structure_certificates
 ```

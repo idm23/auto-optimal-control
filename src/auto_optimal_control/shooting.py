@@ -301,6 +301,57 @@ class SingleShooting:
                                 nfev=int(getattr(sol, "nfev", 0)), result=sol,
                                 max_violation=violation)
 
+    def solve_chord(self, guess, tol=1e-10, max_iterations=12, contraction=0.5):
+        """Newton with one Jacobian reused while the residual falls by ``contraction``.
+
+        On a path with a good predictor a step needs one Jacobian and a few
+        residuals, and a hopeless one stops after a fresh Jacobian fails to
+        contract, where a quasi-Newton iteration would use its whole budget.
+        Returns a ``ShootingSolution`` (``max_violation`` is not computed)."""
+        from scipy.linalg import lu_factor, lu_solve
+        v = np.asarray(guess, dtype=float).copy()
+        R, J = self._safe(v)
+        err = float(np.linalg.norm(R))
+        fresh = True
+        nfev = 1
+        lu = None if not np.isfinite(err) else lu_factor(J)
+        for _ in range(max_iterations):
+            if err < tol or lu is None:
+                break
+            dv = lu_solve(lu, -R)
+            if not np.all(np.isfinite(dv)):
+                break
+            Rt = self._safe_residual(v + dv)
+            nfev += 1
+            trial = float(np.linalg.norm(Rt))
+            if np.isfinite(trial) and trial < contraction * err:
+                v, R, err, fresh = v + dv, Rt, trial, False
+                continue
+            if fresh:
+                # Backtrack along the fresh Newton direction before giving up.
+                step, moved = 0.5, False
+                for _ in range(4):
+                    Rt = self._safe_residual(v + step * dv)
+                    nfev += 1
+                    trial = float(np.linalg.norm(Rt))
+                    if np.isfinite(trial) and trial < (1 - 0.25 * step) * err:
+                        v, R, err, moved = v + step * dv, Rt, trial, True
+                        break
+                    step *= 0.5
+                if not moved:
+                    break
+                R, J = self._safe(v)
+                nfev += 1
+                lu = lu_factor(J)
+                continue
+            R, J = self._safe(v)
+            nfev += 1
+            lu, fresh = lu_factor(J), True
+        x0, lam0, nu, tf = self.unpack(v)
+        return ShootingSolution(v=v, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
+                                residual_norm=err, success=err < tol, nfev=nfev, result=None,
+                                max_violation=0.0)
+
     def multistart(self, sample, n_tries=50, seed=0, **solve_options):
         """Solve from random guesses ``sample(rng) -> v`` until one succeeds.
 
@@ -1381,7 +1432,7 @@ class MultiArcShooting(SingleShooting):
                "touch_nu": [a[1] for (kind, *_), a in zip(self.arcs, arcs) if kind == "touch"],
                "boundary_pi": [a[2] for (kind, *_), a in zip(self.arcs, arcs)
                                if kind == "boundary"],
-               "boundary_mu": [], "boundary_u": [],
+               "boundary_mu": [], "boundary_mu_rise": [], "boundary_u": [],
                "singular_u": [], "singular_legendre": [],
                "singular_bound_violation": self._singular_bound_violation(tr),
                "held_sign_violation": {}}
@@ -1394,6 +1445,16 @@ class MultiArcShooting(SingleShooting):
                     mu.append(m_ if aid < k.N_CONSTRAINTS
                               else m_[list(k.arc_constraints(aid)).index(c)])
                 out["boundary_mu"].append((min(mu), max(mu)))
+                # mu(t) = int_t^{t_out} eta with eta >= 0 (order 1): it may not rise along an
+                # arc. The largest rise within each stretch of riding c (several arcs of c are
+                # separate stretches).
+                idx = np.flatnonzero(on)
+                rise = 0.0
+                for run in np.split(np.arange(len(mu)), np.flatnonzero(np.diff(idx) > 1) + 1):
+                    m_run = np.asarray(mu, dtype=float)[run]
+                    if len(m_run):
+                        rise = max(rise, float(np.max(m_run - np.minimum.accumulate(m_run))))
+                out["boundary_mu_rise"].append(rise)
                 out["boundary_u"].append((tr["u"][on].min(axis=0), tr["u"][on].max(axis=0)))
             elif kind.startswith("singular"):
                 on = tr["singular"] == c

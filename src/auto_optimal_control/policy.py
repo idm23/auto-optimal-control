@@ -269,7 +269,7 @@ def _rebuilt(problem, *, name, running_cost, params=None, final_time="keep", sta
         params=problem.params if params is None else params,
         control_sets=problem.control_sets if control_sets is None else control_sets,
         path_constraints=problem.path_constraints if path_constraints is None
-        else path_constraints)
+        else path_constraints, certified=problem.certified)
 
 
 def _penalized(analysis):
