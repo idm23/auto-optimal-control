@@ -189,3 +189,58 @@ def test_learned_proposals_train():
     model, ss, sy2, se = learn.train_jepa(C, Y, Y[:, :1] + C[:, :1], epochs=20, batch=100)
     y, err = learn.jepa_refine(model, ss, sy2, se, C[0], Y[0, :1] + C[0, :1], Y[:4], steps=20)
     assert y.shape == (4, 2) and np.all(np.diff(err) >= 0)
+
+
+def test_anchored_extremals_start_on_an_exact_entry(smooth):
+    gen = ExtremalGenerator.from_homotopy(smooth, params(np.zeros(3), np.zeros(3)))
+    k, p = gen.kernels, gen.params
+    rng = np.random.default_rng(2)
+    kept = []
+    for _ in range(40):
+        z = np.r_[0.0, rng.uniform(-0.5, 0.5, 2), rng.normal(size=3)]
+        T = rng.uniform(1, 5)
+        try:
+            kept.append(gen.generate_anchored(int(rng.integers(2)), z, 0.4 * T, 0.6 * T, rng=rng))
+        except Rejected:
+            pass
+    assert len(kept) >= 15
+    assert_valid(kept)
+    anchored = [e for e in kept if e.checks["anchored"]]
+    assert len(anchored) >= 10
+    for e in anchored:
+        shoot, v = gen.shooting_of(e)
+        _, _, segs = shoot._evaluate(v, jac=False)
+        c = k.CONSTRAINT_NAMES.index(e.checks["anchored"])
+        entries = [(cc, val[0]) for (kind, cc), val in zip([a for a in e.arcs if a[0] == "enter"], e.values)]
+        t_in = next(t for cc, t in entries if cc == c)
+        before = next(sg for sg in segs if sg[0] is None and abs(sg[3] - t_in) < 1e-12)
+        assert abs(np.atleast_1d(k.constraint_rate(t_in, before[-1]["z"], p))[c]) < 1e-7
+
+
+def test_a_constructed_anchor_is_a_peak_of_the_limit(smooth):
+    # Drawn costates saturate the free jerk, and half the draws would bend the wrong
+    # way; the anchor is built so the free motion meets the limit from inside.
+    gen = ExtremalGenerator.from_homotopy(smooth, params(np.zeros(3), np.zeros(3)))
+    k, p = gen.kernels, gen.params
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        c = int(rng.integers(2))
+        z = gen._construct_anchor(c, 0.0, np.r_[0.0, rng.uniform(-0.5, 0.5, 2), rng.normal(size=3)])
+        assert abs(k.constraint(0.0, z, p)[c]) < 1e-9
+        assert abs(np.atleast_1d(k.constraint_rate(0.0, z, p))[c]) < 1e-9
+        assert abs(k.hamiltonian(0.0, z, p)) < 1e-9
+        assert gen._curvature(c, 0.0, z) < 0
+
+
+def test_the_quasimetric_obeys_the_triangle_inequality_untrained():
+    torch = pytest.importorskip("torch")
+    from auto_optimal_control import learn
+
+    torch.manual_seed(0)
+    model = learn.Quasimetric(2, 1)
+    x, y, z = (torch.randn(500, 2) for _ in range(3))
+    px, py, pz = (torch.randn(500, 1) for _ in range(3))
+    with torch.no_grad():
+        dxz = model(x, px, z, pz)
+        assert torch.all(dxz <= model(x, px, y, py) + model(y, py, z, pz) + 1e-5)
+        assert torch.all(model(x, px, x, px) < 1e-5)
