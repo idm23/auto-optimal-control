@@ -136,10 +136,16 @@ and $\bar\tau_i > 0$), so "at most one per joint" is no restriction.
 
 **What it rules out, and what it does not.** For this class, riding any
 combination of torque limits on different joints never has singular
-equations. A stall of the route is therefore never caused by the riding
-system itself. When $S \cap B \ne \emptyset$ (a joint rides its torque limit
+equations. When $S \cap B \ne \emptyset$ (a joint rides its torque limit
 while its own jerk is at a bound) $C$ may lose rank; Lemma B says nothing
 there, and that case needs a local check.
+
+*Correction.* An earlier version concluded that a stall of the route is
+never caused by the riding system. That does not follow. Lemma B is about
+the equations once $S$ and $B$ are fixed; it says nothing about whether some
+admissible $B$ exists, that is, whether the limit can be held at all within
+the jerk bounds. Lemma I treats that question, and the rest-to-rest cases
+show it is what stalls them.
 
 ### Lemma C (the present continuation path makes births coincide)
 
@@ -331,6 +337,71 @@ structures are tried, never what is accepted.
 interior point, with $\ddot\mu_c = 0$) is the analogue of a death, and the gap
 should be born at zero width there. The rule as built detects the rise after
 a step, as the route detects free-arc violations.
+
+### Lemma I (contacts with an order-1 limit lie where it can be held)
+
+*Let the limit $g(x) \le 0$ have order 1, with $\dot g = a(x)^\top u + d(x)$
+(affine in $u$ by C1, as $g$ depends on $x$ only), $a, d$ continuous, and the
+control set $U$ convex and compact. Call $x$* holdable *when some $u \in U$
+gives $a(x)^\top u + d(x) = 0$. If a trajectory with $u(t) \in U$ a.e. has
+$g(x(t^*)) = 0$ at an interior time and $g(x(t)) \le 0$ near $t^*$, then
+$x(t^*)$ is holdable.*
+
+**Proof.** The image of $U$ under $u \mapsto a(x)^\top u + d(x)$ is a closed
+interval (a continuous linear image of a convex compact set). Suppose it does
+not contain 0 at $x^* = x(t^*)$; say it lies in $[\delta, \infty)$ with
+$\delta > 0$ (the other sign is the same, in reverse time). The interval's
+ends depend continuously on $x$, and $x(t)$ is continuous, so for $t$ near
+$t^*$ every $u \in U$ gives $a(x(t))^\top u + d(x(t)) > \delta / 2$. Then
+$\dot g > \delta / 2$ a.e. near $t^*$ and $g(x(t)) > 0$ for $t$ just after
+$t^*$, a contradiction. $\square$
+
+No smoothness of $u$ is used, so the lemma covers bang-bang controls and
+every point of a boundary arc as well as touches. For a box
+$U = \prod_k [m_k - r_k, m_k + r_k]$ the condition is explicit:
+$|a(x)^\top m + d(x)| \le \sum_k |a_k(x)|\, r_k$. For the arm,
+$a = \pm M(q)_{i,:}$ (C3), so the holdable set of joint $i$'s torque limit is
+where the rate of $\tau_i$ at mid-range jerk is at most
+$\sum_k |M_{ik}(q)| J_k$. At speed the velocity terms of $\dot\tau_i$ can
+exceed that, and then joint $i$'s limit cannot be reached there by any
+admissible motion.
+
+*Corollary.* The peak of a violation on a free arc of the path problem is
+holdable. Its control is in $U$, and $g$ has an interior maximum there, so
+the argument applies to $g - g(x(t^*))$.
+
+*Observed.* In rest-to-rest case 4 the base joint moves at up to 6 rad/s. At
+the entry of a newborn `tau1_max` arc, $\dot\tau_1$ at zero jerk is 84
+while the jerks can cancel at most 80.5. At a `tau1_min` entry it is
+$-349$ against 62. Holdability changes sign inside the violated window: the
+window starts where the limit cannot be held, and the peak, as the corollary
+says, is holdable. Seeds that spanned the whole window failed to integrate
+(the run-time riding solve correctly reports no admissible control). Every
+`tau1` birth in that case failed this way.
+
+### Rule R6 (newborn order-1 arcs are seeded where the limit can be held)
+
+*Hypotheses:* C1, the limit is of order 1, and the control set is a box (the
+kernel's riding solve then decides holdability exactly: it searches the
+bounds' active sets, exhaustively if needed, and fails only when no
+admissible control holds the limit).
+
+*Rule:* a newborn boundary arc's ends are pulled in to the largest stretch
+of its violated window that contains the peak and on which every sampled
+state is holdable.
+
+*Why it is sound:* by Lemma I an arc of any feasible trajectory lies in the
+holdable set, so an arc seeded on a non-holdable stretch cannot be one, and
+pulling the ends in removes only times that no answer can use. The peak is
+holdable (corollary), so the stretch is never empty, up to sampling. Like
+R5, R6 changes only which seed is tried, never what is accepted.
+
+*Open:* holdability is sampled on the free trajectory, but riding changes
+the state, and an arc can leave the holdable set partway. The exact
+statement is that the arc must exit before the edge of the holdable set, an
+event that could be watched during the integration. The edge is where every
+jerk with $a_k \ne 0$ is at a bound, which is outside Lemma B
+($S \cap B \ne \emptyset$).
 
 ## Lemma E (birth of an arc: normal form). Statement and plan of proof
 

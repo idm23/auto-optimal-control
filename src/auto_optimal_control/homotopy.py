@@ -284,6 +284,7 @@ class Homotopy:
         # the reversed problem and map its extremal back (Lemma F).
         self.reversal = True
         self.split_rising = True
+        self.holdable_births = True
         self._certificates = None
         self.penalty_seconds = 300.0       # time budget of the penalty route
         self.path_options = dict(rtol=rtol, atol=atol)    # along the active-set route
@@ -1173,7 +1174,10 @@ class Homotopy:
                 else:
                     w = max(b - a, 1e-3 * T) / 2
                     mid = 0.5 * (a + b)
-                    born.append((("boundary", c), (mid - w, mid + w, np.zeros(q))))
+                    lo, hi = mid - w, mid + w
+                    if self.holdable_births:
+                        lo, hi = self._holdable(shoot, v, c, lo, hi)
+                    born.append((("boundary", c), (lo, hi, np.zeros(q))))
                 continue
             for g in groups:
                 if g[0] & hits:
@@ -1444,6 +1448,55 @@ class Homotopy:
             out_a.append((kind, c))
             out_v.append(val)
         return (out_a, out_v) if changed else None
+
+    def _holdable(self, shoot, v, c, a, b):
+        """The stretch of ``[a, b]`` about the peak of limit ``c`` on which it can be held.
+
+        Where a limit of order 1 is reached at an interior time, its one-sided rates
+        have opposite signs, so (the control set being convex) some admissible control
+        makes the rate zero: every contact lies in the set where the riding problem is
+        feasible (Lemma I of ``docs/notes/structure_certificates.md``). In particular the
+        peak of a violation does, up to the sampling. A newborn arc seeded where the
+        limit cannot be held fails to integrate, so its ends are pulled in to the
+        stretch about the peak where the riding control exists (the kernel's riding
+        solve is exact: it fails only when no admissible control holds the limit)."""
+        k, p = shoot.kernels, shoot.params
+        try:
+            tr = shoot.trajectory(v, n_points=4001)
+        except Exception:
+            return a, b
+        ts, zs = tr["t"], tr["z"]
+        inside = np.flatnonzero((ts >= a) & (ts <= b))
+        if len(inside) < 3:
+            return a, b
+        g = tr["g"][inside, c]
+        j0 = int(np.argmax(g))
+
+        def ok(j):
+            try:
+                k.boundary_control(c, ts[inside[j]], zs[inside[j]][:2 * k.N_STATES], p)
+                return True
+            except Exception:
+                return False
+
+        if not ok(j0):
+            return a, b
+        lo = j0
+        while lo > 0 and ok(lo - 1):
+            lo -= 1
+        hi = j0
+        while hi < len(inside) - 1 and ok(hi + 1):
+            hi += 1
+        if lo == 0 and hi == len(inside) - 1:
+            return a, b
+        T = shoot.unpack(v)[3] - shoot.t0
+        lo_t, hi_t = float(ts[inside[lo]]), float(ts[inside[hi]])
+        if hi_t - lo_t < 1e-4 * T:
+            mid = float(ts[inside[j0]])
+            lo_t, hi_t = mid - 5e-5 * T, mid + 5e-5 * T
+        self._detail(f"    {self.kr.CONSTRAINT_NAMES[c]}: held only on [{lo_t:.5f}, {hi_t:.5f}] "
+                     f"of [{a:.5f}, {b:.5f}]: the newborn arc is placed there")
+        return lo_t, hi_t
 
     def _split_rising(self, shoot, v, n_points=801):
         """Structures with an order-1 boundary arc split where its multiplier rises.
