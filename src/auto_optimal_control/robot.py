@@ -213,8 +213,22 @@ def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends
         constraints += [PathConstraint(tau[i] - limits[i], f"tau{i + 1}_max"),
                         PathConstraint(-tau[i] - limits[i], f"tau{i + 1}_min")]
     more, more_params = joint_limits(q, w, rates=rate_limits, positions=position_limits)
+    inertias_positive = all(sp.sympify(m).is_positive is True for link in links for m in link.inertia)
+    certified = {
+        "mass_matrix_positive_definite": (
+            inertias_positive,
+            "Lemma A: every link's principal moments of inertia are positive, so the kinetic "
+            "energy is positive for any nonzero joint rate"),
+        "limit_control_rows": (
+            True, {f"tau{i + 1}_{side}": (i, 1 if side == "max" else -1)
+                   for i in range(n) for side in ("max", "min")}),
+        "limits_time_reversible": (
+            "Newton-Euler torques M(q) a + c(q, w) + G(q) with c quadratic in w: unchanged by "
+            "w -> -w; rate limits come in +- pairs, angle limits do not involve w",
+            {f"tau{i + 1}_{side}": f"tau{i + 1}_{side}" for i in range(n) for side in ("max", "min")}),
+    }
     return OptimalControlProblem(
         name=name, time=t, states=[*q, *w, *a], controls=list(j),
         params=[*ends, *j_max, *limits, *more_params], dynamics=[*w, *a, *j], running_cost=1,
         initial_state=start, final_state=final, path_constraints=constraints + more,
-        control_sets=[Box(u, -m, m) for u, m in zip(j, j_max)])
+        control_sets=[Box(u, -m, m) for u, m in zip(j, j_max)], certified=certified)

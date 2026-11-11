@@ -1432,7 +1432,7 @@ class MultiArcShooting(SingleShooting):
                "touch_nu": [a[1] for (kind, *_), a in zip(self.arcs, arcs) if kind == "touch"],
                "boundary_pi": [a[2] for (kind, *_), a in zip(self.arcs, arcs)
                                if kind == "boundary"],
-               "boundary_mu": [], "boundary_u": [],
+               "boundary_mu": [], "boundary_mu_rise": [], "boundary_u": [],
                "singular_u": [], "singular_legendre": [],
                "singular_bound_violation": self._singular_bound_violation(tr),
                "held_sign_violation": {}}
@@ -1445,6 +1445,16 @@ class MultiArcShooting(SingleShooting):
                     mu.append(m_ if aid < k.N_CONSTRAINTS
                               else m_[list(k.arc_constraints(aid)).index(c)])
                 out["boundary_mu"].append((min(mu), max(mu)))
+                # mu(t) = int_t^{t_out} eta with eta >= 0 (order 1): it may not rise along an
+                # arc. The largest rise within each stretch of riding c (several arcs of c are
+                # separate stretches).
+                idx = np.flatnonzero(on)
+                rise = 0.0
+                for run in np.split(np.arange(len(mu)), np.flatnonzero(np.diff(idx) > 1) + 1):
+                    m_run = np.asarray(mu, dtype=float)[run]
+                    if len(m_run):
+                        rise = max(rise, float(np.max(m_run - np.minimum.accumulate(m_run))))
+                out["boundary_mu_rise"].append(rise)
                 out["boundary_u"].append((tr["u"][on].min(axis=0), tr["u"][on].max(axis=0)))
             elif kind.startswith("singular"):
                 on = tr["singular"] == c

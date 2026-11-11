@@ -130,12 +130,15 @@ class OptimalControlProblem:
         State limits ``g(t, x, p) <= 0``. A bare expression is a constraint
         without a penalty.
     name : str
+    certified : dict, optional
+        Properties the constructor has proved about its own expressions, by
+        name, each ``(holds, lemma)``; read by :func:`~auto_optimal_control.certificates.certify`.
     """
 
     def __init__(self, *, time, states, controls, dynamics, running_cost=0, terminal_cost=0,
                  initial_state=None, final_state=None, terminal_constraints=(),
                  initial_time=0, final_time=None, params=(), control_sets=(), path_constraints=(),
-                 name=""):
+                 name="", certified=None):
         if not isinstance(time, sp.Symbol):
             raise TypeError("time must be a SymPy Symbol")
         self.time = time
@@ -143,6 +146,8 @@ class OptimalControlProblem:
         self.controls = _as_symbols(controls, "controls")
         self.params = _as_symbols(params, "params")
         self.name = name
+        # Properties proved by the constructor (see auto_optimal_control.certificates).
+        self.certified = dict(certified or {})
         if not self.states:
             raise ValueError("at least one state is required")
 

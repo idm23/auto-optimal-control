@@ -110,7 +110,7 @@ def _copy(problem, *, name, running_cost, params, path_constraints):
         terminal_cost=problem.terminal_cost, initial_state=dict(problem.initial_state),
         terminal_constraints=problem.terminal_constraints, initial_time=problem.initial_time,
         final_time=problem.final_time, params=params, control_sets=problem.control_sets,
-        path_constraints=path_constraints)
+        path_constraints=path_constraints, certified=problem.certified)
 
 
 def regularize(problem, bang_bang=None):
@@ -276,10 +276,25 @@ class Homotopy:
         self.attempt_nfev = 50000          # right-hand-side evaluations per arc
         self.active_set_seconds = 60.0     # time budget of the active-set route (see below)
         self.active_set_backtracks = 8     # structures the active-set route may back out of
+        # Where the limit offsets start: "together" (just above every peak) or "staggered"
+        # (rule R1: a random head start per limit, drawn with offset_seed).
+        self.offset_start = "together"
+        self.offset_seed = 0
+        # Rule R4: when a solve fails and the problem is certified time-reversible, solve
+        # the reversed problem and map its extremal back (Lemma F).
+        self.reversal = True
+        self.split_rising = True
+        self._certificates = None
         self.penalty_seconds = 300.0       # time budget of the penalty route
         self.path_options = dict(rtol=rtol, atol=atol)    # along the active-set route
         self.path_evaluations = 240        # MINPACK evaluations per solve on that route
         self.path_fallback = 1e-2          # a chord step that ends below this earns MINPACK
+        # Picking a new structure: with parallel > 1, each candidate and `variants` jittered
+        # copies of it are solved at once in forked processes, each stopped after
+        # candidate_seconds, and the first candidate (in order) that converged is taken.
+        self.parallel = 0
+        self.variants = 3
+        self.candidate_seconds = 2.0
         self.bang_bang = bang_bang_controls(problem)
         self.regularized, self.eps_symbol, self.rho_symbols = regularize(problem, self.bang_bang)
         # Limits ridden at run time have no penalty route, and a penalty's tape in every
@@ -918,6 +933,12 @@ class Homotopy:
             return False
         if any(lo < -small * max(1.0, abs(hi)) for lo, hi in d["boundary_mu"]):
             return False
+        # Order 1: mu = int_t^{t_out} eta with eta >= 0, so mu must not rise along an arc
+        # (docs/notes/structure_certificates.md, Lemma H).
+        order1 = [q == 1 for kind, _, q in shoot.arcs if kind == "boundary"]
+        if any(o and rise > 1e-6 * max(1.0, abs(hi))
+               for o, rise, (_, hi) in zip(order1, d["boundary_mu_rise"], d["boundary_mu"])):
+            return False
         if any(lo < -small * max(1.0, abs(hi)) for lo, hi in d["singular_legendre"]):
             return False
         if any(w > 1e-6 for w in d["held_sign_violation"].values()):
@@ -1302,6 +1323,105 @@ class Homotopy:
                     options.append((arcs, [new if j == i else w for j, w in enumerate(values)]))
         return options or None
 
+    def _jittered(self, arcs, values, rng):
+        """A copy of a structure's values with junction times and jumps perturbed."""
+        out = []
+        for (kind, _), val in zip(arcs, values):
+            if kind == "boundary":
+                a, b, pi = val
+                width = (b - a) if np.isfinite(a) and np.isfinite(b) else 0.05
+                a2 = a + rng.uniform(-0.25, 0.25) * width if np.isfinite(a) else a
+                b2 = b + rng.uniform(-0.25, 0.25) * width if np.isfinite(b) else b
+                out.append((a2, b2, np.asarray(pi, dtype=float) * rng.uniform(0.5, 1.5)))
+            elif kind == "touch":
+                t, nu = val
+                out.append((t * (1 + rng.uniform(-0.01, 0.01)), nu * rng.uniform(0.5, 1.5)))
+            else:
+                out.append(val)
+        return out
+
+    def _speculate(self, options, base, le, off, solve_structure, state):
+        """Solve candidate structures at once in forked processes; the first in order
+        that converges within ``candidate_seconds``, as ``((arcs, values), shoot, sol)``."""
+        import multiprocessing as mp
+        rng = np.random.default_rng(len(options) + int(1e6 * float(np.sum(np.abs(off)))) % 2 ** 31)
+        tasks = []
+        for arcs, values in options:
+            tasks.append((arcs, values))
+            tasks += [(arcs, self._jittered(arcs, values, rng)) for _ in range(self.variants)]
+        ctx = mp.get_context("fork")
+
+        def child(conn, arcs, values):
+            try:
+                _, r = solve_structure(arcs, values, base, le, off)
+                conn.send((bool(r.success), float(r.residual_norm), r.v))
+            except Exception:
+                conn.send((False, float("inf"), None))
+            conn.close()
+
+        results = {}
+        pending = list(enumerate(tasks))
+        running = {}
+        while pending or running:
+            while pending and len(running) < self.parallel:
+                i, (arcs, values) = pending.pop(0)
+                parent, kid = ctx.Pipe(duplex=False)
+                p = ctx.Process(target=child, args=(kid, arcs, values), daemon=True)
+                p.start()
+                kid.close()
+                running[i] = (p, parent, time.perf_counter())
+            time.sleep(0.01)
+            for i, (p, conn, started) in list(running.items()):
+                if conn.poll():
+                    try:
+                        results[i] = conn.recv()
+                    except EOFError:
+                        results[i] = (False, float("inf"), None)
+                elif p.is_alive() and time.perf_counter() - started < self.candidate_seconds:
+                    continue
+                elif p.is_alive():
+                    results[i] = (False, float("inf"), None)
+                else:
+                    results.setdefault(i, (False, float("inf"), None))
+                if p.is_alive():
+                    p.kill()
+                p.join(timeout=1)
+                conn.close()
+                del running[i]
+            # Stop early once the best-ranked candidate still possible has converged.
+            done = [i for i in sorted(results) if results[i][0]]
+            if done and all(j in results for j in range(done[0])):
+                for p, conn, _ in running.values():
+                    p.kill()
+                    p.join(timeout=1)
+                    conn.close()
+                running.clear()
+                pending.clear()
+        state["solves"] += len(results)
+        per = self.variants + 1
+        converged = [i for i in sorted(results) if results[i][0]]
+        for i in sorted(results):
+            ok, _, v = results[i]
+            if not ok:
+                continue
+            arcs, values = tasks[i]
+            original = tasks[(i // per) * per][1]
+            moved = [(round(float(w[0] - o[0]), 6), round(float(w[1] - o[1]), 6) if np.isfinite(w[1]) and np.isfinite(o[1]) else None,
+                      round(float(np.atleast_1d(w[2])[0] / np.atleast_1d(o[2])[0]), 3) if len(w) > 2 and np.atleast_1d(o[2])[0] else None)
+                     if kind == "boundary" else None for (kind, _), w, o in zip(arcs, values, original)]
+            self._detail(f"    parallel pick: option {i // per} of {len(options)}, "
+                         f"{'original' if i % per == 0 else f'jittered copy {i % per}'}; "
+                         f"converged {[(j // per, j % per) for j in converged]} of {len(tasks)}; "
+                         f"residuals of the originals {[round(results[j][1], 9) for j in range(0, len(tasks), per) if j in results]}; "
+                         f"moved (d t_in, d t_out, pi ratio) {moved}")
+            entries, _ = self._mas_entries(arcs, values)
+            sh = self._smoothed(entries, 10.0 ** le if self.bang_bang else None, off)
+            r = sh.solve_chord(v, tol=max(1e-6, 0.0)) if self.kr.system.riding is not None else \
+                sh.solve(v, tol=1e-6, options=_budget("hybr", self.path_evaluations))
+            if r.success:
+                return (arcs, values), sh, r
+        return None
+
     def _retire(self, shoot, v):
         """The structure without arcs that have died: a boundary arc shrunk to
         nothing becomes a touch point (order 2 or more) or goes (order 1), and a touch
@@ -1324,6 +1444,68 @@ class Homotopy:
             out_a.append((kind, c))
             out_v.append(val)
         return (out_a, out_v) if changed else None
+
+    def _split_rising(self, shoot, v, n_points=801):
+        """Structures with an order-1 boundary arc split where its multiplier rises.
+
+        On an order-1 arc ``mu(t) = int_t^{t_out} d eta`` with ``eta >= 0`` (Lemma H of
+        ``docs/notes/structure_certificates.md``, which holds for each limit separately
+        while others are active too). Where ``mu`` rises, ``eta < 0``: the limit must
+        leave there. The arc becomes two, with the gap over the stretch of the largest
+        rise (running minimum to maximum); the second arc's entry jump is ``mu`` where it
+        starts. A list of ``(arcs, values)``, or ``None`` if no arc rises."""
+        if not isinstance(shoot, MultiArcShooting):
+            return None
+        k, p = shoot.kernels, shoot.params
+        arcs, values = self._arcs_of(shoot, v)
+        tr = shoot.trajectory(v, n_points)
+        T = shoot.unpack(v)[3] - shoot.t0
+        best = None
+        for i, ((kind, c), val) in enumerate(zip(arcs, values)):
+            if kind != "boundary" or self.kr.CONSTRAINT_ORDERS[c] != 1:
+                continue
+            on = np.flatnonzero(tr["active"][:, c] & (tr["t"] >= val[0]) & (tr["t"] <= val[1]))
+            if len(on) < 3:
+                continue
+            mu = []
+            for j in on:
+                aid = tr["arc"][j]
+                m_ = k.boundary_multiplier(aid, tr["t"][j], tr["z"][j], p)
+                mu.append(float(np.atleast_1d(m_)[0]) if aid < k.N_CONSTRAINTS
+                          else float(np.atleast_1d(m_)[list(k.arc_constraints(aid)).index(c)]))
+            mu = np.asarray(mu)
+            run_min = np.minimum.accumulate(mu)
+            rise = mu - run_min
+            j_hi = int(np.argmax(rise))
+            if rise[j_hi] <= 1e-6 * max(1.0, float(np.abs(mu).max())):
+                continue
+            j_lo = int(np.flatnonzero(mu[:j_hi + 1] == run_min[j_hi])[-1])
+            t_lo, t_hi = float(tr["t"][on[j_lo]]), float(tr["t"][on[j_hi]])
+            if t_hi - t_lo < 1e-6 * T or (best is not None and rise[j_hi] <= best[0]):
+                continue
+            best = (rise[j_hi], i, t_lo, t_hi, mu[j_lo], mu[j_hi])
+        if best is None:
+            return None
+        _, i, t_lo, t_hi, mu_lo, mu_hi = best
+        a, b, pi = values[i]
+        self._detail(f"    {self.kr.CONSTRAINT_NAMES[arcs[i][1]]}: multiplier rises on "
+                     f"[{t_lo:.5f}, {t_hi:.5f}] (eta < 0): split the arc")
+        out_a = arcs[:i] + [arcs[i], arcs[i]] + arcs[i + 1:]
+        # The first piece must leave with mu = 0: mu_new = mu - mu(t_lo) on it, so its
+        # entry jump falls by mu(t_lo). The second enters with mu(t_hi).
+        pi1 = np.atleast_1d(np.asarray(pi, float)).copy()
+        pi1[0] -= mu_lo
+        pi2 = np.atleast_1d(np.asarray(mu_hi, float))
+        # The rise is often exactly another limit's arc (its junctions bound it): a gap
+        # on those junctions would make events coincide (Lemma D), so the gap is
+        # offered a little wider, then a little narrower.
+        d = 0.02 * (t_hi - t_lo)
+        out = []
+        for lo, hi in ((t_lo - d, t_hi + d), (t_lo + d, t_hi - d)):
+            if not (lo > a and hi < b):
+                continue
+            out.append((out_a, values[:i] + [(a, lo, pi1), (hi, b, pi2)] + values[i + 1:]))
+        return out or None
 
     def _exact_jump(self, arcs, v, tol):
         """The exact problem's solve of structure ``arcs`` from ``v``: ``(J, shoot, sol)`` or None."""
@@ -1381,7 +1563,8 @@ class Homotopy:
                     if g > 1e-8}
         return (f"violated off their arcs {violated}, controls past their bounds on arcs "
                 f"{np.round(d['boundary_bound_violation'], 6).tolist()}, touch nu "
-                f"{np.round(d['touch_nu'], 6).tolist()}, mu ranges "
+                f"{np.round(d['touch_nu'], 6).tolist()}, mu rises "
+                f"{[float(f'{x:.3g}') for x in d.get('boundary_mu_rise', [])]}, mu ranges "
                 f"{[(round(a, 6), round(b, 6)) for a, b in d['boundary_mu']]}")
 
     def _active_set(self, sol, eps0, s_max, steps, tol, max_solves=1500):
@@ -1398,6 +1581,7 @@ class Homotopy:
         last change of structure and rules out the structure chosen there."""
         deadline = time.perf_counter() + self.active_set_seconds
         banned, checkpoints, ended = set(), [], set()
+        tried_splits = {}                  # split structure -> times tried (at most 3)
 
         def key(arcs, values):
             return tuple(self._mas_entries(arcs, values, True)[0])
@@ -1409,6 +1593,13 @@ class Homotopy:
         # barely uses), how far that solution is from the limit.
         scale = np.maximum(np.maximum(g.max(axis=0) - g.min(axis=0), np.abs(g.max(axis=0))), 1e-12)
         off0 = np.maximum(g.max(axis=0), 0.0) + 1e-3 * scale
+        if self.offset_start == "staggered":
+            # Rule R1 (docs/notes/structure_certificates.md, Lemmas C and D): offsets that
+            # all start just above their peaks bring every limit in at once; a random head
+            # start per limit separates the births, with probability one.
+            peaks = np.maximum(g.max(axis=0), 0.0)
+            draw = np.random.default_rng(self.offset_seed).uniform(0.5, 1.5, self.nc)
+            off0 = peaks * (1.0 + draw) + 1e-3 * scale
         state = {"shoot": shoot, "v": sol.v, "le": np.log10(eps0) if self.bang_bang else 0.0,
                  "off": off0.copy(), "solves": 0}
         log_eps_min = state["le"] - s_max
@@ -1451,6 +1642,7 @@ class Homotopy:
             last = None
             changed = False
             for _ in range(2 * self.nc + 4):
+                optional = False
                 viol = self._free_violations(sh, r.v, scale)
                 if viol:
                     worst = max(peak / scale[c] for c, _, _, peak in viol)
@@ -1473,13 +1665,33 @@ class Homotopy:
                     options = self._activate(sh, r.v, viol)
                 else:
                     dead = self._retire(sh, r.v)
+                    if dead is None and self.split_rising:
+                        dead = self._split_rising(sh, r.v)
+                        # A split that does not solve leaves the step as it was: the
+                        # exact solve's acceptance still judges the structure.
+                        optional = dead is not None
+                        if optional and tried_splits.get(key(*dead[0]), 0) >= 3:
+                            dead, optional = None, False
+                        elif optional:
+                            tried_splits[key(*dead[0])] = tried_splits.get(key(*dead[0]), 0) + 1
                     if dead is not None:
-                        options = [dead]
+                        options = dead if optional else [dead]
                     else:
                         options = self._bound_options(sh, r.v)
                         if options is None:
                             return sh, r
                 base = r.v[:sh.n_base] if isinstance(sh, MultiArcShooting) else r.v
+                options = [o for o in options if key(*o) not in banned]
+                if self.parallel > 1 and options and not optional:
+                    hit = self._speculate(options, base, le, off, solve_structure, state)
+                    if hit is None:
+                        return None
+                    (arcs, values), nsh, nr = hit
+                    self._detail(f"    try in parallel: {self._mas_entries(arcs, values, True)[0]}")
+                    sh, r = nsh, nr
+                    changed = True
+                    self._say(f"  structure: {self._names(arcs)}")
+                    continue
                 for arcs, values in options:
                     if key(arcs, values) in banned:
                         continue
@@ -1493,6 +1705,8 @@ class Homotopy:
                     if nr.success:
                         break
                 else:
+                    if optional:
+                        return sh, r
                     return None
                 sh, r = nsh, nr
                 changed = True
@@ -1669,10 +1883,116 @@ class Homotopy:
                              f"{[str(p) for p in self.stated.params]}, got {len(params)}")
         if self._stages is None:
             r = self._solve(params, costates, final_time, **options)
+            if not r.exact and self.reversal:
+                back = self._through_reversal(params, costates, final_time, **options)
+                if back is not None:
+                    r = back
         else:
             r = self._lexicographic(params, costates, final_time, **options)
         r.policy = self.policy_text
         return r
+
+    @property
+    def certificates(self):
+        """The certificates of the problem solved (:func:`~auto_optimal_control.certificates.certify`)."""
+        if self._certificates is None:
+            from auto_optimal_control.certificates import certify
+            self._certificates = certify(self.problem)
+        return self._certificates
+
+    def _reversed_params(self, params):
+        """The parameters of the reversed problem (rule R4), or None if the ends do not
+        map to parameters: each end value must be a number or a parameter symbol."""
+        c = self.certificates["time_reversible"]
+        if not c:
+            return None
+        p = self.problem
+        signs = dict(zip(p.states, c.detail["state_signs"]))
+        index = {s: i for i, s in enumerate(p.params)}
+        final = {}
+        for e in p.terminal_constraints:
+            for s in p.states:
+                rest = sp.expand(s - e)
+                if not (rest.free_symbols & set(p.states)):
+                    final[s] = rest
+        out = np.array(params, dtype=float)
+        for s in p.states:
+            if s not in p.initial_state or s not in final:
+                return None
+            e0, ef = sp.sympify(p.initial_state[s]), sp.sympify(final[s])
+            r = signs[s]
+            if e0.is_number and ef.is_number:
+                if not (float(r * ef) == float(e0) and float(r * e0) == float(ef)):
+                    return None
+            elif e0 in index and ef in index:
+                out[index[e0]], out[index[ef]] = r * params[index[ef]], r * params[index[e0]]
+            else:
+                return None
+        return out
+
+    def _through_reversal(self, params, costates, final_time, **options):
+        """Rule R4 (Lemma F): solve the reversed problem and map its extremal back exactly.
+
+        The reversed extremal's junction times reflect (t -> T - t), each arc keeps
+        its jump and moves to the limit reversal maps it to, and the costates map
+        as lambda(0) = -R lambda~(T); the exact problem is then solved from there."""
+        if self.bang_bang:
+            return None
+        rev = self._reversed_params(params)
+        if rev is None:
+            return None
+        self._say("reversal: solving the reversed problem (rule R4)")
+        rr = self._solve(rev, costates, final_time, **options)
+        if not rr.exact or not isinstance(rr.shooting, (MultiArcShooting, SingleShooting)):
+            self._say("reversal: the reversed problem was not solved either")
+            return None
+        c = self.certificates["time_reversible"]
+        R = np.array(c.detail["state_signs"], dtype=float)
+        limit_map = c.detail["limit_map"]
+        sh, v = rr.shooting, rr.solution.v
+        n = sh.kernels.N_STATES
+        segs = sh._evaluate(np.asarray(v, dtype=float), jac=False)[2] if isinstance(sh, MultiArcShooting) \
+            else None
+        if segs is not None:
+            zT = segs[-1][-1]["z"]
+        else:
+            x0, lam0, _, tf_ = sh.unpack(v)
+            zT = sh.kernels.propagate(sh.t0, np.concatenate([x0, lam0]), tf_, sh.params,
+                                      **self.options)["z"]
+        T = rr.solution.tf
+        lam0 = -R * zT[n:]
+        arcs, values = self._arcs_of(sh, v)
+        f_arcs, f_vals = [], []
+        for (kind, cc), val in zip(arcs, values):
+            f_arcs.append((kind, limit_map[cc]))
+            if kind == "boundary":
+                a, b, pi = val
+                f_vals.append((T - b, T - a, pi))
+            else:
+                f_vals.append((T - val[0], *val[1:]))
+        self.params = np.asarray(params, dtype=float)
+        kx, px = self.exact_kernels, self.exact_params()
+        entries, f_vals = self._mas_entries(f_arcs, f_vals)
+        if entries:
+            shoot = MultiArcShooting(kx, px, entries, max_nfev=self.attempt_nfev, open_end=True,
+                                     **self.options)
+            base = shoot.pack(lam0, None, T if kx.FREE_FINAL_TIME else None)
+            guess = shoot.pack_arcs(base, f_vals)
+        else:
+            shoot = SingleShooting(kx, px, **self.options)
+            guess = shoot.pack(lam0, None, T if kx.FREE_FINAL_TIME else None)
+        if kx.N_MULTIPLIERS:
+            # The terminal multipliers enter linearly: fit them.
+            Rv, Jv = shoot.residual_jacobian(guess)
+            cols = slice(shoot.n_free + n, shoot.n_free + n + kx.N_MULTIPLIERS)
+            guess[cols] += np.linalg.lstsq(Jv[:, cols], -Rv, rcond=None)[0]
+        hit = self._exact_jump(entries, guess, _scaled(options.get("tol", 1e-10), guess))
+        if hit is None:
+            self._say("reversal: the mapped extremal was not accepted")
+            return None
+        J, xs, xsol = hit
+        return HomotopyResult(xsol, xs, self._entries(xs), True, J, xs.params, rr.steps, rr.tries,
+                              f"exact through the reversed problem (rule R4); {rr.message}")
 
     def _lexicographic(self, params, costates, final_time, **options):
         """Each component's minimum time, then minimum effort at ``(1 + delta) T*``."""
