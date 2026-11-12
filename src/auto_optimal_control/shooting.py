@@ -542,6 +542,8 @@ class MultiArcShooting(SingleShooting):
     #: under the arriving control at an entry and the departing control at an exit.
     rate_junctions_default = True
     junction_rows_default = "lemma J"
+    #: Touch points of order-1 limits, at the edge of the holdable set (Lemma L).
+    order1_touches_default = False         # Lemma L: degenerate at the corner (see the note)
     #: Past the edge of the holdable set, continue an exit-bound arc on the free law
     #: (rule R9 of docs/notes/structure_certificates.md).
     past_edge_default = False
@@ -624,8 +626,11 @@ class MultiArcShooting(SingleShooting):
                     why = k.system.path_constraints[c].unsupported
                     raise ValueError(f"path constraint {k.CONSTRAINT_NAMES[c]!r}: {why}")
                 q = k.CONSTRAINT_ORDERS[c]
-                if kind == "touch" and q < 2:
-                    raise ValueError("touch points are for constraints of order 2 or more")
+                if kind == "touch" and q < 2 and not (
+                        MultiArcShooting.order1_touches_default
+                        and k.system.problem.control_sets and not k.N_SWITCHING):
+                    raise ValueError("touch points are for constraints of order 2 or more "
+                                     "(or order 1 with bounded controls and no bang-bang)")
                 if kind == "boundary":
                     self.events += [("in", len(self.arcs)), ("out", len(self.arcs))]
                 else:
@@ -1210,9 +1215,16 @@ class MultiArcShooting(SingleShooting):
                 continue
             Nv = k.tangency(c, t, z, p)
             Nt, Nx, Nxx, Nxt = k.tangency_gradient(c, t, z, p)
-            for r_ in range(2 if kind == "touch" else q):
+            for r_ in range(1 if kind == "touch" and q == 1 else 2 if kind == "touch" else q):
                 rows.append(Nv[r_])
                 grads.append(Nt[r_] * d_ev + Nx[r_] @ D[:n] if jac else None)
+            if kind == "touch" and q == 1:
+                # An order-1 touch (Lemma L): at the edge, with the control at the corner on
+                # both sides, the one-sided rates are both -margin, so dg/dt = 0 under the
+                # arriving control.
+                val, gt, gz = self._rate_of(c, aid, t, z, flags)
+                rows.append(val)
+                grads.append(gt * d_ev + gz @ D if jac else None)
             used = slice(0, 1) if kind == "touch" else slice(0, q)
             mult = w[1:2] if kind == "touch" else w[len(w) - q:]
             mult_cols = ([sl.start + 1] if kind == "touch"
@@ -1350,6 +1362,8 @@ class MultiArcShooting(SingleShooting):
                 continue
             Nv = k.tangency(c, t_in, z, p)
             Nt, Nx, Nxx, Nxt = k.tangency_gradient(c, t_in, z, p)
+            if kind == "touch" and q == 1:
+                raise ShootingError("an order-1 touch needs the event evaluator", "other")
             for i in range(2 if kind == "touch" else q):
                 rows.append(Nv[i])
                 grads.append(Nt[i] * d_in + Nx[i] @ D[:n] if jac else None)
