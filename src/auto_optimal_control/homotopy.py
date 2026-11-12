@@ -285,6 +285,7 @@ class Homotopy:
         self.reversal = True
         self.split_rising = True
         self.holdable_births = True
+        self.width_steps = False        # rule R2: neutral on the census (see the note)
         self.edge_exits = False         # rule R8: tried, no gain (see the note)
         self._certificates = None
         self.penalty_seconds = 300.0       # time budget of the penalty route
@@ -1499,6 +1500,89 @@ class Homotopy:
                      f"of [{a:.5f}, {b:.5f}]: the newborn arc is placed there")
         return lo_t, hi_t
 
+    def _width_step(self, shoot, v, frac, point, factor, tol, iterations=10):
+        """Rule R2: a step in a young arc's width, with the route's parameter solved for.
+
+        Near a birth (or death) of an order-1 arc its width moves like the square root
+        of the route's parameter (Lemma E), so steps in the parameter stall while steps
+        in the width are regular. The narrowest finite order-1 arc's width is set to
+        ``factor`` times its current value and the system ``[Phi(v; s), w - w_target]``
+        is solved for ``(v, s)``, with ``point(s) = (le, off)`` the route's line.
+        Returns ``(v, s)`` or None."""
+        if not isinstance(shoot, MultiArcShooting):
+            return None
+        T = shoot.unpack(v)[3] - shoot.t0
+        best = None
+        for i, ((kind, c, q), sl) in enumerate(zip(shoot.arcs, shoot._arc_slices)):
+            if kind != "boundary" or q != 1 or i in shoot._started or i in shoot._open:
+                continue
+            w = v[sl.start + 1] - v[sl.start]
+            if 0 < w < 0.05 * T and (best is None or w < best[1]):
+                best = (i, w, sl)
+        if best is None:
+            return None
+        i, w, sl = best
+        target = factor * w
+        p_saved = shoot.params.copy()
+
+        def params(sv):
+            le, off = point(sv)
+            return np.asarray(self.regularized_params(10.0 ** le if self.bang_bang else None,
+                                                      np.zeros(self.nc), off), dtype=float)
+
+        def resid(x, jac):
+            shoot.params = params(x[-1])
+            if jac:
+                R, J = shoot.residual_jacobian(x[:-1])
+            else:
+                R, J = shoot.residual(x[:-1]), None
+            row = x[sl.start + 1] - x[sl.start] - target
+            return np.append(R, row), J
+
+        x = np.append(np.asarray(v, dtype=float), frac)
+        mid = 0.5 * (x[sl.start] + x[sl.start + 1])
+        x[sl.start], x[sl.start + 1] = mid - 0.5 * target, mid + 0.5 * target
+        try:
+            for _ in range(iterations):
+                R, J = resid(x, True)
+                err = float(np.linalg.norm(R))
+                if not np.isfinite(err):
+                    return None
+                if err < tol:
+                    break
+                h = 1e-7 * max(1.0, abs(x[-1]))
+                xs = x.copy()
+                xs[-1] += h
+                Rs, _ = resid(xs, False)
+                col = (Rs[:-1] - R[:-1]) / h
+                n = len(x) - 1
+                A = np.zeros((n + 1, n + 1))
+                A[:n, :n] = J
+                A[:n, n] = col
+                A[n, sl.start + 1], A[n, sl.start] = 1.0, -1.0
+                dx = np.linalg.lstsq(A, -R, rcond=None)[0]
+                step = 1.0
+                for _ in range(6):
+                    try:
+                        Rt, _ = resid(x + step * dx, False)
+                        if np.linalg.norm(Rt) < (1 - 0.25 * step) * err:
+                            break
+                    except _FAILURES:
+                        pass
+                    step *= 0.5
+                else:
+                    return None
+                x = x + step * dx
+            else:
+                return None
+        except _FAILURES:
+            return None
+        finally:
+            shoot.params = p_saved
+        self._detail(f"    width step: arc {i} from {w:.3e} to {target:.3e}, route parameter "
+                     f"{frac:.6f} -> {x[-1]:.6f}")
+        return x[:-1], float(x[-1])
+
     def _split_rising(self, shoot, v, n_points=801):
         """Structures with an order-1 boundary arc split where its multiplier rises.
 
@@ -1821,6 +1905,27 @@ class Homotopy:
                             done = settle(sh, r, le, off) if r.success else None
                         except _FAILURES as exc:
                             self._detail(f"  arcs run out to the ends: {exc}")
+                if done is None and self.width_steps and ds < 1e-3:
+                    # Rule R2: steps in s stall at a birth or death; a step in the young
+                    # arc's width is regular there (Lemma E).
+                    def point(sv, le0=le0, off_start=off_start):
+                        return (le0 + sv * (target_le - le0),
+                                off_start + sv * (target_off - off_start))
+                    for factor in (1.5, 0.5):
+                        hit = self._width_step(sh0, v0, frac, point, factor, path_tol)
+                        if hit is None or not frac < hit[1] <= 1.0:
+                            continue
+                        vw, fw = hit
+                        le_w, off_w = point(fw)
+                        try:
+                            arcs_w, vals_w = self._arcs_of(sh0, vw)
+                            sh, r = solve_structure(arcs_w, vals_w, vw[:sh0.n_base], le_w, off_w)
+                            done = settle(sh, r, le_w, off_w) if r.success else None
+                        except _FAILURES:
+                            done = None
+                        if done is not None:
+                            f, le, off = fw, le_w, off_w
+                            break
                 if done is None:
                     ds *= 0.5
                     continue
