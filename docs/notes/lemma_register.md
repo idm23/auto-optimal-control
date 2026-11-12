@@ -308,3 +308,27 @@ route stalls.
   - *Conjecture.* Generically the arc exits before that moment. If so, the
     split R5 builds, with its gap from the saturation time onward, is the
     right structure, and its failure to converge is a seeding problem.
+
+### P. The arc density jumps when a ridden limit's own control saturates — sketch
+
+- **Statement.** Assume C1 and C2, and a single order-1 limit ridden with
+  held set $B$ and free set $F$. Then in the direct form the density of the
+  measure on the arc is
+  $$\eta = -\frac{\dot a^\top u + \dot d + a_F^\top R_F^{-1} (G^\top H_x)_F}{a_F^\top R_F^{-1} a_F}.$$
+  It is continuous while $B$ is fixed. It jumps when a control with
+  $a_k \ne 0$ joins $B$, since that control's terms leave both the numerator
+  and the denominator.
+- **Consequences.**
+  - Lemma H ($\eta \ge 0$) can fail right after such a moment, although it
+    held before.
+  - An exit at that moment needs $\mu = 0$. The jump $\nu a$ would move the
+    controls still free, unless $a_F = 0$, so Lemma J allows no jump.
+  - So an arc whose $\eta$ changes sign at a saturation must already have
+    left before it.
+- **Proof.** Differentiate the identity $\dot g(x, u(\lambda_d)) = 0$ along
+  the arc, with $u_F = -R_F^{-1}(G^\top \lambda_d)_F$ and
+  $\dot\lambda_d = -H_x - \eta \nabla g$. The terms in $\eta$ collect to
+  $\eta\, a_F^\top R_F^{-1} a_F$.
+- **Gap.** Assumes $u_B$ constant on the stretch, true when it is held at a
+  bound, and the direct form of S1.
+- **Used by.** Diagnosis of rest 12 (O2). No rule yet.
