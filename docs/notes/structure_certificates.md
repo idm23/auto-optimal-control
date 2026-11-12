@@ -470,6 +470,22 @@ such junction, and in the regular case they have the same roots as the old
 rows. Acceptance is unchanged: $\mu \ge 0$, $\dot\mu \le 0$ (Lemma H) and
 the jump signs are still checked.
 
+*Correction: where the row is used.* As first built, R7 used the rate row at
+every order-1 junction. That broke two slow tests (an arc ridden from the
+start, and the two-link arm's run-time arcs). The rate row is
+$a^\top u_{\rm free} + d$, and wherever the free law is clipped at a bound it
+does not depend on the costates. Its gradient vanishes there, so Newton
+cannot move off it. In the failing test the seed's free jerk at the exit was
+$-J$, so the row was stuck at $-1$, while the answer has the jerk interior
+and $\mu = 0$ at the exit. Lemma J holds at every junction, but the row is
+well posed only where it is needed: at the corner of Lemma K, where the
+riding control has every control that moves $\dot g$ at a bound. R7 now
+uses it there and keeps $\mu = 0$ (or $H$ continuity) elsewhere
+(`MultiArcShooting._rate_row_here`). The lesson for rule-making: a necessary
+condition can be the right equation and still the wrong row, because a
+row's usefulness to Newton is its gradient, which the lemma says nothing
+about.
+
 ## Lemma E (birth of an arc: normal form). Statement and plan of proof
 
 This is the result behind continuing in an arc's width rather than in $s$.
