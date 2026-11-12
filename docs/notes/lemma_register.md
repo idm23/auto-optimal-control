@@ -29,6 +29,7 @@ Standard results cited, and so prerequisites of any formalization:
 | S4 | Sard's theorem, or the weaker fact that a $C^1$ image of a lower-dimensional manifold is Lebesgue-null | D |
 | S5 | Variational inequalities for convex minimization over a convex set | J, I′ |
 | S6 | The kinetic energy is $\tfrac12 \dot q^\top M(q) \dot q$ for the Newton-Euler model | A |
+| S7 | Danskin's theorem: directional derivatives of $\max_{t \in T} \phi(t, s)$ over a compact $T$ | N |
 
 Mathlib has S2 (`HasStrictFDerivAt.implicitFunction`), S5 (as first-order
 optimality on convex sets), S4 for $C^1$ maps between equal dimensions
@@ -248,6 +249,23 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Gap.** "Non-decreasing" is a first-order condition. The second-order
   case $\dot m = 0$ is not treated.
 - **Used by.** Conjectured rule R16 (below).
+
+### N. The peak excess is smooth before a birth — proved
+
+- **Statement.** Along a $C^1$ branch $v(s)$ of a fixed structure, the peak
+  excess $P_c(s)$ of an inactive limit has two properties:
+  - it is Lipschitz, with one-sided derivatives;
+  - it is $C^1$, with derivative $\partial_s g_c$ at the peak, wherever the
+    peak is unique, interior and nondegenerate (L1).
+- **Depends on.** S2 (for $v(s)$ and $t^*(s)$), S3, Danskin's theorem
+  (the derivative of a max over a compact set).
+- **To formalize.** Danskin's theorem is not in Mathlib in this form. The
+  $C^1$ case needs only the implicit function theorem and the chain rule,
+  and is a good first target. Reparametrizing the moving free segments over
+  fixed intervals needs care.
+- **Gap.** Two peaks of equal height (a kink in $P_c$) give no rate for the
+  secant. The rule only needs bracketing there.
+- **Used by.** R16.
 
 ### E′. One-sided birth at the corner — conjecture
 
