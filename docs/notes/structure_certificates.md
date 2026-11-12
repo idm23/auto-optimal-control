@@ -531,6 +531,53 @@ the edge must be a row of the shooting: the holdability margin, generated
 from the expressions $a(x)$ and $d(x)$, equal to zero at the exit, with the
 riding integration stopped there by an event, not by failure.
 
+### Lemma K (at a forced exit, R7's row is the margin)
+
+*Under the hypotheses of Lemma J, with a box $U$ and $a_k(x) \ne 0$ for every
+$k$, let an order-1 arc exit at $\tau$ on the edge of the holdable set. Then
+the control at $\tau$ is the corner $u^v$ of the box at which $a^\top u + d$
+is extreme, and so is the free control law at the (continuous) indirect
+costate. Wherever the free law is at that corner, R7's exit row equals
+$\mp m(x)$, the holdability margin
+$m(x) = \sum_k |a_k| r_k - |a^\top \bar u + d|$, with $\bar u$ the box's
+centre.*
+
+**Proof.** At the edge $m(x(\tau)) = 0$, so the only control in $U$ with
+$a^\top u + d = 0$ is the corner $u^v$, which is therefore the riding
+control. By Lemma J the control is continuous, so the free law gives $u^v$ at
+$\tau^+$. At that corner $a^\top u^v + d = \pm(|a^\top \bar u + d| - \sum_k
+|a_k| r_k)$, with the sign fixed by which way the drift points. $\square$
+
+So the margin row the R8 lesson asked for is already in the shooting:
+R7's row, wherever the free law sits at the corner (an open set of costates,
+since the box projection saturates there). The margin does not need to be
+generated separately. What was missing is a residual defined past the edge.
+
+### Rule R9 (continue past the edge on the free law)
+
+*Rule:* when the riding of a single order-1 limit fails before that arc's
+exit time, ride to the edge (found by bisection), then continue on the free
+law to the exit time (`MultiArcShooting.past_edge`). The residual is then
+defined on both sides of the edge, and by Lemma K R7's row crosses zero
+there.
+
+*Why it is sound:* it defines the residual only where it was undefined (the
+evaluation used to fail). At a solution with the exit before the edge
+nothing changes. At a solution with the exit on the edge, the motion is the
+riding motion up to the exit (Lemma K). Acceptance still checks every
+condition. The Jacobian leaves out the edge time's own dependence on the
+unknowns, which costs Newton accuracy only past the edge.
+
+*Result: off by default.* On the census (with R1, R4, R5, R6 and R7) it
+solved 24 of 45, against 27 without it. It lost rest-to-rest cases 0 and 5,
+and goal 5 at 90%, which is timing noise. Answers common to both runs agree to
+4e-16. On rest-to-rest case 11 it removed few of the failed evaluations. Most
+were a different failure: Newton steps that take an arc's exit before its
+entry ("arc times out of order", 895 of about 1200 failed evaluations). That
+is the square-root law of Lemma E: near its birth or death an arc's width
+moves like the square root of the homotopy parameter, so Newton in the
+junction times overshoots zero width. It points to continuing in the width.
+
 ## Lemma E (birth of an arc: normal form). Statement and plan of proof
 
 This is the result behind continuing in an arc's width rather than in $s$.
