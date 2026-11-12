@@ -731,6 +731,73 @@ cost is that riding failures are now the main class. They are backward rides
 that leave the holdable set, so the edge of Lemma I is now the obstacle on
 both sides of an arc. R10 is on by default.
 
+### What the toy and a direct comparison showed
+
+On the drift-limited axis with $B = 1$ and $B = 2$ the route failed with riding
+failures. A direct transcription, used only to *look* at the answer (never as a
+seed), shows the optimal motion has a simple structure: jerk $+J$, a long
+`tau_max` arc, jerk $-J$, a short `tau_min` arc, jerk $+J$. Its holdability
+margin stays at 0.23 or more on the free stretches and 0.6 or more on the arcs.
+So the answer is nowhere near the edge. The failures come from the route's
+intermediate states, not from the answer.
+
+### Rule R11 (arcs of one limit that touch are one arc)
+
+*Observed:* with $B = 1$ the route reached the right structure, then R5 split
+the `tau_max` arc, and the gap between the pieces closed as the route
+advanced. The pieces touched, then crossed (exit 1.08692, entry 1.08690). Two
+arcs of one limit cannot be ordered, so every later step failed ("entered
+twice without an exit"), and the route stalled and backed out.
+
+*Rule:* boundary arcs of one limit that touch or overlap are merged into one
+arc, whose entry jump is the sum of theirs (`Homotopy._merge_touching`).
+
+*Why it is sound:* by construction. Their union is the set of times on the
+limit, and $\mu = \int d\eta$ adds over the pieces.
+
+*Result:* $B = 1$ now solves exactly, matching the direct comparison's
+structure (`tau_max` on $[0.489, 3.150]$, `tau_min` on $[3.90, 4.41]$). On the
+arm it fired in 6 cases: the same 30 of 45 solved, 4% faster on the common
+cases (median 72.9 s, 13 under 60 s).
+
+### Lemma I′ (a peak on the edge) and one-sided births
+
+*At an interior maximum $t^*$ of $g$ along a motion whose control $u^*$ is in
+the box, the margin is $\ge 0$, with equality exactly when $u^*(t^*)$ is the
+box's corner for $g$.*
+
+**Proof.** $\dot g(t^*) = 0$ gives $a^\top u^* + d = 0$, so
+$|a^\top m + d| = |a^\top (m - u^*)| \le \sum_k |a_k|\, |m_k - u^*_k| \le
+\sum_k |a_k|\, r_k$. Equality needs $|m_k - u^*_k| = r_k$ for every $k$ with
+$a_k \ne 0$, with the signs aligned: that is the corner. $\square$
+
+*Observed:* with $B = 2$ the first `tau_min` birth has its peak on the edge
+(margin $-0.001$ at the sampled peak, $-0.144$ before it, $+0.139$ after it).
+The free jerk is saturated there. The limit is holdable only after the peak,
+so the newborn arc is one-sided, $[t^*, t^* + w]$. Lemma E's normal form is
+symmetric about $t^*$ and assumes interior jerks, so it does not cover this.
+R6 gave up when the peak sample failed the exact test. It now starts from the
+nearest holdable sample on the side where the margin rises ("R6 one-sided").
+$B = 2$ still fails: riding from the edge leaves the holdable set at once,
+because riding holds $g$ fixed and does not follow the free motion whose margin
+grew. The one-sided birth needs its own normal form. It never fired on the arm.
+
+### Rule R10b, tried
+
+Continuing a backward ride on the free law when riding backward fails
+(continuous at zero width) gained nothing. The fallback failed as often. On
+the toy, most riding failures turned out to be *forward* (1,318 against 284).
+Off by default.
+
+### R7's rows, replayed
+
+Replaying 221 census snapshots under each row policy compared three settings:
+rate rows at the corner with $H$ continuity elsewhere; Lemma J's rows (rate
+rows at the corner, multiplier rows elsewhere); and rate rows everywhere. Of
+the 157 steps that converged in the census, they converge again 157, 157 and
+146 times. On the 146 that all three solve, they take 94.8 s, 87.0 s and
+102.3 s. Lemma J's rows are the best per step.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

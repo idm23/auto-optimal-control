@@ -289,6 +289,7 @@ class Homotopy:
         self.split_rising = True
         self.holdable_births = True
         self.width_steps = False
+        self.merge_touching = True
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
         #: oracles on every path solution (slow: for development).
@@ -1096,6 +1097,32 @@ class Homotopy:
                 merged.append((c, ta, tb, peak))
         return merged
 
+    def _merge_touching(self, arcs, values):
+        """Rule R11: boundary arcs of one limit that touch or overlap are one arc.
+
+        When the gap between two arcs of a limit closes (a split whose stretch off the
+        limit dies, or a predictor carrying one arc into the next), their union is the
+        set of times on the limit, so they are one arc. Its entry jump carries both,
+        since mu = int d eta adds over the pieces (the convention of ``_activate``)."""
+        arcs, values = list(arcs), list(values)
+        merged = self.merge_touching
+        while merged:
+            merged = False
+            order = sorted((i for i, (kind, _) in enumerate(arcs) if kind == "boundary"),
+                           key=lambda i: float(values[i][0]))
+            for i, j in zip(order, order[1:]):
+                if arcs[i][1] != arcs[j][1]:
+                    continue
+                (a0, a1, pa), (b0, b1, pb) = values[i], values[j]
+                if b0 <= a1:
+                    keep = (a0, max(a1, b1), np.asarray(pa, dtype=float) + np.asarray(pb, dtype=float))
+                    values[i] = keep
+                    del arcs[j], values[j]
+                    self.diagnostics.fired("R11")
+                    merged = True
+                    break
+        return arcs, values
+
     def _mas_entries(self, arcs, values, names=False):
         """MultiArcShooting entries for arcs that may overlap: ``(entries, values)``.
 
@@ -1103,6 +1130,7 @@ class Homotopy:
         limit that comes into play while another is ridden becomes an arc
         inside or across that one; the values follow the order of entry.
         """
+        arcs, values = self._merge_touching(arcs, values)
         # A predictor can carry a short arc past zero length: it stays an arc, just
         # barely, and the solve or the retirement rule decides what becomes of it.
         values = [(v[0], max(v[1], v[0] + 1e-10 * max(1.0, abs(v[0]))), *v[2:])
@@ -1508,7 +1536,14 @@ class Homotopy:
                 return False
 
         if not ok(j0):
-            return a, b
+            # The peak is on the edge (equality in Lemma I's corollary: the free control
+            # is at the corner there), so the arc is born one-sided, on the side where
+            # the limit becomes holdable: start from the nearest holdable sample.
+            near = [j for j in sorted(range(len(inside)), key=lambda j: abs(j - j0)) if ok(j)]
+            if not near:
+                return a, b
+            j0 = near[0]
+            self.diagnostics.fired("R6 one-sided")
         lo = j0
         while lo > 0 and ok(lo - 1):
             lo -= 1
