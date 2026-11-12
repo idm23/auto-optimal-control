@@ -503,6 +503,34 @@ under C2, $H$ continuity is never needed at order-1 junctions: the rows are
 $\mu = 0$ (exit) and $\mu = \pi$ or $\dot g = 0$ (entry) off the corner, and
 the rate rows at the corner (`MultiArcShooting._multiplier_row_here`).
 
+### Rule R8 (exits are pulled in to the edge of the holdable set)
+
+*Hypotheses:* those of Lemma I and R7, with limits ridden at run time (the
+riding solve fails exactly where no admissible control holds the limits).
+
+*Rule:* when a seed does not propagate because a boundary arc's riding fails
+partway, the last time to which it does propagate (the edge) is found by
+bisection. The arc's exit is moved to just inside the edge and the seed is
+solved again (`MultiArcShooting.pull_in_exits`).
+
+*Why it is sound:* by Lemma I no answer rides a limit past the edge, so the
+times removed are no answer's. By Lemma J an exit at the edge is a legitimate
+junction, fixed by R7's exit row, even with $\mu > 0$. It changes only the
+seed. Newton iterates that step past the edge are already handled: the
+evaluation fails, and the chord iteration backtracks.
+
+*Result: off by default.* On rest-to-rest cases 1, 4 and 11 it fired 4, 18
+and 7 times and solved none. In case 11 the route converges with the exit
+near 0.346 up to $s \approx 0.67$. Beyond that the exit approaches the edge
+from inside. Pulled-in seeds start far from the solution (residuals 20 to
+25), and Newton iterates near the solution keep landing past the edge, where
+the residual is undefined. The lesson is that an exit reaching the edge is a
+structure event in its own right: the arc goes from a regular exit
+($\mu = 0$, inside) to an exit forced at the edge ($\mu > 0$). To follow it,
+the edge must be a row of the shooting: the holdability margin, generated
+from the expressions $a(x)$ and $d(x)$, equal to zero at the exit, with the
+riding integration stopped there by an event, not by failure.
+
 ## Lemma E (birth of an arc: normal form). Statement and plan of proof
 
 This is the result behind continuing in an arc's width rather than in $s$.

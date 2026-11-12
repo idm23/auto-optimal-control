@@ -285,6 +285,7 @@ class Homotopy:
         self.reversal = True
         self.split_rising = True
         self.holdable_births = True
+        self.edge_exits = False         # rule R8: tried, no gain (see the note)
         self._certificates = None
         self.penalty_seconds = 300.0       # time budget of the penalty route
         self.path_options = dict(rtol=rtol, atol=atol)    # along the active-set route
@@ -1676,6 +1677,16 @@ class Homotopy:
                 # Limits ridden at run time make every evaluation dear: a cheap attempt
                 # first, and only a step that gets close earns the slower solve.
                 r = sh.solve_chord(guess, tol=path_tol)
+                if (not r.success and r.residual_norm >= 1e5 and self.edge_exits and arcs
+                        and isinstance(sh, MultiArcShooting)):
+                    # The seed did not propagate. If an arc rides past the edge of the
+                    # holdable set, its exit is pulled in to the edge (Lemma I).
+                    pulled = sh.pull_in_exits(guess)
+                    if pulled is not None:
+                        self._detail("    exits pulled in to the edge of the holdable set")
+                        guess = pulled
+                        state["solves"] += 1
+                        r = sh.solve_chord(guess, tol=path_tol)
                 if r.success or not r.residual_norm < self.path_fallback:
                     return sh, r
             r = sh.solve(guess, tol=path_tol, options=options)
