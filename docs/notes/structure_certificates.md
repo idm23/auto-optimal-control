@@ -486,6 +486,23 @@ condition can be the right equation and still the wrong row, because a
 row's usefulness to Newton is its gradient, which the lemma says nothing
 about.
 
+*Off the corner, multiplier rows (a second consequence of Lemma J).* With
+the rate row kept to the corner, the junctions off the corner where the free
+side's control is clipped fell back to $H$ continuity. That row has a double
+root (Newton converges only linearly), and the census ran 31% slower on the
+common cases. Lemma J's argument gives better rows there. Off the corner,
+some control $k$ with $a_k \ne 0$ is strictly inside its bounds on the arc.
+Since the control is continuous at the junction, the $k$-th components of
+the two optimality conditions ($R u + c + G^\top\lambda + \mu a = 0$ on the
+arc, the same without $\mu a$ off it, and $\lambda^+ = \lambda^- - \pi
+\nabla g$ at an entry) agree. So:
+$$\mu(t_{\rm out}^-)\, a_k = 0 \;\Rightarrow\; \mu(t_{\rm out}) = 0,
+\qquad (\mu(t_{\rm in}^+) - \pi)\, a_k = 0 \;\Rightarrow\; \mu(t_{\rm in}^+) = \pi ,$$
+whatever the other controls are clipped to. Both rows have simple roots. So
+under C2, $H$ continuity is never needed at order-1 junctions: the rows are
+$\mu = 0$ (exit) and $\mu = \pi$ or $\dot g = 0$ (entry) off the corner, and
+the rate rows at the corner (`MultiArcShooting._multiplier_row_here`).
+
 ## Lemma E (birth of an arc: normal form). Statement and plan of proof
 
 This is the result behind continuing in an arc's width rather than in $s$.
