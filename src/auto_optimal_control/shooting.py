@@ -930,6 +930,16 @@ class MultiArcShooting(SingleShooting):
         held = (u - lo <= tight) | (hi - u <= tight)
         return bool(np.all(held[moves]))
 
+    def _multiplier_row_here(self, kind, q):
+        """Rule R7, off the corner: whether an order-1 junction takes a multiplier row
+        (``mu = 0`` at an exit, ``mu = pi`` at an entry) in place of ``H`` continuity.
+        Under C2 these hold at every junction where the riding control is not at the
+        corner (Lemma J); the caller has already checked for the corner."""
+        return bool(self.rate_junctions and kind == "boundary" and q == 1
+                    and self.junctions == "auto" and not self.kernels.N_SWITCHING
+                    and self.kernels.system.problem.control_sets
+                    and self._control_matrix() is not None)
+
     def _control_matrix(self):
         """``df/du``, constant by certificate C1, or None if it is not."""
         if not hasattr(self, "_G"):
@@ -1111,9 +1121,13 @@ class MultiArcShooting(SingleShooting):
                     val, gt, gz = self._rate_of(c, after, t, z, flags)
                     rows.append(val)
                     grads.append(gt * d_ev + gz @ D if jac else None)
-                elif self._regular_junction(kind, q, after, t, z):
-                    # mu_c vanishes at the exit of an order-1 limit when H is
-                    # regular: a simple root, where H continuity has a double one.
+                elif (self._regular_junction(kind, q, after, t, z)
+                      or self._multiplier_row_here(kind, q)):
+                    # mu_c vanishes at the exit of an order-1 limit: when H is regular,
+                    # and, under C2, at every exit off the corner, where a control that
+                    # moves dg/dt is interior on the arc and continuity of the control
+                    # forces mu_c a_k = 0 (Lemma J). A simple root, where H continuity
+                    # has a double one.
                     val, Mt, Mz = self._multiplier_of(aid, c, t, z)
                     rows.append(val)
                     grads.append(Mt * d_ev + Mz @ D if jac else None)
@@ -1152,6 +1166,18 @@ class MultiArcShooting(SingleShooting):
                     val, gt, gz = self._rate_of(c, aid, t, z, flags)
                     rows.append(val)
                     grads.append(gt * d_ev + gz @ D if jac else None)
+                elif self._multiplier_row_here(kind, q):
+                    # Off the corner, under C2, the entry carries mu_c(t_in+) = pi: a
+                    # control that moves dg/dt is interior on the arc, and continuity of
+                    # the control at the junction forces (mu_c - pi) a_k = 0 (Lemma J).
+                    val, Mt, Mz = self._multiplier_of(after, c, t, zp)
+                    rows.append(val - float(mult[0]))
+                    if jac:
+                        g_ = Mt * d_ev + Mz @ Dp
+                        g_[mult_cols[0]] -= 1.0
+                        grads.append(g_)
+                    else:
+                        grads.append(None)
                 else:
                     # H continuous at the entry: H(before, z-) = H(after, z+).
                     H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags)
