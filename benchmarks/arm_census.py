@@ -53,6 +53,7 @@ def setup(args):
         H.max_path_solves = args.solves
         H.active_set_seconds = float("inf")
     H.snapshot_dir = args.snapshots
+    H.parallel_routes = args.parallel_routes
     for item in args.set or []:
         name, value = item.split("=", 1)
         try:
@@ -128,14 +129,20 @@ def main(argv=None):
     ap.add_argument("--cache", default=None)
     ap.add_argument("--set", action="append")
     ap.add_argument("--rule", action="append")
+    ap.add_argument("--parallel-routes", action="store_true",
+                    help="run R15's routes at once (each case then uses one core per route)")
     args = ap.parse_args(argv)
     setup(args)
     names = args.cases or ([f"goal{i}@{p}" for i in range(10) for p in (90, 80, 70)]
                            + [f"rest{i}" for i in range(15)])
     rows = []
-    with mp.get_context("fork").Pool(args.workers, maxtasksperchild=1) as pool, \
+    # Workers that may start processes of their own (Homotopy.parallel_routes): a
+    # ProcessPoolExecutor's are not daemonic, unlike a Pool's.
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    with ProcessPoolExecutor(args.workers, mp_context=mp.get_context("fork")) as pool, \
             open(args.out, "w") as fo:
-        for row in pool.imap_unordered(run, names):
+        for fut in as_completed([pool.submit(run, n) for n in names]):
+            row = fut.result()
             rows.append(row)
             fo.write(json.dumps(row) + "\n")
             fo.flush()

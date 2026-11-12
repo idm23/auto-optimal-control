@@ -828,6 +828,79 @@ remedy belongs to the route: when a birth's peak lies on the edge, change
 which limits tighten first, so that the contact happens where the limit can
 be held.
 
+### First contacts with drift are corner births, and arcs entered at the corner
+
+With drift, a limit's *first* contact along a near-minimum-time free motion is
+on the edge in the problem itself, not only on the route. The free jerk is
+saturated almost everywhere, and a peak of $g$ under a saturated control has
+margin exactly 0 (Lemma I′'s equality case). A direct transcription of the
+toy ($B = 2$, comparison only), with the limit tightened from just above the
+free peak, shows what follows. The contact grows into an **arc entered at the
+corner**: the margin at the entry is within $\pm 0.02$ of zero at every
+limit value, the jerk arrives at $-1$, and the riding jerk is just inside
+($-0.95$, $-0.89$, …). The arc grows asymmetrically: the entry creeps
+earlier, the exit moves later fast. This is the time reverse of Lemma K's
+forced exit. R7's rate row at the corner ($\dot g = -$margin $= 0$ under the
+arriving control) is its entry condition.
+
+### Rule R13 (bring the limits in one at a time)
+
+The limit the free motion breaks most comes first (`offset_order =
+"sequential"`). Tried on the toy: no gain. Even the first limit is born on
+the edge (above). It is one route of R15's portfolio.
+
+### Rule R14 (ride the corner at the edge, up to rounding)
+
+*Observed:* a ride entered at the edge (margin $-0.0000$ to four decimals)
+failed on its first internal step. The riding problem has no admissible
+control just past the edge, and the integrator's stage points land there by
+rounding.
+
+*Rule (generated riding code):* when the riding problem is infeasible by no
+more than $10^{-6}$ of the jerks' reach, every control is held at the corner
+except the one with the largest $|a_k|$, and the limit fixes that one. The
+riding system is then nonsingular, and $\mu$ comes from that control's own
+equation. This is the continuous limit from the holdable side, where that
+control is the last still interior.
+
+*Why it is sound:* it changes the riding vector field only within rounding
+of the edge, where the exact one does not exist (Lemma B fails there).
+
+### Rule R15 (a portfolio of routes)
+
+*Rule:* when the active-set route fails, try the next route of a portfolio:
+another draw of the offsets, then sequential births (`Homotopy.portfolio`).
+Every route may use all the time left, and a route that sets no new low of
+its offsets for `stall_seconds` (60 s) yields to the next.
+
+*Why it is sound:* each route is a valid route (Lemma D: almost every draw
+separates the births), and acceptance is unchanged.
+
+*Effectiveness:* heuristic, but grounded in the census history. Which cases
+solve depends on the route, and the union of the checked runs solved 34
+cases while no single run solved more than 30.
+
+*Census* (45 cases, 300 s per direction, with R1, R2, R4–R7, R10, R11 and
+R14, against the same run without R15, which solved 30):
+
+| Variant | Solved | Under 60 s | Median |
+|---|---|---|---|
+| Routes in turn, time split (first route half) | 29 | 14 | 68 s |
+| In turn, each may use all the time left, yields after 60 s without progress | 34 | 13 | 104 s |
+| The same with 120 s | 30 | 12 | 74 s |
+| 60 s, offsets at zero and structure changes count as progress | 33 | 12 | 101 s |
+| **Routes at once in forked processes** (`parallel_routes`) | **35** | **18** | **52 s** |
+
+Routes in turn trade cases for cases: any rule for cutting one route short
+also cuts routes that would have finished. Goal 8 and goal 9 at 70% need
+their first route uninterrupted for 240 to 275 s. Run at once, each route
+has the whole budget, and the solved set is the union of the routes. That
+run gained goal 0 at 80%, goal 3 at 70% and 80%, goal 5 at 80%, goal 7 at
+70% and rest 2, and lost rest 9 (solved before only through the reversed
+problem, after 526 s). Common answers agree to 1e-15, and the common cases
+are 9% faster. A later route found 21 of the 35 answers. The cost is one
+core per route: the census ran 5 cases at a time on 16 cores.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

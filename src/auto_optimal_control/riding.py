@@ -305,6 +305,32 @@ static int {P}r_solve(int id, double t, const double* z, const double* p, double
             if ({P}r_system(id, R, limits, c0, lo, hi, held, K, piv, v, dout)) continue;
             if ({P}r_check(id, v, lo, hi, held, &which, &to)) solved = 1;
         }}
+        if (!solved && s == 1) {{
+            /* Rule R14: on the edge of the holdable set, up to rounding (Lemma I), the only
+               control that holds the limit is the box's corner, and every control is held,
+               so mu is not fixed by the equations (Lemma B fails). It is fixed by continuity
+               from the holdable side, where the control with the largest |a_k| is the last
+               still interior: its own equation gives mu. */
+            const int c = {P}r_set[id][0];
+            const int kr = {P}r_root[c];
+            double base = limits[{nr * m} + kr], reach = 0.0, amax = 0.0;
+            int best = 0;
+            for (int i = 0; i < {m}; ++i) {{
+                const double ai = limits[kr * {m} + i];
+                base += ai * 0.5 * (lo[i] + hi[i]);
+                reach += fabs(ai) * 0.5 * (hi[i] - lo[i]);
+                if (fabs(ai) > amax) {{ amax = fabs(ai); best = i; }}
+            }}
+            if (amax > 0.0 && reach - fabs(base) > -1e-6 * (reach + 1e-300)) {{
+                /* every control held at the corner but the one with the largest |a_k|,
+                   which the limit then fixes: a consistent, nonsingular system */
+                for (int i = 0; i < {m}; ++i) {{
+                    const double ai = limits[kr * {m} + i];
+                    held[i] = (i == best) ? 0 : ((ai * base > 0.0) ? -1 : (ai * base < 0.0 ? 1 : 0));
+                }}
+                if (!{P}r_system(id, R, limits, c0, lo, hi, held, K, piv, v, dout)) solved = 1;
+            }}
+        }}
         if (!solved) return 4;     /* these limits cannot be ridden within the bounds */
     }}
     for (int i = 0; i < {m}; ++i) u[i] = v[i];
