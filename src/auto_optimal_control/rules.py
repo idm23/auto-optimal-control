@@ -66,12 +66,24 @@ RULES = (
     Rule("R12", "newborn arc", "a violation's peak lies on the edge of the holdable set",
          "bring the limit in as an order-1 touch point, not an arc", ("I'", "L"), "heuristic",
          "settle failed: no structure converged", "corner_touches"),
+    Rule("R13", "route start", "every solve",
+         "bring the limits in one at a time, the most violated first", ("I'",), "heuristic",
+         "seed failed: riding_failed", "offset_order=sequential"),
+    Rule("R14", "riding", "the riding problem is infeasible only by rounding (margin ~ 0)",
+         "ride the corner, with mu from the last interior control", ("I", "B"),
+         "continuity from the holdable side", "riding_failed", "always"),
+    Rule("R15", "route failed", "the active-set route fails",
+         "try the next route of a portfolio in the time left", ("D",), "heuristic",
+         "not exact", "portfolio"),
     Rule("R9", "evaluation", "a single limit's riding fails before its exit",
          "continue past the edge on the free law", ("K",), "heuristic", "riding_failed",
          "MultiArcShooting.past_edge_default"),
 )
 
 BY_NAME = {r.name: r for r in RULES}
+
+#: The portfolio rule R15 turns on: another draw of the offsets, then sequential births.
+DEFAULT_PORTFOLIO = ({"offset_seed": 1}, {"offset_order": "sequential"})
 
 
 def enabled(h):
@@ -80,6 +92,9 @@ def enabled(h):
 
     out = {}
     for r in RULES:
+        if r.switch == "always":
+            out[r.name] = True
+            continue
         name, _, value = r.switch.partition("=")
         if name.startswith("MultiArcShooting."):
             cur = getattr(MultiArcShooting, name.split(".", 1)[1])
@@ -93,8 +108,15 @@ def set_rule(h, name, on):
     """Turn rule ``name`` on or off for Homotopy ``h`` (class defaults for the shooting's)."""
     from .shooting import MultiArcShooting
 
+    if BY_NAME[name].switch == "always":
+        if not on:
+            raise ValueError(f"rule {name} is part of the generated code and cannot be turned off")
+        return
     attr, _, value = BY_NAME[name].switch.partition("=")
-    new = (value if on else {"offset_start": "together"}.get(attr, None)) if value else bool(on)
+    off_values = {"offset_start": "together", "offset_order": "joint"}
+    new = (value if on else off_values.get(attr, None)) if value else bool(on)
+    if attr == "portfolio":
+        new = list(DEFAULT_PORTFOLIO) if on else []
     if attr.startswith("MultiArcShooting."):
         setattr(MultiArcShooting, attr.split(".", 1)[1], new)
     else:

@@ -62,6 +62,9 @@ def test_every_rule_can_be_switched(axis):
     before = enabled(h)
     try:
         for r in RULES:
+            if r.switch == "always":
+                assert enabled(h)[r.name]
+                continue
             set_rule(h, r.name, True)
             assert enabled(h)[r.name]
             set_rule(h, r.name, False)

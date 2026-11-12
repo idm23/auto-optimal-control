@@ -290,6 +290,13 @@ class Homotopy:
         self.holdable_births = True
         self.width_steps = False
         self.merge_touching = True
+        self.offset_order = "joint"
+        #: Rule R15: routes to try after the first fails, as attribute settings (each
+        #: gets an equal share of the time left); empty for one route.
+        self.portfolio = []
+        self.stall_seconds = 60.0
+        #: Run the portfolio's routes at once in forked processes (one core each).
+        self.parallel_routes = False
         self.corner_touches = False         # rule R12: refuted by Lemma L (see the note)
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
@@ -1404,6 +1411,71 @@ class Homotopy:
                 out.append(val)
         return out
 
+    def _routes_in_parallel(self, members, first, eps0, s_max, steps, tol):
+        """Rule R15 in parallel: each route of the portfolio in a forked process with the
+        whole time budget; the first exact answer is solved again here (and accepted or
+        not by the same checks). ``(J, shoot, sol)`` or None."""
+        import multiprocessing as mp
+        ctx = mp.get_context("fork")
+
+        def child(conn, member):
+            try:
+                for k_, val_ in member.items():
+                    setattr(self, k_, val_)
+                self.portfolio = []
+                hit = self._active_set(first, eps0, s_max, steps, tol,
+                                       max_solves=self.max_path_solves)
+                out = None
+                if hit is not None:
+                    _, xs, xsol = hit
+                    out = (self._entries(xs), np.asarray(xsol.v, dtype=float))
+                conn.send((out, self.diagnostics.as_dict()))
+            except Exception:
+                conn.send((None, {}))
+            conn.close()
+
+        running = []
+        for n_, member in enumerate(members):
+            parent, kid = ctx.Pipe(duplex=False)
+            p = ctx.Process(target=child, args=(kid, member), daemon=True)
+            p.start()
+            kid.close()
+            running.append((n_, p, parent))
+        deadline = time.perf_counter() + self.active_set_seconds + 30.0
+        found = None
+        while running and found is None and time.perf_counter() < deadline:
+            time.sleep(0.05)
+            for item in list(running):
+                n_, p, conn = item
+                if not conn.poll():
+                    if not p.is_alive():
+                        running.remove(item)
+                    continue
+                try:
+                    out, diag = conn.recv()
+                except EOFError:
+                    out, diag = None, {}
+                running.remove(item)
+                p.join(timeout=1)
+                for part in ("evaluations", "steps", "rejected", "rules", "oracles"):
+                    for key_, cnt in diag.get(part, {}).items():
+                        table = getattr(self.diagnostics, part)
+                        table[key_] = table.get(key_, 0) + cnt
+                if out is not None:
+                    entries, v = out
+                    hit = self._exact_jump(list(entries), v, tol)
+                    if hit is not None:
+                        if n_:
+                            self.diagnostics.fired("R15")
+                        self._say(f"active set: route {n_ + 1} of {len(members)} found it")
+                        found = hit
+                        break
+        for _, p, conn in running:
+            p.kill()
+            p.join(timeout=1)
+            conn.close()
+        return found
+
     def _speculate(self, options, base, le, off, solve_structure, state):
         """Solve candidate structures at once in forked processes; the first in order
         that converges within ``candidate_seconds``, as ``((arcs, values), shoot, sol)``."""
@@ -1914,9 +1986,18 @@ class Homotopy:
             peaks = np.maximum(g.max(axis=0), 0.0)
             draw = np.random.default_rng(self.offset_seed).uniform(0.5, 1.5, self.nc)
             off0 = peaks * (1.0 + draw) + 1e-3 * scale
+        peaks0 = g.max(axis=0)
         state = {"shoot": shoot, "v": sol.v, "le": np.log10(eps0) if self.bang_bang else 0.0,
                  "off": off0.copy(), "solves": 0}
         log_eps_min = state["le"] - s_max
+        state["best_tight"], state["progress_at"] = np.inf, time.perf_counter()
+
+        def stalled():
+            """Rule R15: no new low of the offsets for ``stall_seconds`` (with a portfolio,
+            the next route gets the time that is left)."""
+            if not self.portfolio or state["best_tight"] <= 1e-12:
+                return False               # one route, or offsets at zero: the last phase
+            return time.perf_counter() - state["progress_at"] > self.stall_seconds
 
         # The path only has to be followed closely, not solved to the last digit:
         # at an order-1 entry with a smooth control H continuity has a double
@@ -2015,7 +2096,7 @@ class Homotopy:
             prev = None                    # (frac, v, structure) of the solution before
             while frac < 1.0:
                 if (state["solves"] > max_solves or ds < ds_min
-                        or time.perf_counter() > deadline):
+                        or time.perf_counter() > deadline or stalled()):
                     self.diagnostics.step("stalled" if ds < ds_min else "out of budget")
                     return False
                 f = min(frac + ds, 1.0)
@@ -2108,6 +2189,9 @@ class Homotopy:
                     new_arcs, new_values = self._arcs_of(done[0], done[1].v)
                     checkpoints.append((dict(state), key(new_arcs, new_values)))
                 state.update(shoot=done[0], v=done[1].v, le=le, off=off)
+                tight = float(np.sum(np.asarray(off, dtype=float) / scale))
+                if tight < state["best_tight"] - 1e-9:
+                    state["best_tight"], state["progress_at"] = tight, time.perf_counter()
                 if self.check_lemmas:
                     from auto_optimal_control.lemmas import check
                     try:
@@ -2118,6 +2202,7 @@ class Homotopy:
                         self.diagnostics.oracle("check failed")
                 if changed:
                     prev = None            # the structure changed: no secant across it
+                    state["progress_at"] = time.perf_counter()     # progress, for R15
                 frac, ds = f, min(ds * 1.5, 0.25)
                 if on_step is not None and on_step():
                     return True
@@ -2143,11 +2228,24 @@ class Homotopy:
             return False
 
         def out_of_budget():
-            return state["solves"] > max_solves or time.perf_counter() > deadline
+            return state["solves"] > max_solves or time.perf_counter() > deadline or stalled()
 
         def anneal():
             """The vector of offsets to zero: together, then one by one, then back up."""
             backtracks = 0
+            if self.offset_order == "sequential":
+                # Rule R13: the limits come in one at a time, the one the free motion
+                # breaks most first. A limit that slows the motion is then tight before
+                # the ones whose holdable set shrinks with speed are born (Lemma I'), so
+                # their births happen off the edge, as on the true path.
+                excess = np.maximum(peaks0, 0.0) / scale
+                for c in np.argsort(-excess):
+                    if excess[c] <= 0 or out_of_budget():
+                        continue
+                    target = state["off"].copy()
+                    target[c] = 0.0
+                    self.diagnostics.fired("R13")
+                    advance(state["le"], target, ds_min=1e-4)
             while True:
                 if advance(state["le"], np.zeros(self.nc)):
                     return True
@@ -2523,7 +2621,44 @@ class Homotopy:
         active_first = can_activate and not any(kx.SINGULAR_ARCS)
 
         def active_route():
-            hit = self._active_set(first, eps0, s_max, steps, tol, max_solves=self.max_path_solves)
+            # Rule R15: a portfolio of routes. Each is a valid route (Lemma D: almost every
+            # draw of the offsets separates the births), and which cases a route solves
+            # depends on its path; on failure the next one gets the time that is left.
+            members = [{}] + [dict(m_) for m_ in self.portfolio]
+            if self.portfolio and self.parallel_routes:
+                hit = self._routes_in_parallel(members, first, eps0, s_max, steps, tol)
+                if hit is None:
+                    return None
+                J, xs, xsol = hit
+                return HomotopyResult(xsol, xs, self._entries(xs), True, J, xs.params, steps,
+                                      tries, f"exact after {len(steps)} steps (active set)")
+            total, start = self.active_set_seconds, time.perf_counter()
+            saved = {k_: getattr(self, k_) for m_ in members for k_ in m_}
+            hit = None
+            try:
+                for n_, member in enumerate(members):
+                    left = total - (time.perf_counter() - start)
+                    if left <= 1.0:
+                        break
+                    for k_, val_ in saved.items():
+                        setattr(self, k_, val_)
+                    for k_, val_ in member.items():
+                        setattr(self, k_, val_)
+                    # Every route may use all the time left: a route that stops making
+                    # progress (stall_seconds without a new low of its offsets) yields.
+                    share = left
+                    self.active_set_seconds = share
+                    if n_:
+                        self.diagnostics.fired("R15")
+                        self._say(f"active set: route {n_ + 1} of {len(members)} ({member}), {share:.0f} s")
+                    hit = self._active_set(first, eps0, s_max, steps, tol,
+                                           max_solves=self.max_path_solves)
+                    if hit is not None:
+                        break
+            finally:
+                self.active_set_seconds = total
+                for k_, val_ in saved.items():
+                    setattr(self, k_, val_)
             if hit is None:
                 return None
             J, xs, xsol = hit
