@@ -901,6 +901,54 @@ problem, after 526 s). Common answers agree to 1e-15, and the common cases
 are 9% faster. A later route found 21 of the 35 answers. The cost is one
 core per route: the census ran 5 cases at a time on 16 cores.
 
+### Lemma N (the peak excess is smooth before a birth)
+
+*Let the shooting equations of a fixed structure have a branch $v(s)$, $C^1$ by
+L2 and the implicit function theorem, and let limit $c$ be inactive on it. Write
+its peak excess as $P_c(s) = \max_{t \in T_{\rm free}} g_c(x(t; v(s))) - o_c(s)$,
+with $T_{\rm free}$ the compact set of times off $c$'s arcs.*
+
+1. *$P_c$ is Lipschitz, and has one-sided derivatives everywhere (Danskin).*
+2. *If the maximum is attained at a single interior time $t^*(s)$, with
+   $\ddot g_c(t^*) < 0$ (L1), then $P_c$ is $C^1$ near $s$, with
+   $P_c'(s) = \partial_s\big[g_c(x(t; v(s)))\big]_{t = t^*} - o_c'(s)$.*
+
+**Proof.** The map $(t, s) \mapsto g_c(x(t; v(s)))$ is $C^1$ on
+$T_{\rm free} \times$ (a neighbourhood). The junction times move with $s$, but
+smoothly, so reparametrize each free segment over a fixed interval. Part 1
+is Danskin's theorem for a max over a compact set. For part 2: by the
+implicit function theorem on $\partial_t g_c = 0$, with $\partial_t^2 g_c \ne 0$,
+the maximizer $t^*(s)$ is $C^1$. Then $\frac{d}{ds} g_c(t^*(s), s) =
+\partial_s g_c + \partial_t g_c \cdot t^{*\prime} = \partial_s g_c$, since
+$\partial_t g_c = 0$ there. $\square$
+
+**Consequence.** If $P_c(s_0) \le 0 < P_c(s_1)$ and part 2 holds on
+$[s_0, s_1]$, then the secant root $\hat s$ of $P_c = \text{target}$ satisfies
+$|\hat s - s^*| = O((s_1 - s_0)^2)$, with a constant set by $\sup |P_c''|$
+when $P_c$ is $C^2$. With only part 1, the secant is still a bracketing step
+(regula falsi), but no rate is claimed.
+
+### Rule R16 (place the step at the birth)
+
+*Observed:* a census run has about 4,100 steps that converge but overshoot a
+birth ("settle failed: violation too large"), against 13,500 that succeed.
+Each is followed by a halved step.
+
+*Rule:* after such a step, take the next step at the fraction
+$\theta = (\text{target} - P_0)/(P_1 - P_0)$ of the failed one, clipped to
+$[0.05, 0.9]$, with the target $2 \times 10^{-4}$ of the limit's scale, and
+the smallest $\theta$ over the limits that overshot (`Homotopy.locate_births`).
+
+*Why it is sound:* only the step length changes. The step is solved, settled
+and judged like any other.
+
+*Result: on in the census.* With R1, R2 and R15 (parallel routes), 37 of 45
+solve, against 35 without it. It gains rest-to-rest cases 6 (285 s; never
+solved before) and 9, and loses none. 22 solve under 60 s, against 18, and the
+median time is 36.3 s, against 52.0 s. The 35 common answers agree to 1e-15,
+and take 23% less time in total. Overshooting steps fell from 4,126 to 1,357,
+and steps in all from about 26,500 to 17,400.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

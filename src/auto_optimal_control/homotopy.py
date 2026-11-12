@@ -298,6 +298,9 @@ class Homotopy:
         #: Run the portfolio's routes at once in forked processes (one core each).
         self.parallel_routes = False
         self.corner_touches = False         # rule R12: refuted by Lemma L (see the note)
+        #: Rule R16: after a step that overshoots a birth, place the next one at the
+        #: birth by a secant on the peak excess (Lemma N), not by halving.
+        self.locate_births = False
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
         #: oracles on every path solution (slow: for development).
@@ -1079,6 +1082,33 @@ class Homotopy:
                               for ti, zi in zip(sol.t, sol.y.T)]).reshape(len(sol.t), -1)
                 out.append((sol.t, g, tuple(k.arc_constraints(aid))))
         return out
+
+    def _birth_fraction(self, shoot, v, overshoot, scale, target=2e-4):
+        """Rule R16: the fraction of an overshooting step at which the first limit's
+        peak excess reaches ``target`` (relative to ``scale``), by a secant between the
+        consistent solution ``v`` and the overshooting one, or None.
+
+        Before a birth the structure is fixed, and the peak excess is a C^1 function of
+        the route parameter with derivative the explicit one at the peak (Lemma N), so
+        the secant puts the step within O(ds^2) of the birth. Only the step length
+        changes; the step is solved and judged as any other."""
+        if not overshoot:
+            return None
+        try:
+            samples = self._free_samples(shoot, v)
+        except _FAILURES:
+            return None
+        best = None
+        for c, p1 in overshoot.items():
+            vals = [g[:, c] for t, g, active in samples if c not in active]
+            if not vals:
+                continue
+            p0 = float(max(np.max(x) for x in vals)) / scale[c]
+            if not p1 > target > p0:
+                continue
+            theta = (target - p0) / (p1 - p0)
+            best = theta if best is None else min(best, theta)
+        return None if best is None else float(np.clip(best, 0.05, 0.9))
 
     def _free_violations(self, shoot, v, scale):
         """``[(c, start, end, peak)]``: where each limit is violated while it is not ridden."""
@@ -2023,6 +2053,10 @@ class Homotopy:
                                                  f" at [{a:.5f}, {b:.5f}]"
                                                  for c, a, b, peak in viol) + ")")
                         state["why"] = "violation too large"
+                        over = {}
+                        for c, _, _, peak in viol:
+                            over[c] = max(over.get(c, -np.inf), peak / scale[c])
+                        state["overshoot"] = over
                         return None        # too far in: take a shorter step
                     # After a structure change a large violation is that change's doing
                     # (new arcs move the motion), which no shorter step undoes: it is
@@ -2139,6 +2173,10 @@ class Homotopy:
                     if done is not None:
                         break
                 self.diagnostics.step(outcome)
+                located = None
+                if (done is None and self.locate_births
+                        and outcome == "settle failed: violation too large"):
+                    located = self._birth_fraction(sh0, v0, state.get("overshoot"), scale)
                 if done is None and attempt is not None and self.snapshot_dir is not None:
                     cur_arcs, cur_vals = self._arcs_of(sh0, v0)
                     self.diagnostics.snapshot(self.snapshot_dir, self.snapshot_tag, outcome, {
@@ -2180,7 +2218,12 @@ class Homotopy:
                             f, le, off = fw, le_w, off_w
                             break
                 if done is None:
-                    ds *= 0.5
+                    if located is not None:
+                        self.diagnostics.fired("R16")
+                        self._detail(f"    birth located at {located:.2f} of the step")
+                        ds = (f - frac) * located
+                    else:
+                        ds *= 0.5
                     continue
                 prev = (frac, v0, arcs)
                 changed = self._arcs_of(done[0], done[1].v)[0] != arcs
