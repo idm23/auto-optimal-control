@@ -290,6 +290,7 @@ class Homotopy:
         self.holdable_births = True
         self.width_steps = False
         self.merge_touching = True
+        self.corner_touches = False         # rule R12: refuted by Lemma L (see the note)
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
         #: oracles on every path solution (slow: for development).
@@ -1228,6 +1229,12 @@ class Homotopy:
                     w = max(b - a, 1e-3 * T) / 2
                     mid = 0.5 * (a + b)
                     lo, hi = mid - w, mid + w
+                    t_edge = self._corner_peak(shoot, v, c, lo, hi) if self.corner_touches else None
+                    if t_edge is not None:
+                        # Lemma L: a peak on the edge is born as a touch point, not an arc.
+                        self.diagnostics.fired("R12")
+                        born.append((("touch", c), (t_edge, 0.0)))
+                        continue
                     if self.holdable_births:
                         lo, hi = self._holdable(shoot, v, c, lo, hi)
                     born.append((("boundary", c), (lo, hi, np.zeros(q))))
@@ -1504,6 +1511,27 @@ class Homotopy:
             out_a.append((kind, c))
             out_v.append(val)
         return (out_a, out_v) if changed else None
+
+    def _corner_peak(self, shoot, v, c, a, b, rel=1e-2):
+        """The time of the peak of limit ``c`` on ``[a, b]`` if it lies on the edge of the
+        holdable set (margin within ``rel`` of the jerks' reach there: the equality case
+        of Lemma I'), else None."""
+        from auto_optimal_control.lemmas import LimitObjects
+        try:
+            obj = LimitObjects(shoot.kernels, shoot.params)
+            tr = shoot.trajectory(v, n_points=4001)
+        except Exception:
+            return None
+        inside = np.flatnonzero((tr["t"] >= a) & (tr["t"] <= b))
+        if len(inside) < 3:
+            return None
+        j0 = inside[int(np.argmax(tr["g"][inside, c]))]
+        t0, z0 = float(tr["t"][j0]), tr["z"][j0]
+        a_, d_ = obj.rate_parts(c, t0, z0)
+        lo_, hi_ = (np.asarray(x, dtype=float) for x in shoot.kernels.control_bounds(t0, z0, shoot.params))
+        reach = float(np.abs(a_) @ (0.5 * (hi_ - lo_)))
+        m = obj.margin(c, t0, z0)
+        return t0 if abs(m) <= rel * max(reach, 1e-300) else None
 
     def _holdable(self, shoot, v, c, a, b):
         """The stretch of ``[a, b]`` about the peak of limit ``c`` on which it can be held.

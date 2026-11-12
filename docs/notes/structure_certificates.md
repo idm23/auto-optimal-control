@@ -798,6 +798,36 @@ the 157 steps that converged in the census, they converge again 157, 157 and
 146 times. On the 146 that all three solve, they take 94.8 s, 87.0 s and
 102.3 s. Lemma J's rows are the best per step.
 
+### Lemma L (a touch at the corner cannot correct anything)
+
+*Tried:* bring a peak on the edge in as an order-1 touch point, with rows
+$g = 0$ and $\dot g = 0$ (that is, $-$margin $= 0$) and a jump $\nu \ge 0$
+(rule R12, `Homotopy.corner_touches`, with `MultiArcShooting.order1_touches`).
+
+*Lemma L.* If the free control is at the corner on an interval after a touch
+at $t_c$, the jump $\lambda^+ = \lambda^- - \nu \nabla g$ does not change the
+control there (the box projection is saturated), and so it does not change
+the motion. The shooting rows are locally independent of $\nu$, and the
+Jacobian is singular.
+
+*Observed:* on the toy with $B = 2$ the touch solves reach residuals of
+1e-3 to 4e-5 and stop there. The Jacobian's smallest singular value is 3e-17
+(condition number 2e19), and $\nu$ drifts to $-8$. A touch cannot correct an
+overshoot that its jump has no way to influence. R12 is off.
+
+*What the true path does:* a direct transcription of the toy ($B = 2$, comparison
+only), with the limit tightened through the first `tau_min` contact, shows a
+contact at a point ($t = 4.628$) that grows into a two-sided arc
+($[4.676, 4.731]$, then $[4.764, 4.902]$). Its margin at the contact is 0.25,
+well inside the holdable set; the jerk arrives at $-1$ and leaves interior.
+So in the problem itself the birth is ordinary, and holdable. The route's
+birth sat on the edge because its intermediate problem is not the true path's.
+R1's staggered offsets tighten the limits in a different order, and there the
+motion is faster. **A corner birth is an artifact of the route's path.** The
+remedy belongs to the route: when a birth's peak lies on the edge, change
+which limits tighten first, so that the contact happens where the limit can
+be held.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
