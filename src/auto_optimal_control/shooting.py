@@ -541,12 +541,16 @@ class MultiArcShooting(SingleShooting):
     #: Junction rows of order-1 arcs from the limit's rate (Lemma J): ``dg/dt = 0``
     #: under the arriving control at an entry and the departing control at an exit.
     rate_junctions_default = True
+    junction_rows_default = "lemma J"
     #: Past the edge of the holdable set, continue an exit-bound arc on the free law
     #: (rule R9 of docs/notes/structure_certificates.md).
     past_edge_default = False
     #: A segment whose end comes before its start is integrated backward, so the
     #: residual is smooth across an arc's zero width (rule R10; Lemma E, step 1).
-    backward_default = True           # rule R9: tried, worse on the census (see the note)
+    backward_default = True
+    #: Where riding backward fails, continue the negative-width arc on the free law
+    #: (rule R10b): continuous, so Newton can step back.
+    backward_fallback_default = False      # rule R10b: tried, no gain (see the note)           # rule R9: tried, worse on the census (see the note)
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1):
@@ -559,9 +563,14 @@ class MultiArcShooting(SingleShooting):
             raise ValueError("junctions must be 'auto' or 'hamiltonian'")
         self.junctions = junctions
         self.rate_junctions = MultiArcShooting.rate_junctions_default
+        #: R7's rows (for experiments): "lemma J" (rate rows at the corner, multiplier
+        #: rows elsewhere), "corner" (rate rows at the corner, the regular rows or H
+        #: continuity elsewhere) or "rate" (rate rows at every order-1 junction).
+        self.junction_rows = MultiArcShooting.junction_rows_default
         self._find_edges = False
         self.past_edge = MultiArcShooting.past_edge_default
         self.backward_segments = MultiArcShooting.backward_default
+        self.backward_fallback = MultiArcShooting.backward_fallback_default
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -863,7 +872,15 @@ class MultiArcShooting(SingleShooting):
                 if edge is not None:
                     raise EdgeReached(f"riding failed past {edge} on [{ta}, {tb}]: {exc}",
                                       edge, ta, tb) from exc
+            if kind == "boundary" and tb < ta and self.backward_fallback:
+                # Rule R10b: a negative-width arc is no answer, so its residual only has
+                # to be continuous for Newton to step back. Riding backward is the
+                # smooth extension (Lemma E) where riding exists; where it does not,
+                # the free law from the same state agrees with it at zero width.
+                return self._segment(None, None, ta, dta, z, D, tb, dtb, jac, cost, flags or {})
             failure = {None: "free_failed", "boundary": "riding_failed"}.get(kind, "singular_failed")
+            if tb < ta:
+                failure += " backward"
             raise ShootingError(f"propagation failed on [{ta}, {tb}]: {exc}", failure) from exc
         if r["status"] != 0:
             raise ShootingError(f"propagation failed with status {r['status']}",
@@ -963,6 +980,8 @@ class MultiArcShooting(SingleShooting):
                 and self.junctions == "auto" and not self.kernels.N_SWITCHING
                 and self.kernels.system.problem.control_sets and ride_id is not None):
             return False
+        if self.junction_rows == "rate":
+            return True
         k, p = self.kernels, self.params
         G = self._control_matrix()
         if G is None:
@@ -984,7 +1003,8 @@ class MultiArcShooting(SingleShooting):
         (``mu = 0`` at an exit, ``mu = pi`` at an entry) in place of ``H`` continuity.
         Under C2 these hold at every junction where the riding control is not at the
         corner (Lemma J); the caller has already checked for the corner."""
-        return bool(self.rate_junctions and kind == "boundary" and q == 1
+        return bool(self.rate_junctions and self.junction_rows == "lemma J"
+                    and kind == "boundary" and q == 1
                     and self.junctions == "auto" and not self.kernels.N_SWITCHING
                     and self.kernels.system.problem.control_sets
                     and self._control_matrix() is not None)
