@@ -87,6 +87,7 @@ from auto_optimal_control.build import build_kernels
 from auto_optimal_control.policy import Lexicographic, SecondaryCost, analyze, resolve
 from auto_optimal_control.pontryagin import OUTLINE_ABOVE_OPS, bang_bang_controls, derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
+from auto_optimal_control.diagnostics import Diagnostics
 from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting
 
 # The path of the continuation is followed to 1e-6: a rough Jacobian steers Newton as well.
@@ -211,6 +212,8 @@ class HomotopyResult:
     message: str = ""
     policy: str = ""
     stages: list = field(default_factory=list)
+    #: What the solve ran into (:class:`~auto_optimal_control.diagnostics.Diagnostics`).
+    diagnostics: dict = field(default_factory=dict)
 
     @property
     def success(self):
@@ -285,7 +288,17 @@ class Homotopy:
         self.reversal = True
         self.split_rising = True
         self.holdable_births = True
-        self.width_steps = False        # rule R2: neutral on the census (see the note)
+        self.width_steps = False
+        #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
+        #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
+        #: oracles on every path solution (slow: for development).
+        self.diagnostics = Diagnostics()
+        self.snapshot_dir = None
+        self.snapshot_tag = None
+        self.check_lemmas = False
+        #: Path solves the active-set route may make (a budget that does not depend on
+        #: the machine; ``active_set_seconds`` is the wall-clock one).
+        self.max_path_solves = 1500        # rule R2: neutral on the census (see the note)
         self.edge_exits = False         # rule R8: tried, no gain (see the note)
         self._certificates = None
         self.penalty_seconds = 300.0       # time budget of the penalty route
@@ -920,33 +933,41 @@ class Homotopy:
         return out
 
     def _accept(self, shoot, sol, tol):
-        """Whether an exact solution passes the checks it can make."""
+        """Whether an exact solution passes the checks it can make. A converged one
+        that does not is counted in ``diagnostics.rejected`` by the check it failed."""
+        reason = self._verdict(shoot, sol)
+        if reason is not None and sol.success and np.isfinite(sol.residual_norm):
+            self.diagnostics.reject(reason)
+        return reason is None
+
+    def _verdict(self, shoot, sol):
+        """None if an exact solution passes every check, else the check it fails."""
         if not sol.success or not np.isfinite(sol.residual_norm):
-            return False
+            return "not converged"
         if sol.max_violation > 1e-7:
-            return False
+            return "limit violated off its arcs"
         if not isinstance(shoot, MultiArcShooting) or not shoot.arcs:
-            return True
+            return None
         try:
             d = shoot.diagnostics(sol.v)
         except _FAILURES:
-            return False
+            return "diagnostics failed"
         small = 1e-7
         if any(nu < -small for nu in d["touch_nu"]):
-            return False
+            return "touch jump negative"
         if any(lo < -small * max(1.0, abs(hi)) for lo, hi in d["boundary_mu"]):
-            return False
+            return "mu negative (Lemma H)"
         # Order 1: mu = int_t^{t_out} eta with eta >= 0, so mu must not rise along an arc
         # (docs/notes/structure_certificates.md, Lemma H).
         order1 = [q == 1 for kind, _, q in shoot.arcs if kind == "boundary"]
         if any(o and rise > 1e-6 * max(1.0, abs(hi))
                for o, rise, (_, hi) in zip(order1, d["boundary_mu_rise"], d["boundary_mu"])):
-            return False
+            return "mu rises (Lemma H)"
         if any(lo < -small * max(1.0, abs(hi)) for lo, hi in d["singular_legendre"]):
-            return False
+            return "Legendre condition"
         if any(w > 1e-6 for w in d["held_sign_violation"].values()):
-            return False
-        return True
+            return "held control sign"
+        return None
 
     def _attempt(self, read, base, n_jitter, rng, tol):
         """Exact solves of every candidate from one reading: ``[(J, shoot, sol)]``."""
@@ -1496,11 +1517,55 @@ class Homotopy:
         if hi_t - lo_t < 1e-4 * T:
             mid = float(ts[inside[j0]])
             lo_t, hi_t = mid - 5e-5 * T, mid + 5e-5 * T
+        self.diagnostics.fired("R6")
         self._detail(f"    {self.kr.CONSTRAINT_NAMES[c]}: held only on [{lo_t:.5f}, {hi_t:.5f}] "
                      f"of [{a:.5f}, {b:.5f}]: the newborn arc is placed there")
         return lo_t, hi_t
 
-    def _width_step(self, shoot, v, frac, point, factor, tol, iterations=10):
+    def _solve_structure(self, arcs, values, base, le, off, path_tol, state=None):
+        """The path problem at ``(le, off)`` with structure ``(arcs, values)``, solved
+        from ``base``: ``(shoot, sol)``. ``state["solves"]`` counts the solves."""
+        if state is None:
+            state = {"solves": 0}
+        entries, values = self._mas_entries(arcs, values)
+        sh = self._smoothed(entries, 10.0 ** le if self.bang_bang else None, off)
+        guess = sh.pack_arcs(base, values) if arcs else np.asarray(base, dtype=float)
+        state["solves"] += 1
+        if isinstance(sh, MultiArcShooting) and (sh._open or sh._started):
+            # On an arc that reaches a fixed end on the limit, the terminal row and the
+            # riding say the same thing: rank-deficient, which needs the damped solver.
+            return sh, sh.solve_damped(guess, tol=path_tol, max_steps=40, max_seconds=30.0)
+        options = _budget("hybr", self.path_evaluations)
+        if self.kr.system.riding is not None:
+            # Limits ridden at run time make every evaluation dear: a cheap attempt
+            # first, and only a step that gets close earns the slower solve.
+            r = sh.solve_chord(guess, tol=path_tol)
+            if (not r.success and r.residual_norm >= 1e5 and self.edge_exits and arcs
+                    and isinstance(sh, MultiArcShooting)):
+                # The seed did not propagate. If an arc rides past the edge of the
+                # holdable set, its exit is pulled in to the edge (Lemma I).
+                pulled = sh.pull_in_exits(guess)
+                if pulled is not None:
+                    self.diagnostics.fired("R8")
+                    self._detail("    exits pulled in to the edge of the holdable set")
+                    guess = pulled
+                    state["solves"] += 1
+                    r = sh.solve_chord(guess, tol=path_tol)
+            if r.success or not r.residual_norm < self.path_fallback:
+                return sh, r
+        r = sh.solve(guess, tol=path_tol, options=options)
+        if (not r.success and r.residual_norm < 1e-2 and arcs and sh.tangent_junctions):
+            # A control at its bound at a junction jumps there: H continuity, not tangency.
+            state["solves"] += 1
+            sh.tangent_junctions = False
+            alt = sh.solve(guess, tol=path_tol, options=options)
+            if alt.success:
+                return sh, alt
+            sh.tangent_junctions = True
+        return sh, r
+
+    def _width_step(self, shoot, v, frac, point, factor, tol, iterations=10, guess=None,
+                    arc=None):
         """Rule R2: a step in a young arc's width, with the route's parameter solved for.
 
         Near a birth (or death) of an order-1 arc its width moves like the square root
@@ -1508,13 +1573,16 @@ class Homotopy:
         in the width are regular. The narrowest finite order-1 arc's width is set to
         ``factor`` times its current value and the system ``[Phi(v; s), w - w_target]``
         is solved for ``(v, s)``, with ``point(s) = (le, off)`` the route's line.
-        Returns ``(v, s)`` or None."""
+        ``guess`` is a predicted ``(v, s)`` to start from, ``arc`` the arc's index.
+        Returns ``(v, s, arc, w, w_target)`` or None."""
         if not isinstance(shoot, MultiArcShooting):
             return None
         T = shoot.unpack(v)[3] - shoot.t0
         best = None
         for i, ((kind, c, q), sl) in enumerate(zip(shoot.arcs, shoot._arc_slices)):
             if kind != "boundary" or q != 1 or i in shoot._started or i in shoot._open:
+                continue
+            if arc is not None and i != arc:
                 continue
             w = v[sl.start + 1] - v[sl.start]
             if 0 < w < 0.05 * T and (best is None or w < best[1]):
@@ -1539,7 +1607,10 @@ class Homotopy:
             row = x[sl.start + 1] - x[sl.start] - target
             return np.append(R, row), J
 
-        x = np.append(np.asarray(v, dtype=float), frac)
+        if guess is not None:
+            x = np.append(np.asarray(guess[0], dtype=float), float(guess[1]))
+        else:
+            x = np.append(np.asarray(v, dtype=float), frac)
         mid = 0.5 * (x[sl.start] + x[sl.start + 1])
         x[sl.start], x[sl.start + 1] = mid - 0.5 * target, mid + 0.5 * target
         try:
@@ -1579,9 +1650,45 @@ class Homotopy:
             return None
         finally:
             shoot.params = p_saved
+        self.diagnostics.fired("R2")
         self._detail(f"    width step: arc {i} from {w:.3e} to {target:.3e}, route parameter "
                      f"{frac:.6f} -> {x[-1]:.6f}")
-        return x[:-1], float(x[-1])
+        return x[:-1], float(x[-1]), i, w, target
+
+    def _width_moves(self, shoot, v, frac, point, tol):
+        """Rule R2's moves at a stall, from Lemma E's normal form ``s = s* + kappa w^2``.
+
+        A step to half the young arc's width tells which side of the event the route is
+        on. If ``s`` moves forward the arc is dying: ``w^2`` is linear in ``s``, so the
+        death is at ``s* = s_half + (s_half - s) / 3``; the moves are the structure
+        without the arc just past ``s*``, then the half step. If ``s`` moves back the
+        arc is being born: ``kappa`` and ``s*`` from the two points predict ``s`` at
+        ``1.5 w``, and ``v`` is predicted linearly in ``w`` (the branch is smooth in
+        ``w``). Yields ``(v, s, dropped arc or None)``, best first."""
+        half = self._width_step(shoot, v, frac, point, 0.5, tol)
+        if half is None:
+            return
+        v_h, s_h, i, w0, w_h = half
+        if s_h > frac:
+            s_star = s_h + (s_h - frac) * w_h ** 2 / (w0 ** 2 - w_h ** 2)
+            beyond = s_star + 0.25 * (s_star - frac)
+            if s_star < 1.0:
+                self.diagnostics.fired("R2 death")
+                self._detail(f"    width steps: arc {i} dies at s = {s_star:.6f}; past it without")
+                yield v, min(beyond, 1.0), i
+            yield v_h, s_h, None
+            return
+        kappa = (frac - s_h) / (w0 ** 2 - w_h ** 2)
+        if not kappa > 0:
+            return
+        s_star = frac - kappa * w0 ** 2
+        w_t = 1.5 * w0
+        s_t = s_star + kappa * w_t ** 2
+        v_t = v + (v - v_h) * (w_t - w0) / (w0 - w_h)
+        grown = self._width_step(shoot, v, frac, point, 1.5, tol, guess=(v_t, s_t), arc=i)
+        if grown is not None and frac < grown[1] <= 1.0:
+            self.diagnostics.fired("R2 birth")
+            yield grown[0], grown[1], None
 
     def _split_rising(self, shoot, v, n_points=801):
         """Structures with an order-1 boundary arc split where its multiplier rises.
@@ -1626,6 +1733,7 @@ class Homotopy:
             return None
         _, i, t_lo, t_hi, mu_lo, mu_hi = best
         a, b, pi = values[i]
+        self.diagnostics.fired("R5")
         self._detail(f"    {self.kr.CONSTRAINT_NAMES[arcs[i][1]]}: multiplier rises on "
                      f"[{t_lo:.5f}, {t_hi:.5f}] (eta < 0): split the arc")
         out_a = arcs[:i] + [arcs[i], arcs[i]] + arcs[i + 1:]
@@ -1748,41 +1856,7 @@ class Homotopy:
         path_tol = max(tol, 1e-6)
 
         def solve_structure(arcs, values, base, le, off):
-            entries, values = self._mas_entries(arcs, values)
-            sh = self._smoothed(entries, 10.0 ** le if self.bang_bang else None, off)
-            guess = sh.pack_arcs(base, values) if arcs else np.asarray(base, dtype=float)
-            state["solves"] += 1
-            if isinstance(sh, MultiArcShooting) and (sh._open or sh._started):
-                # On an arc that reaches a fixed end on the limit, the terminal row and the
-                # riding say the same thing: rank-deficient, which needs the damped solver.
-                return sh, sh.solve_damped(guess, tol=path_tol, max_steps=40, max_seconds=30.0)
-            options = _budget("hybr", self.path_evaluations)
-            if self.kr.system.riding is not None:
-                # Limits ridden at run time make every evaluation dear: a cheap attempt
-                # first, and only a step that gets close earns the slower solve.
-                r = sh.solve_chord(guess, tol=path_tol)
-                if (not r.success and r.residual_norm >= 1e5 and self.edge_exits and arcs
-                        and isinstance(sh, MultiArcShooting)):
-                    # The seed did not propagate. If an arc rides past the edge of the
-                    # holdable set, its exit is pulled in to the edge (Lemma I).
-                    pulled = sh.pull_in_exits(guess)
-                    if pulled is not None:
-                        self._detail("    exits pulled in to the edge of the holdable set")
-                        guess = pulled
-                        state["solves"] += 1
-                        r = sh.solve_chord(guess, tol=path_tol)
-                if r.success or not r.residual_norm < self.path_fallback:
-                    return sh, r
-            r = sh.solve(guess, tol=path_tol, options=options)
-            if (not r.success and r.residual_norm < 1e-2 and arcs and sh.tangent_junctions):
-                # A control at its bound at a junction jumps there: H continuity, not tangency.
-                state["solves"] += 1
-                sh.tangent_junctions = False
-                alt = sh.solve(guess, tol=path_tol, options=options)
-                if alt.success:
-                    return sh, alt
-                sh.tangent_junctions = True
-            return sh, r
+            return self._solve_structure(arcs, values, base, le, off, path_tol, state)
 
         def settle(sh, r, le, off):
             """Bring in violated limits and retire dead arcs until the solution at
@@ -1799,6 +1873,7 @@ class Homotopy:
                                      + ", ".join(f"{self.kr.CONSTRAINT_NAMES[c]} {peak / scale[c]:.1e}"
                                                  f" at [{a:.5f}, {b:.5f}]"
                                                  for c, a, b, peak in viol) + ")")
+                        state["why"] = "violation too large"
                         return None        # too far in: take a shorter step
                     # After a structure change a large violation is that change's doing
                     # (new arcs move the motion), which no shorter step undoes: it is
@@ -1833,6 +1908,7 @@ class Homotopy:
                 if self.parallel > 1 and options and not optional:
                     hit = self._speculate(options, base, le, off, solve_structure, state)
                     if hit is None:
+                        state["why"] = "no structure converged"
                         return None
                     (arcs, values), nsh, nr = hit
                     self._detail(f"    try in parallel: {self._mas_entries(arcs, values, True)[0]}")
@@ -1855,10 +1931,12 @@ class Homotopy:
                 else:
                     if optional:
                         return sh, r
+                    state["why"] = "no structure converged"
                     return None
                 sh, r = nsh, nr
                 changed = True
                 self._say(f"  structure: {self._names(arcs)}")
+            state["why"] = "structure changes did not settle"
             return None
 
         def advance(target_le, target_off, on_step=None, ds_min=1e-6):
@@ -1870,6 +1948,7 @@ class Homotopy:
             while frac < 1.0:
                 if (state["solves"] > max_solves or ds < ds_min
                         or time.perf_counter() > deadline):
+                    self.diagnostics.step("stalled" if ds < ds_min else "out of budget")
                     return False
                 f = min(frac + ds, 1.0)
                 le = le0 + f * (target_le - le0)
@@ -1881,20 +1960,46 @@ class Homotopy:
                     # Secant predictor along the path, while the structure holds.
                     guesses.insert(0, v0 + (v0 - prev[1]) * (f - frac) / (frac - prev[0]))
                 done = None
+                outcome, attempt = None, None
                 for g in guesses:
                     base = g[:sh0.n_base] if isinstance(sh0, MultiArcShooting) else g
                     vals = self._arcs_of(sh0, g)[1] if arcs else values
+                    attempt = (arcs, vals, base)
+                    before = dict(self.diagnostics.evaluations)
+                    state["why"] = None
                     try:
                         sh, r = solve_structure(arcs, vals, base, le, off)
                         self._detail(f"  step to {f:.6f} (ds {ds:.1e}): residual "
                                      f"{r.residual_norm:.1e}; junctions "
                                      f"{self._junction_text(sh, r.v)}")
                         done = settle(sh, r, le, off) if r.success else None
+                        if r.success:
+                            outcome = ("converged" if done is not None
+                                       else f"settle failed: {state.get('why') or 'other'}")
+                        elif r.residual_norm >= 1e5:
+                            new = {k_: n_ - before.get(k_, 0)
+                                   for k_, n_ in self.diagnostics.evaluations.items()}
+                            worst = max(new, key=new.get) if any(new.values()) else "other"
+                            outcome = f"seed failed: {worst}"
+                        else:
+                            outcome = "not converged"
                     except _FAILURES as exc:
                         self._detail(f"  step to {f:.6f} (ds {ds:.1e}): {exc}")
                         done = None
+                        outcome = f"raised: {getattr(exc, 'failure', type(exc).__name__)}"
                     if done is not None:
                         break
+                self.diagnostics.step(outcome)
+                if done is None and attempt is not None and self.snapshot_dir is not None:
+                    cur_arcs, cur_vals = self._arcs_of(sh0, v0)
+                    self.diagnostics.snapshot(self.snapshot_dir, self.snapshot_tag, outcome, {
+                        "params": np.array(self.params, dtype=float), "path_tol": path_tol,
+                        "frac": frac, "f": f, "ds": ds,
+                        "before": {"arcs": cur_arcs, "values": cur_vals,
+                                   "base": v0[:sh0.n_base] if isinstance(sh0, MultiArcShooting)
+                                   else v0, "le": state["le"], "off": state["off"].copy()},
+                        "attempt": {"arcs": attempt[0], "values": attempt[1], "base": attempt[2],
+                                    "le": le, "off": np.array(off, dtype=float)}})
                 if done is None and f >= 1.0 and not np.any(target_off) and tuple(map(tuple, arcs)) not in ended:
                     ended.add(tuple(map(tuple, arcs)))
                     converted = self._end_structure(sh0, v0)
@@ -1911,14 +2016,13 @@ class Homotopy:
                     def point(sv, le0=le0, off_start=off_start):
                         return (le0 + sv * (target_le - le0),
                                 off_start + sv * (target_off - off_start))
-                    for factor in (1.5, 0.5):
-                        hit = self._width_step(sh0, v0, frac, point, factor, path_tol)
-                        if hit is None or not frac < hit[1] <= 1.0:
-                            continue
-                        vw, fw = hit
+                    for vw, fw, drop in self._width_moves(sh0, v0, frac, point, path_tol):
                         le_w, off_w = point(fw)
                         try:
                             arcs_w, vals_w = self._arcs_of(sh0, vw)
+                            if drop is not None:
+                                arcs_w = arcs_w[:drop] + arcs_w[drop + 1:]
+                                vals_w = vals_w[:drop] + vals_w[drop + 1:]
                             sh, r = solve_structure(arcs_w, vals_w, vw[:sh0.n_base], le_w, off_w)
                             done = settle(sh, r, le_w, off_w) if r.success else None
                         except _FAILURES:
@@ -1936,6 +2040,14 @@ class Homotopy:
                     new_arcs, new_values = self._arcs_of(done[0], done[1].v)
                     checkpoints.append((dict(state), key(new_arcs, new_values)))
                 state.update(shoot=done[0], v=done[1].v, le=le, off=off)
+                if self.check_lemmas:
+                    from auto_optimal_control.lemmas import check
+                    try:
+                        for lemma, n_bad in check(done[0], done[1].v).items():
+                            if n_bad:
+                                self.diagnostics.oracle(lemma)
+                    except _FAILURES:
+                        self.diagnostics.oracle("check failed")
                 if changed:
                     prev = None            # the structure changed: no secant across it
                 frac, ds = f, min(ds * 1.5, 0.25)
@@ -2050,15 +2162,22 @@ class Homotopy:
         if len(params) != len(self.stated.params):
             raise ValueError(f"expected {len(self.stated.params)} parameters "
                              f"{[str(p) for p in self.stated.params]}, got {len(params)}")
-        if self._stages is None:
-            r = self._solve(params, costates, final_time, **options)
-            if not r.exact and self.reversal:
-                back = self._through_reversal(params, costates, final_time, **options)
-                if back is not None:
-                    r = back
-        else:
-            r = self._lexicographic(params, costates, final_time, **options)
+        self.diagnostics = Diagnostics()
+        sink, SingleShooting.sink = SingleShooting.sink, self.diagnostics.evaluations
+        try:
+            if self._stages is None:
+                r = self._solve(params, costates, final_time, **options)
+                if not r.exact and self.reversal:
+                    back = self._through_reversal(params, costates, final_time, **options)
+                    if back is not None:
+                        self.diagnostics.fired("R4")
+                        r = back
+            else:
+                r = self._lexicographic(params, costates, final_time, **options)
+        finally:
+            SingleShooting.sink = sink
         r.policy = self.policy_text
+        r.diagnostics = self.diagnostics.as_dict()
         return r
 
     @property
@@ -2336,7 +2455,7 @@ class Homotopy:
         active_first = can_activate and not any(kx.SINGULAR_ARCS)
 
         def active_route():
-            hit = self._active_set(first, eps0, s_max, steps, tol)
+            hit = self._active_set(first, eps0, s_max, steps, tol, max_solves=self.max_path_solves)
             if hit is None:
                 return None
             J, xs, xsol = hit

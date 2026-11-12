@@ -265,6 +265,28 @@ def jerk_limited_move():
                           PathConstraint(-a - A, "a_min")])
 
 
+def drift_limited_axis():
+    """A jerk-controlled axis whose "torque" has a velocity term: the holdability edge.
+
+    ``x''' = j`` with ``|j| <= J``, from rest at 0 to rest at ``D``, with
+    ``-T <= a + B v^2 <= T``. Both limits have order 1, with
+    ``d/dt (a + B v^2) = j + 2 B v a``: the drift ``2 B v a`` grows with speed, so
+    where ``|2 B v a| > J`` no admissible jerk holds the limit (Lemma I of
+    ``docs/notes/structure_certificates.md``). It is the one-axis model of an arm
+    joint whose torque has centrifugal terms, small enough to solve in seconds.
+
+    params: ``J, T, B, D``.
+    """
+    t, x, v, a, j = sp.symbols("t x v a j", real=True)
+    J, T, B, D = sp.symbols("J T B D", positive=True)
+    tau = a + B * v ** 2
+    return OptimalControlProblem(
+        name="drift_limited_axis", time=t, states=[x, v, a], controls=[j], params=[J, T, B, D],
+        dynamics=[v, a, j], running_cost=1, initial_state=[0, 0, 0],
+        final_state={x: D, v: 0, a: 0}, control_sets=[Box(j, -J, J)],
+        path_constraints=[PathConstraint(tau - T, "tau_max"), PathConstraint(-tau - T, "tau_min")])
+
+
 def jerk_limited_min_time(J, A, V, D):
     """The minimum time of :func:`jerk_limited_move`, in closed form.
 
