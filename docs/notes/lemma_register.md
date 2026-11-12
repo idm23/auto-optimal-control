@@ -286,3 +286,25 @@ margin is zero exactly when the corner is the only control that holds $g$.
 On every solved census case, and on the toy's direct comparisons, the margin
 of the answer stays at least 0.23 (relative) on free stretches. Corner
 states appear only on the route. Not a lemma; it guides where to look.
+
+### Observation O2: rises start where a limit's own jerk saturates
+
+These are probe results on the route's intermediate states, taken before the
+route stalls.
+
+- **Rest 12.** On the `tau1_max` arc, $\mu$ falls until joint 1's own jerk
+  reaches its bound ($t = 0.3411$). It rises from there, while the limit is
+  held through joints 2 and 3 alone. The margin is about 6 throughout, far
+  from the edge. This is the case Lemma B excludes ($S \cap B \ne \emptyset$).
+  The riding KKT solution stays continuous there, but $\alpha_F = 1/(a_F^\top
+  R_F^{-1} a_F)$ jumps by the factor $|a|^2/|a_F|^2 \approx 25$, and so does
+  the slope of $\mu$.
+- **Goal 9 at 80%.** $\mu$ of `tau2_min` turns negative just before an arc of
+  `tau6_min`, the wrist joint. Its $a$ is about $10^{-4}$, its margin 0.012,
+  and its entry jump about 1, against about $10^{-5}$ for the other limits.
+- **Open: a lemma for the held set changing on an arc.** It should say what
+  Lemma H's $\dot\mu \le 0$ requires at the moment $B$ gains the joint of a
+  ridden limit.
+  - *Conjecture.* Generically the arc exits before that moment. If so, the
+    split R5 builds, with its gap from the saturation time onward, is the
+    right structure, and its failure to converge is a seeding problem.

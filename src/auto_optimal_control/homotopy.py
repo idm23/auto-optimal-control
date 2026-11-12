@@ -304,6 +304,9 @@ class Homotopy:
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
+        #: Rule R18: an arc whose multiplier rises from its entry (to its exit) is
+        #: trimmed to where the rise ends (starts), before any split is tried.
+        self.trim_rising = False
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
         #: oracles on every path solution (slow: for development).
@@ -1932,10 +1935,10 @@ class Homotopy:
             t_lo, t_hi = float(tr["t"][on[j_lo]]), float(tr["t"][on[j_hi]])
             if t_hi - t_lo < 1e-6 * T or (best is not None and rise[j_hi] <= best[0]):
                 continue
-            best = (rise[j_hi], i, t_lo, t_hi, mu[j_lo], mu[j_hi])
+            best = (rise[j_hi], i, t_lo, t_hi, mu[j_lo], mu[j_hi], j_lo == 0, j_hi == len(on) - 1)
         if best is None:
             return None
-        _, i, t_lo, t_hi, mu_lo, mu_hi = best
+        _, i, t_lo, t_hi, mu_lo, mu_hi, at_entry, at_exit = best
         a, b, pi = values[i]
         self.diagnostics.fired("R5")
         self._detail(f"    {self.kr.CONSTRAINT_NAMES[arcs[i][1]]}: multiplier rises on "
@@ -1951,6 +1954,16 @@ class Homotopy:
         # offered a little wider, then a little narrower.
         d = 0.02 * (t_hi - t_lo)
         out = []
+        if self.trim_rising and (at_entry or at_exit):
+            # Rule R18: mu on an arc is at most its entry value (Lemma H), so a rise that
+            # starts at the entry (ends at the exit) is a stretch the arc must not cover;
+            # the split would leave a piece of zero width there, and the trimmed arc is
+            # the structure it tends to. It is offered first.
+            self.diagnostics.fired("R18")
+            lo_t, hi_t = (t_hi, b) if at_entry else (a, t_lo)
+            pi_t = pi2 if at_entry else pi1
+            if hi_t - lo_t > 1e-6 * T:
+                out.append((arcs, values[:i] + [(lo_t, hi_t, pi_t)] + values[i + 1:]))
         for lo, hi in ((t_lo - d, t_hi + d), (t_lo + d, t_hi - d)):
             if not (lo > a and hi < b):
                 continue
