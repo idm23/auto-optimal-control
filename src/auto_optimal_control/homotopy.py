@@ -301,6 +301,9 @@ class Homotopy:
         #: Rule R16: after a step that overshoots a birth, place the next one at the
         #: birth by a secant on the peak excess (Lemma N), not by halving.
         self.locate_births = False
+        #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
+        #: in s by Lemma E) to the arc's death and step past it without the arc.
+        self.locate_deaths = False
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
         #: oracles on every path solution (slow: for development).
@@ -1825,6 +1828,37 @@ class Homotopy:
                      f"{frac:.6f} -> {x[-1]:.6f}")
         return x[:-1], float(x[-1]), i, w, target
 
+    def _death_points(self, shoot, v1, v0, s1, s0, s_fail):
+        """Rule R17: ``[(arc index, s*)]`` for finite order-1 arcs that shrink from ``v1``
+        (at ``s1``) to ``v0`` (at ``s0``) and, by a secant in ``w^2``, die before
+        ``s_fail``, the step that failed; earliest death first.
+
+        By Lemma E an arc's width obeys ``s - s* = kappa w^2 + O(w^3)`` near its birth
+        or death, with the branch smooth in ``w``: so ``w^2`` is C^1 in ``s`` with a
+        nonzero slope, and the secant through two points of the path finds ``s*`` to
+        ``O(ds^2)``. Past ``s*`` the arc is gone; the step without it is solved and
+        judged as any other."""
+        if not isinstance(shoot, MultiArcShooting) or not s0 > s1:
+            return []
+        a0, val0 = self._arcs_of(shoot, v0)
+        a1, val1 = self._arcs_of(shoot, v1)
+        if a0 != a1:
+            return []
+        T = shoot.unpack(v0)[3] - shoot.t0
+        out = []
+        for i, ((kind, c), x0, x1) in enumerate(zip(a0, val0, val1)):
+            if kind != "boundary" or self.kr.CONSTRAINT_ORDERS[c] != 1 or len(x0) < 2:
+                continue
+            if i in shoot._open or i in shoot._started:
+                continue                   # an arc run out to an end has no death
+            w0, w1 = float(x0[1] - x0[0]), float(x1[1] - x1[0])
+            if not (w1 > w0 > 0 and w0 < 0.05 * T):
+                continue
+            s_star = s0 + (s0 - s1) * w0 ** 2 / (w1 ** 2 - w0 ** 2)
+            if s0 < s_star < s_fail:
+                out.append((i, s_star))
+        return sorted(out, key=lambda e: e[1])
+
     def _width_moves(self, shoot, v, frac, point, tol):
         """Rule R2's moves at a stall, from Lemma E's normal form ``s = s* + kappa w^2``.
 
@@ -2197,6 +2231,25 @@ class Homotopy:
                             done = settle(sh, r, le, off) if r.success else None
                         except _FAILURES as exc:
                             self._detail(f"  arcs run out to the ends: {exc}")
+                if done is None and self.locate_deaths and prev is not None and prev[2] == arcs:
+                    for drop, s_star in self._death_points(sh0, prev[1], v0, prev[0], frac, f):
+                        fd = min(s_star + 0.25 * (s_star - frac), f)
+                        le_d = le0 + fd * (target_le - le0)
+                        off_d = off_start + fd * (target_off - off_start)
+                        arcs_d, vals_d = self._arcs_of(sh0, v0)
+                        arcs_d = arcs_d[:drop] + arcs_d[drop + 1:]
+                        vals_d = vals_d[:drop] + vals_d[drop + 1:]
+                        try:
+                            sh, r = solve_structure(arcs_d, vals_d, v0[:sh0.n_base], le_d, off_d)
+                            done = settle(sh, r, le_d, off_d) if r.success else None
+                        except _FAILURES:
+                            done = None
+                        self._detail(f"    arc {drop} dies at {s_star:.6f}: "
+                                     + ("stepped past it" if done is not None else "no"))
+                        if done is not None:
+                            self.diagnostics.fired("R17")
+                            f, le, off = fd, le_d, off_d
+                            break
                 if done is None and self.width_steps and ds < 1e-3:
                     # Rule R2: steps in s stall at a birth or death; a step in the young
                     # arc's width is regular there (Lemma E).
