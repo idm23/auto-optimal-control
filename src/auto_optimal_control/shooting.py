@@ -504,6 +504,10 @@ class MultiArcShooting(SingleShooting):
 
     _SIZES = {"touch": 2, "singular": 2, "singular_joined": 1, "switch": 1}
 
+    #: Junction rows of order-1 arcs from the limit's rate (Lemma J): ``dg/dt = 0``
+    #: under the arriving control at an entry and the departing control at an exit.
+    rate_junctions_default = True
+
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1):
         super().__init__(kernels, params, x0=x0, method=method, rtol=rtol, atol=atol,
@@ -514,6 +518,7 @@ class MultiArcShooting(SingleShooting):
         if junctions not in ("auto", "hamiltonian"):
             raise ValueError("junctions must be 'auto' or 'hamiltonian'")
         self.junctions = junctions
+        self.rate_junctions = MultiArcShooting.rate_junctions_default
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -826,6 +831,57 @@ class MultiArcShooting(SingleShooting):
             return next(iter(active))
         return self.kernels.boundary_set(sorted(active))
 
+    def _rate_row_here(self, kind, q, ride_id, c, t, z):
+        """Rule R7: whether a junction of order-1 limit ``c`` takes the rate row
+        ``dg/dt = 0`` under the control off the arc. Lemma J makes that row necessary at
+        every such junction, but under a free law clipped at a bound it is flat in the
+        costates, so Newton cannot use it. It is used where it is needed and well
+        posed: where the riding control (of arc ``ride_id``) is at the corner of the box
+        for ``c``, every control that moves ``dg/dt`` at a bound (Lemma K). Elsewhere
+        the regular rows (``mu = 0``, or ``H`` continuity) are kept."""
+        if not (self.rate_junctions and kind == "boundary" and q == 1
+                and self.junctions == "auto" and not self.kernels.N_SWITCHING
+                and self.kernels.system.problem.control_sets and ride_id is not None):
+            return False
+        k, p = self.kernels, self.params
+        G = self._control_matrix()
+        if G is None:
+            return False
+        try:
+            u = np.asarray(k.boundary_control(ride_id, t, z, p), dtype=float)
+        except RuntimeError:
+            return False
+        lo, hi = (np.asarray(b, dtype=float) for b in k.control_bounds(t, z, p))
+        _, Nx, _, _ = k.tangency_gradient(c, t, z, p)
+        a = G.T @ np.asarray(Nx[0], dtype=float)[:k.N_STATES]
+        moves = np.abs(a) > 1e-9 * max(np.abs(a).max(), 1e-300)
+        tight = 1e-9 * np.maximum(1.0, np.abs(u))
+        held = (u - lo <= tight) | (hi - u <= tight)
+        return bool(np.all(held[moves]))
+
+    def _multiplier_row_here(self, kind, q):
+        """Rule R7, off the corner: whether an order-1 junction takes a multiplier row
+        (``mu = 0`` at an exit, ``mu = pi`` at an entry) in place of ``H`` continuity.
+        Under C2 these hold at every junction where the riding control is not at the
+        corner (Lemma J); the caller has already checked for the corner."""
+        return bool(self.rate_junctions and kind == "boundary" and q == 1
+                    and self.junctions == "auto" and not self.kernels.N_SWITCHING
+                    and self.kernels.system.problem.control_sets
+                    and self._control_matrix() is not None)
+
+    def _control_matrix(self):
+        """``df/du``, constant by certificate C1, or None if it is not."""
+        if not hasattr(self, "_G"):
+            import sympy as sp
+            prob = self.kernels.system.problem
+            G = sp.Matrix(prob.dynamics).jacobian(list(prob.controls))
+            if any(e.free_symbols & (set(prob.states) | set(prob.controls)) for e in G):
+                self._G = None
+            else:
+                fn = sp.lambdify(list(self.kernels.system.params), G, "numpy")
+                self._G = np.array(fn(*self.params), dtype=float).reshape(G.shape)
+        return self._G
+
     def _regular_junction(self, kind, q, side, t, z):
         """Whether a boundary arc's junction drops ``H`` continuity: an order-1
         limit when ``H`` is regular (strictly convex, or convex with clipped
@@ -967,9 +1023,22 @@ class MultiArcShooting(SingleShooting):
             z = r["z"]
             t, dt = t_ev, d_ev
             if ev == "out":
-                if self._regular_junction(kind, q, self._arc_id(active - {c}), t, z):
-                    # mu_c vanishes at the exit of an order-1 limit when H is
-                    # regular: a simple root, where H continuity has a double one.
+                after = self._arc_id(active - {c})
+                if self._rate_row_here(kind, q, aid, c, t, z):
+                    # The departure is tangential: under the control that follows the
+                    # exit, dg/dt = 0 (Lemma J). At the edge of the holdable set, with
+                    # the riding control at the box's corner, it holds with mu_c > 0,
+                    # where mu_c = 0 cannot (Lemma K).
+                    val, gt, gz = self._rate_of(c, after, t, z, flags)
+                    rows.append(val)
+                    grads.append(gt * d_ev + gz @ D if jac else None)
+                elif (self._regular_junction(kind, q, after, t, z)
+                      or self._multiplier_row_here(kind, q)):
+                    # mu_c vanishes at the exit of an order-1 limit: when H is regular,
+                    # and, under C2, at every exit off the corner, where a control that
+                    # moves dg/dt is interior on the arc and continuity of the control
+                    # forces mu_c a_k = 0 (Lemma J). A simple root, where H continuity
+                    # has a double one.
                     val, Mt, Mz = self._multiplier_of(aid, c, t, z)
                     rows.append(val)
                     grads.append(Mt * d_ev + Mz @ D if jac else None)
@@ -1000,13 +1069,26 @@ class MultiArcShooting(SingleShooting):
                 Dp[n:, mult_cols] -= Nx[used].T
             if kind == "boundary":
                 after = self._arc_id(active | {c})
-                if self._regular_junction(kind, q, aid, t, z):
+                if (self._rate_row_here(kind, q, after, c, t, zp)
+                        or self._regular_junction(kind, q, aid, t, z)):
                     # The arrival is tangential: g peaks there along the arc
                     # before, so dg/dt = 0 (a simple root in t_in, where g = 0
                     # alone has a double one).
                     val, gt, gz = self._rate_of(c, aid, t, z, flags)
                     rows.append(val)
                     grads.append(gt * d_ev + gz @ D if jac else None)
+                elif self._multiplier_row_here(kind, q):
+                    # Off the corner, under C2, the entry carries mu_c(t_in+) = pi: a
+                    # control that moves dg/dt is interior on the arc, and continuity of
+                    # the control at the junction forces (mu_c - pi) a_k = 0 (Lemma J).
+                    val, Mt, Mz = self._multiplier_of(after, c, t, zp)
+                    rows.append(val - float(mult[0]))
+                    if jac:
+                        g_ = Mt * d_ev + Mz @ Dp
+                        g_[mult_cols[0]] -= 1.0
+                        grads.append(g_)
+                    else:
+                        grads.append(None)
                 else:
                     # H continuous at the entry: H(before, z-) = H(after, z+).
                     H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags)
