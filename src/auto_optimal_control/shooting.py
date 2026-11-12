@@ -543,7 +543,10 @@ class MultiArcShooting(SingleShooting):
     rate_junctions_default = True
     #: Past the edge of the holdable set, continue an exit-bound arc on the free law
     #: (rule R9 of docs/notes/structure_certificates.md).
-    past_edge_default = False           # rule R9: tried, worse on the census (see the note)
+    past_edge_default = False
+    #: A segment whose end comes before its start is integrated backward, so the
+    #: residual is smooth across an arc's zero width (rule R10; Lemma E, step 1).
+    backward_default = True           # rule R9: tried, worse on the census (see the note)
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1):
@@ -558,6 +561,7 @@ class MultiArcShooting(SingleShooting):
         self.rate_junctions = MultiArcShooting.rate_junctions_default
         self._find_edges = False
         self.past_edge = MultiArcShooting.past_edge_default
+        self.backward_segments = MultiArcShooting.backward_default
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -835,7 +839,7 @@ class MultiArcShooting(SingleShooting):
     def _segment(self, kind, c, ta, dta, z, D, tb, dtb, jac, cost=False, flags=None):
         """Propagate a free (``kind is None``), boundary or singular arc; chain ``D = dz/dv``."""
         k, p = self.kernels, self.params
-        if not tb > ta:
+        if not tb > ta and not (self.backward_segments and tb < ta):
             raise ShootingError(f"arc times out of order: {ta} then {tb}", "negative_width")
         tolerance = {"stm_rtol": self.jacobian_rtol} if jac else {}
         try:
@@ -869,6 +873,23 @@ class MultiArcShooting(SingleShooting):
             Phi = r["stm"]
             D = Phi @ D + np.outer(r["dz_dt1"], dtb) - np.outer(Phi @ Fa, dta)
         return r, D
+
+    def event_times(self, v):
+        """The junction times of ``v`` in the order of ``self.events``."""
+        v = np.asarray(v, dtype=float)
+        out = []
+        for ev, i in self.events:
+            w = v[self._arc_slices[i]]
+            at = (0 if i in self._started else 1) if ev == "out" else 0
+            out.append(float(w[at]))
+        return out
+
+    def in_order(self, v):
+        """Whether ``v``'s junctions come in the order of the structure (with
+        :attr:`backward_segments` the residual is defined either way)."""
+        x0, lam0, nu, tf = self.unpack(v)
+        times = [self.t0, *self.event_times(v), tf]
+        return all(b >= a for a, b in zip(times, times[1:]))
 
     def _arc_id(self, active):
         """The kernels' arc id for the set of constraints ``active`` (None: free)."""

@@ -948,6 +948,8 @@ class Homotopy:
             return "limit violated off its arcs"
         if not isinstance(shoot, MultiArcShooting) or not shoot.arcs:
             return None
+        if not shoot.in_order(sol.v):
+            return "junctions out of order"
         try:
             d = shoot.diagnostics(sol.v)
         except _FAILURES:
@@ -1457,7 +1459,10 @@ class Homotopy:
         if not arcs:
             return None
         T = shoot.unpack(v)[3] - shoot.t0
-        out_a, out_v, changed = [], [], False
+        # Junctions that crossed (rule R10 lets the residual through them): the same arcs,
+        # with their events sorted again, is a structure change.
+        crossed = isinstance(shoot, MultiArcShooting) and not shoot.in_order(v)
+        out_a, out_v, changed = [], [], crossed
         for (kind, c), val in zip(arcs, values):
             if kind == "boundary" and val[1] - val[0] < 1e-6 * T:
                 changed = True
