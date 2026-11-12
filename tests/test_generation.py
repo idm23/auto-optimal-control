@@ -342,14 +342,25 @@ def test_an_arc_ridden_from_the_start_matches_a_vanishing_free_stretch(smooth):
     v = shoot.pack_arcs(r.solution.v[:shoot.n_base], [(0.0, values[0][1], np.zeros(1)), values[1]])
     w = v + 1e-5 * np.random.default_rng(0).normal(size=len(v)) * np.abs(v).clip(1e-3)
     R, J = shoot.residual_jacobian(w)
-    FD = np.zeros_like(J)
-    for i in range(len(w)):
-        h = 1e-6 * max(1.0, abs(w[i]))
-        a, b = w.copy(), w.copy()
-        a[i] += h
-        b[i] -= h
-        FD[:, i] = (shoot.residual(a) - shoot.residual(b)) / (2 * h)
-    assert np.allclose(J, FD, rtol=1e-3, atol=2e-4)
+
+    def central(step):
+        FD = np.zeros_like(J)
+        for i in range(len(w)):
+            h = step * max(1.0, abs(w[i]))
+            a, b = w.copy(), w.copy()
+            a[i] += h
+            b[i] -= h
+            FD[:, i] = (shoot.residual(a) - shoot.residual(b)) / (2 * h)
+        return FD
+
+    # The residual is piecewise smooth (the clipped jerk switches modes), so one
+    # difference step can straddle a switch, and rounding spoils a step that is too
+    # small. Each entry must match differences at one of two steps; a wrong Jacobian
+    # matches neither.
+    ok = np.zeros(J.shape, dtype=bool)
+    for step in (1e-6, 1e-5):
+        ok |= np.isclose(J, central(step), rtol=1e-3, atol=2e-4)
+    assert ok.all()
     sol = shoot.solve_damped(v, tol=1e-9)
     assert sol.success, sol.residual_norm
     assert abs(sol.tf - r.solution.tf) < 1e-6
