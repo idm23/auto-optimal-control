@@ -2,7 +2,7 @@
 
     python benchmarks/arm_census.py OUT.jsonl [--workers 14] [--cases goal4@90 rest11 ...]
         [--seconds 300] [--solves N] [--snapshots DIR] [--set name=value ...]
-        [--rule R2=on ...]
+        [--rule R2=on ...] [--export docs/_static/census/data]
 
 Cases: 10 goals from rest at the origin, each with torque limits at 90%, 80% and
 70% of the way from the ends' torques to the free motion's peak (``goal<i>@<pct>``),
@@ -14,7 +14,9 @@ route steps by outcome, converged answers rejected by check, and rules fired.
 that does not depend on the machine or its load. ``--set`` sets a Homotopy attribute
 (``--set offset_start=staggered --set width_steps=True``); ``--set
 MultiArcShooting.rate_junctions_default=False`` sets a class default; ``--rule
-R2=on`` turns a rule of ``auto_optimal_control.rules`` on or off. The summary
+R2=on`` turns a rule of ``auto_optimal_control.rules`` on or off. ``--export`` writes each case's
+motion for the animated census page (``docs/census.md``), with a manifest of every
+case in the directory, so new cases show up on the page by themselves. The summary
 at the end adds the counters up over all cases.
 """
 
@@ -32,16 +34,19 @@ from auto_optimal_control import examples
 from auto_optimal_control.homotopy import Homotopy
 from auto_optimal_control.robot import GRAVITY, SIX_JOINT_LINKS, joint_torques
 from auto_optimal_control import rules, shooting
+from census_export import export_case, write_manifest
 
 TAU = np.array([5.0, 87.3, 28.5, 2.5, 0.7, 0.2])
 J = np.full(6, 30.0)
 BOX, TS = ([-.5] * 18, [.5] * 18), (.3, 5.)
 H = None
 TQ = None
+EXPORT = None
 
 
 def setup(args):
-    global H, TQ
+    global H, TQ, EXPORT
+    EXPORT = getattr(args, "export", None)
     warnings.simplefilter("ignore")
     q, w, a = (sp.symbols(f"{s}1:7", real=True) for s in "qwa")
     f = sp.lambdify((q, w, a), joint_torques(SIX_JOINT_LINKS, q, w, a, GRAVITY), "numpy")
@@ -90,17 +95,24 @@ def params(name, free_cache={}):
 
 
 def run(name):
+    p, r = None, None
     try:
         p = params(name)
         H.snapshot_tag = name
         t0 = time.time()
         r = H.solve(p, BOX, TS)
-        return {"name": name, "exact": bool(r.exact), "sec": round(time.time() - t0, 1),
-                "tf": float(r.solution.tf) if r.exact else None, "msg": r.message[:80],
-                "diagnostics": r.diagnostics}
+        row = {"name": name, "exact": bool(r.exact), "sec": round(time.time() - t0, 1),
+               "tf": float(r.solution.tf) if r.exact else None, "msg": r.message[:80],
+               "diagnostics": r.diagnostics}
     except Exception as exc:          # a case that raises is a result too
-        return {"name": name, "exact": False, "sec": 0.0, "tf": None, "msg": repr(exc)[:80],
-                "diagnostics": {}}
+        row = {"name": name, "exact": False, "sec": 0.0, "tf": None, "msg": repr(exc)[:80],
+               "diagnostics": {}}
+    if EXPORT and p is not None:
+        try:
+            export_case(EXPORT, name, p, row, r if row["exact"] else None, TQ)
+        except Exception as exc:      # the census result stands without the page's copy
+            print(f"export of {name} failed: {exc!r}", flush=True)
+    return row
 
 
 def summary(rows):
@@ -129,6 +141,9 @@ def main(argv=None):
     ap.add_argument("--cache", default=None)
     ap.add_argument("--set", action="append")
     ap.add_argument("--rule", action="append")
+    ap.add_argument("--export", default=None,
+                    help="write each case's motion for the census page to this directory "
+                         "(docs/_static/census/data)")
     ap.add_argument("--parallel-routes", action="store_true",
                     help="run R15's routes at once (each case then uses one core per route)")
     args = ap.parse_args(argv)
@@ -147,6 +162,8 @@ def main(argv=None):
             fo.write(json.dumps(row) + "\n")
             fo.flush()
     summary(rows)
+    if args.export:
+        print(f"exported {write_manifest(args.export)} cases to {args.export}")
 
 
 if __name__ == "__main__":

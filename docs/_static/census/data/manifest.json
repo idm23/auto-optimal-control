@@ -1,0 +1,454 @@
+{
+ "cases": [
+  {
+   "file": "goal0@70.json",
+   "name": "goal0@70",
+   "family": "goal",
+   "index": 0,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 635.2,
+   "tf": null
+  },
+  {
+   "file": "goal0@80.json",
+   "name": "goal0@80",
+   "family": "goal",
+   "index": 0,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 168.5,
+   "tf": 1.156634184100086
+  },
+  {
+   "file": "goal0@90.json",
+   "name": "goal0@90",
+   "family": "goal",
+   "index": 0,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 11.1,
+   "tf": 1.156616086644625
+  },
+  {
+   "file": "goal1@70.json",
+   "name": "goal1@70",
+   "family": "goal",
+   "index": 1,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 139.3,
+   "tf": 1.1675058733367567
+  },
+  {
+   "file": "goal1@80.json",
+   "name": "goal1@80",
+   "family": "goal",
+   "index": 1,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 62.9,
+   "tf": 1.1674990130038598
+  },
+  {
+   "file": "goal1@90.json",
+   "name": "goal1@90",
+   "family": "goal",
+   "index": 1,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 13.4,
+   "tf": 1.1674987370971333
+  },
+  {
+   "file": "goal2@70.json",
+   "name": "goal2@70",
+   "family": "goal",
+   "index": 2,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 619.8,
+   "tf": null
+  },
+  {
+   "file": "goal2@80.json",
+   "name": "goal2@80",
+   "family": "goal",
+   "index": 2,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 30.2,
+   "tf": 1.1434204471457299
+  },
+  {
+   "file": "goal2@90.json",
+   "name": "goal2@90",
+   "family": "goal",
+   "index": 2,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 13.2,
+   "tf": 1.142991517873185
+  },
+  {
+   "file": "goal3@70.json",
+   "name": "goal3@70",
+   "family": "goal",
+   "index": 3,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 98.5,
+   "tf": 1.147171028504635
+  },
+  {
+   "file": "goal3@80.json",
+   "name": "goal3@80",
+   "family": "goal",
+   "index": 3,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 19.1,
+   "tf": 1.1471498186190483
+  },
+  {
+   "file": "goal3@90.json",
+   "name": "goal3@90",
+   "family": "goal",
+   "index": 3,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 6.3,
+   "tf": 1.1471418817915415
+  },
+  {
+   "file": "goal4@70.json",
+   "name": "goal4@70",
+   "family": "goal",
+   "index": 4,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 536.2,
+   "tf": null
+  },
+  {
+   "file": "goal4@80.json",
+   "name": "goal4@80",
+   "family": "goal",
+   "index": 4,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 21.6,
+   "tf": 1.167490703011765
+  },
+  {
+   "file": "goal4@90.json",
+   "name": "goal4@90",
+   "family": "goal",
+   "index": 4,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 11.2,
+   "tf": 1.1674720736261162
+  },
+  {
+   "file": "goal5@70.json",
+   "name": "goal5@70",
+   "family": "goal",
+   "index": 5,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 47.3,
+   "tf": 1.0530968715630424
+  },
+  {
+   "file": "goal5@80.json",
+   "name": "goal5@80",
+   "family": "goal",
+   "index": 5,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 15.1,
+   "tf": 1.0530801619941654
+  },
+  {
+   "file": "goal5@90.json",
+   "name": "goal5@90",
+   "family": "goal",
+   "index": 5,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 6.4,
+   "tf": 1.053072143745882
+  },
+  {
+   "file": "goal6@70.json",
+   "name": "goal6@70",
+   "family": "goal",
+   "index": 6,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 198.6,
+   "tf": 1.126093072502916
+  },
+  {
+   "file": "goal6@80.json",
+   "name": "goal6@80",
+   "family": "goal",
+   "index": 6,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 33.2,
+   "tf": 1.1158180621312983
+  },
+  {
+   "file": "goal6@90.json",
+   "name": "goal6@90",
+   "family": "goal",
+   "index": 6,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 9.3,
+   "tf": 1.115785227682307
+  },
+  {
+   "file": "goal7@70.json",
+   "name": "goal7@70",
+   "family": "goal",
+   "index": 7,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 72.4,
+   "tf": 1.0769652179328488
+  },
+  {
+   "file": "goal7@80.json",
+   "name": "goal7@80",
+   "family": "goal",
+   "index": 7,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 22.0,
+   "tf": 1.07695163406746
+  },
+  {
+   "file": "goal7@90.json",
+   "name": "goal7@90",
+   "family": "goal",
+   "index": 7,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 39.0,
+   "tf": 1.0769341916303024
+  },
+  {
+   "file": "goal8@70.json",
+   "name": "goal8@70",
+   "family": "goal",
+   "index": 8,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 120.6,
+   "tf": 1.1327314813076075
+  },
+  {
+   "file": "goal8@80.json",
+   "name": "goal8@80",
+   "family": "goal",
+   "index": 8,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 39.2,
+   "tf": 1.1220754875540038
+  },
+  {
+   "file": "goal8@90.json",
+   "name": "goal8@90",
+   "family": "goal",
+   "index": 8,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 11.2,
+   "tf": 1.1220647168173725
+  },
+  {
+   "file": "goal9@70.json",
+   "name": "goal9@70",
+   "family": "goal",
+   "index": 9,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 233.9,
+   "tf": 1.1276667473189252
+  },
+  {
+   "file": "goal9@80.json",
+   "name": "goal9@80",
+   "family": "goal",
+   "index": 9,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 633.6,
+   "tf": null
+  },
+  {
+   "file": "goal9@90.json",
+   "name": "goal9@90",
+   "family": "goal",
+   "index": 9,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 177.5,
+   "tf": 1.1275921826851045
+  },
+  {
+   "file": "rest0.json",
+   "name": "rest0",
+   "family": "rest",
+   "index": 0,
+   "setting": null,
+   "solved": true,
+   "seconds": 24.9,
+   "tf": 1.005648648103025
+  },
+  {
+   "file": "rest1.json",
+   "name": "rest1",
+   "family": "rest",
+   "index": 1,
+   "setting": null,
+   "solved": false,
+   "seconds": 610.4,
+   "tf": null
+  },
+  {
+   "file": "rest10.json",
+   "name": "rest10",
+   "family": "rest",
+   "index": 10,
+   "setting": null,
+   "solved": true,
+   "seconds": 23.3,
+   "tf": 1.4461524092860216
+  },
+  {
+   "file": "rest11.json",
+   "name": "rest11",
+   "family": "rest",
+   "index": 11,
+   "setting": null,
+   "solved": false,
+   "seconds": 633.2,
+   "tf": null
+  },
+  {
+   "file": "rest12.json",
+   "name": "rest12",
+   "family": "rest",
+   "index": 12,
+   "setting": null,
+   "solved": false,
+   "seconds": 616.7,
+   "tf": null
+  },
+  {
+   "file": "rest13.json",
+   "name": "rest13",
+   "family": "rest",
+   "index": 13,
+   "setting": null,
+   "solved": true,
+   "seconds": 76.0,
+   "tf": 1.2853086939572704
+  },
+  {
+   "file": "rest14.json",
+   "name": "rest14",
+   "family": "rest",
+   "index": 14,
+   "setting": null,
+   "solved": true,
+   "seconds": 3.2,
+   "tf": 1.2738436723589583
+  },
+  {
+   "file": "rest2.json",
+   "name": "rest2",
+   "family": "rest",
+   "index": 2,
+   "setting": null,
+   "solved": true,
+   "seconds": 149.6,
+   "tf": 1.4513909275231192
+  },
+  {
+   "file": "rest3.json",
+   "name": "rest3",
+   "family": "rest",
+   "index": 3,
+   "setting": null,
+   "solved": true,
+   "seconds": 95.7,
+   "tf": 1.4026544484693164
+  },
+  {
+   "file": "rest4.json",
+   "name": "rest4",
+   "family": "rest",
+   "index": 4,
+   "setting": null,
+   "solved": false,
+   "seconds": 629.4,
+   "tf": null
+  },
+  {
+   "file": "rest5.json",
+   "name": "rest5",
+   "family": "rest",
+   "index": 5,
+   "setting": null,
+   "solved": true,
+   "seconds": 220.6,
+   "tf": 1.7499272895751852
+  },
+  {
+   "file": "rest6.json",
+   "name": "rest6",
+   "family": "rest",
+   "index": 6,
+   "setting": null,
+   "solved": true,
+   "seconds": 263.3,
+   "tf": 1.5387226989893896
+  },
+  {
+   "file": "rest7.json",
+   "name": "rest7",
+   "family": "rest",
+   "index": 7,
+   "setting": null,
+   "solved": true,
+   "seconds": 18.2,
+   "tf": 1.3850275266539074
+  },
+  {
+   "file": "rest8.json",
+   "name": "rest8",
+   "family": "rest",
+   "index": 8,
+   "setting": null,
+   "solved": true,
+   "seconds": 3.3,
+   "tf": 1.1867642584190146
+  },
+  {
+   "file": "rest9.json",
+   "name": "rest9",
+   "family": "rest",
+   "index": 9,
+   "setting": null,
+   "solved": true,
+   "seconds": 588.5,
+   "tf": 1.3685146027721018
+  }
+ ]
+}

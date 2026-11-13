@@ -44,4 +44,6 @@ The kernels are compiled when you first build them, so you need a C compiler
 notebooks/index
 api
 notes/structure_certificates
+notes/lemma_register
+census
 ```
