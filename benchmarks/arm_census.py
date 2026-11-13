@@ -24,8 +24,10 @@ import argparse
 import ast
 import json
 import multiprocessing as mp
+import sys
 import time
 import warnings
+from pathlib import Path
 
 import numpy as np
 import sympy as sp
@@ -34,7 +36,9 @@ from auto_optimal_control import examples
 from auto_optimal_control.homotopy import Homotopy
 from auto_optimal_control.robot import GRAVITY, SIX_JOINT_LINKS, joint_torques
 from auto_optimal_control import rules, shooting
-from census_export import export_case, write_manifest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # importable from anywhere
+from census_export import export_case, write_manifest  # noqa: E402
 
 TAU = np.array([5.0, 87.3, 28.5, 2.5, 0.7, 0.2])
 J = np.full(6, 30.0)

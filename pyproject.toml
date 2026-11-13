@@ -35,6 +35,8 @@ shooting = ["scipy>=1.13"]
 # auto_optimal_control.learn: learned proposals (a conditional flow, a JEPA) trained on
 # generated indirect extremals.
 learn = ["torch>=2.2"]
+# auto_optimal_control.direct: a direct transcription, for comparison only (IPOPT via CasADi).
+direct = ["casadi>=3.6"]
 
 [project.urls]
 Homepage = "https://github.com/idm23/auto-optimal-control"
