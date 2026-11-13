@@ -314,6 +314,11 @@ class Homotopy:
         #: an extremal with a strictly convex Hamiltonian; it stands in for an arc too
         #: short to solve, and grows back into one when a violation appears beside it.
         self.collapsed_touches = False
+        #: Rule R21: an exact solution rejected because an order-1 arc's multiplier
+        #: rises (Lemma H) is split there, settled on the route at the end of the
+        #: offsets (new violations brought in), and solved exactly again.
+        self.exact_splits = False
+        self._last_rejected = None
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
         #: oracles on every path solution (slow: for development).
@@ -963,6 +968,7 @@ class Homotopy:
         reason = self._verdict(shoot, sol)
         if reason is not None and sol.success and np.isfinite(sol.residual_norm):
             self.diagnostics.reject(reason)
+            self._last_rejected = (shoot, sol, reason)
         return reason is None
 
     def _verdict(self, shoot, sol):
@@ -2142,11 +2148,11 @@ class Homotopy:
         def solve_structure(arcs, values, base, le, off):
             return self._solve_structure(arcs, values, base, le, off, path_tol, state)
 
-        def settle(sh, r, le, off):
+        def settle(sh, r, le, off, changed=False):
             """Bring in violated limits and retire dead arcs until the solution at
-            (le, off) is consistent; ``(shoot, sol)`` or None."""
+            (le, off) is consistent; ``(shoot, sol)`` or None. ``changed``: the
+            structure was just changed, so a large violation is that change's doing."""
             last = None
-            changed = False
             for _ in range(2 * self.nc + 4):
                 optional = False
                 viol = self._free_violations(sh, r.v, scale)
@@ -2377,8 +2383,9 @@ class Homotopy:
 
         found = []
 
-        def try_exact():
+        def try_exact(depth=0):
             sh, v = state["shoot"], state["v"]
+            self._last_rejected = None
             arcs, values = self._arcs_of(sh, v)
             entries, _ = self._mas_entries(arcs, values, names=True)
             step = Step(log_eps_min + s_max - state["le"] if self.bang_bang else 0.0,
@@ -2402,11 +2409,49 @@ class Homotopy:
                         break
             self._say(f"active set at eps = {step.eps:.3g}: {self._names(arcs)}, "
                       f"exact {'accepted' if hit else 'not accepted'}")
+            if hit is None and self.exact_splits and depth < 2 and self.split_rising:
+                hit = split_exact(depth)
             if hit is not None:
                 step.accepted = True
                 found.append(hit)
                 return True
             return False
+
+        def split_exact(depth):
+            """Rule R21: the last exact solution rejected for a rising multiplier, split
+            where it rises (Lemma H, as R5), settled on the route and tried again."""
+            rejected = self._last_rejected
+            if (rejected is None or rejected[2] != "mu rises (Lemma H)"
+                    or time.perf_counter() > deadline):
+                return None
+            xs, xsol, _ = rejected
+            try:
+                options = self._split_rising(xs, xsol.v) or []
+            except _FAILURES:
+                return None
+            saved = dict(state)
+            for arcs_s, vals_s in options:
+                try:
+                    sh, r = solve_structure(arcs_s, vals_s, xsol.v[:xs.n_base], state["le"],
+                                            state["off"])
+                except _FAILURES as exc:
+                    self._detail(f"  exact split: {exc}")
+                    continue
+                self._detail(f"  exact split {self._mas_entries(arcs_s, vals_s, True)[0]}: "
+                             f"residual {r.residual_norm:.1e}")
+                # The split moves the motion: a violation it causes is brought in as it
+                # is, as after any structure change (there is no step to shorten).
+                done = settle(sh, r, state["le"], state["off"], changed=True) if r.success else None
+                if done is None:
+                    continue
+                self.diagnostics.fired("R21")
+                state.update(shoot=done[0], v=done[1].v)
+                if try_exact(depth + 1):
+                    return found.pop()     # the caller records it
+                solves = state["solves"]
+                state.clear()
+                state.update(saved, solves=solves)
+            return None
 
         def out_of_budget():
             return state["solves"] > max_solves or time.perf_counter() > deadline or stalled()

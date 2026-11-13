@@ -1036,6 +1036,41 @@ physical cores:
 Every case still unsolved (goal 2 and goal 4 at 70%, goal 9 at 80%, rest 4)
 has an isolated point contact in the direct transcription, except goal 4.
 
+### Rule R21 (split an exact solution whose multiplier rises), tried
+
+*Observed:* with R20, goal 9 at 80% and goal 4 at 70% reach the end of the
+offsets, and the exact solve converges (residual about $10^{-12}$, no
+violations). It is rejected because an order-1 multiplier rises (Lemma H).
+
+- In goal 9 the rise is $2.6 \times 10^{-5}$ on a `tau5_max` arc whose
+  $\mu$ reaches $3.7 \times 10^{-4}$. The direct transcription (comparison
+  only) has two `tau5_max` arcs there, $[0.822, 0.827]$ and $[0.864, 0.926]$.
+- The route's own R5 uses the same threshold. It did not split the arc,
+  because the route's solution, at its looser tolerance, does not show the
+  rise.
+
+*Rule:* when the exact solve is rejected for a rising multiplier, split the
+exact solution's arc where it rises (R5's split). Solve the split on the route
+at the end of the offsets, and settle it there. A violation the split causes
+is brought in as after any structure change: there is no step to shorten.
+Then solve exactly again, at most two levels deep (`Homotopy.exact_splits`).
+
+*Why it is sound:* every structure it produces is solved and judged by the
+same exact checks.
+
+*Result: no gain, off by default.*
+
+- **Goal 9 at 80%:** the split solves on the route ($2.4 \times 10^{-7}$),
+  and the split exact problem solves with no rise left. But it violates
+  `tau6_min` by $1.9 \times 10^{-2}$ of its scale. Widening the `tau6_min`
+  arc over the violation does not converge (residual 1.7).
+- **Goal 4 at 70%:** the split leaves a rise of 0.815 on two `tau6_min`
+  arcs whose $\mu$ goes negative ($-0.67$). That structure is wrong in a way
+  no split can fix.
+
+So the route arrives at the wrong arrangement of arcs, and a single
+discrete change at the end is too far from the right one.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

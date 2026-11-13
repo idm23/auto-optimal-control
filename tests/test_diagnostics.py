@@ -152,3 +152,24 @@ def test_order1_touches_become_short_arcs_for_the_exact_solve():
     # Nothing to do without an order-1 touch.
     h, shoot = _stub_structure(arcs[:1] + arcs[2:], values[:1] + values[2:], [1, 1, 2])
     assert h._touch_arcs(shoot, None) == []
+
+
+def test_rejected_exact_solution_is_kept_for_r21():
+    """Rule R21 needs the last exact solution rejected and why; an accepted one or an
+    unconverged one leaves nothing behind."""
+    import types
+
+    h = Homotopy.__new__(Homotopy)
+    h.diagnostics = Diagnostics()
+    h._last_rejected = None
+    sol = types.SimpleNamespace(success=True, residual_norm=1e-12)
+    h._verdict = lambda shoot, sol: "mu rises (Lemma H)"
+    assert not h._accept("shoot", sol, 1e-10)
+    assert h._last_rejected == ("shoot", sol, "mu rises (Lemma H)")
+    h._last_rejected = None
+    h._verdict = lambda shoot, sol: "not converged"
+    assert not h._accept("shoot", types.SimpleNamespace(success=False, residual_norm=1.0), 1e-10)
+    assert h._last_rejected is None
+    h._verdict = lambda shoot, sol: None
+    assert h._accept("shoot", sol, 1e-10)
+    assert h._last_rejected is None
