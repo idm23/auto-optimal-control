@@ -298,6 +298,7 @@ class Homotopy:
         #: Run the portfolio's routes at once in forked processes (one core each).
         self.parallel_routes = False
         self.corner_touches = False         # rule R12: refuted by Lemma L (see the note)
+        self.corner_rel = 1e-2              # R12: how near the edge a peak must be
         #: Rule R16: after a step that overshoots a birth, place the next one at the
         #: birth by a secant on the peak excess (Lemma N), not by halving.
         self.locate_births = False
@@ -1272,7 +1273,8 @@ class Homotopy:
                     w = max(b - a, 1e-3 * T) / 2
                     mid = 0.5 * (a + b)
                     lo, hi = mid - w, mid + w
-                    t_edge = self._corner_peak(shoot, v, c, lo, hi) if self.corner_touches else None
+                    t_edge = (self._corner_peak(shoot, v, c, lo, hi, rel=self.corner_rel)
+                              if self.corner_touches else None)
                     if t_edge is not None:
                         # Lemma L: a peak on the edge is born as a touch point, not an arc.
                         self.diagnostics.fired("R12")
