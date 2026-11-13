@@ -332,3 +332,32 @@ route stalls.
 - **Gap.** Assumes $u_B$ constant on the stretch, true when it is held at a
   bound, and the direct form of S1.
 - **Used by.** Diagnosis of rest 12 (O2). No rule yet.
+
+### Observation O3: what the direct comparison shows for the unsolved cases
+
+The direct transcription (`auto_optimal_control.direct`) was run at 120 and 240
+intervals. It is a comparison only, never a seed. Final times agree to about
+1e-4 between the grids, and the total multiplier of each limit agrees to a few
+percent.
+
+- **Rest 12** has two base-joint arcs: `tau1_max` on [0.111, 0.410] and
+  `tau1_min` on [1.008, 1.482]. Joint 1's own jerk is interior on both. It
+  leaves its bound just before each entry and reaches it again just after each
+  exit, as Lemma P requires.
+- **Rest 1 and rest 11** each have an isolated `tau1_max` contact. Its
+  multiplier, 0.0016 and 0.0011, is the same on both grids, so it is an atom of
+  the measure: an order-1 touch, or an arc shorter than the grid.
+  - At the contact every jerk that moves `tau1` is at a bound **except one**
+    (joint 2, in the middle of a switch).
+  - So Lemma L's hypothesis (every control with $a_k \ne 0$ saturated after
+    the touch) fails. The jump moves the interior control, and the touch rows
+    are not singular.
+  - R12 was refuted on the drift toy, where the single control is saturated.
+    It has not been tried on the arm.
+- **Rest 4's contact is not settled.** Its multiplier halves from 120 to 240
+  intervals.
+- **Goal 9 at 80%** has a short `tau6_min` arc, [0.282, 0.287]. Its multiplier
+  is stable, and joint 6's jerk switches at its start.
+- **Reading the solver's logs.** The route's last structures in a failed solve
+  belong to the time-reversed problem (R4). Map them back by $t \to t_f - t$
+  before comparing.
