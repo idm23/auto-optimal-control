@@ -743,14 +743,18 @@ def generate_c(pmp, name=None):
         stm_sig = (f"int {P}{group}_stm_rhs(int c, double t, const double* y, const double* p, "
                    "double* dy)")
         sigs.append(stm_sig)
+        if numeric and group == "boundary":
+            # One riding solve for both (the riding problem is the costly part).
+            fused = (f"    int rc = {P}riding_rhs_jac(c, t, y, p, dy, A);\n"
+                     "    if (rc) return rc;")
+        else:
+            fused = (f"    int rc = {P}{group}_rhs(c, t, y, p, dy);\n    if (rc) return rc;\n"
+                     f"    rc = {P}{group}_jac(c, t, y, p, A);\n    if (rc) return rc;")
         out.append(f"""{stm_sig} {{
     double A[{NZ * NZ}];
     const double* Phi = y + {NZ};
     double* dPhi = dy + {NZ};
-    int rc = {P}{group}_rhs(c, t, y, p, dy);
-    if (rc) return rc;
-    rc = {P}{group}_jac(c, t, y, p, A);
-    if (rc) return rc;
+{fused}
     for (int i = 0; i < {NZ}; ++i) {{  /* A is mostly zeros on the free arcs of a large problem */
         double* row = dPhi + i * {NZ};
         for (int j = 0; j < {NZ}; ++j) row[j] = 0.0;

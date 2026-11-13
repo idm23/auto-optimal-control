@@ -279,6 +279,9 @@ static int {P}r_check(int id, const double* v, const double* lo, const double* h
 /* The controls u and the multipliers: per limit of the set (ms) and summed per root (mr).
    With bounds this is a small strictly convex quadratic program, whose solution is
    unique: an active set from nothing held, and every combination if that cycles. */
+static _Thread_local int {P}r_warm[{max(len(sets), 1)}][{max(m, 1)}];
+static _Thread_local int {P}r_warm_ok[{max(len(sets), 1)}];
+
 static int {P}r_solve(int id, double t, const double* z, const double* p, double* u, double* ms,
                       double* mr, double* K, int* piv, double* c0, int* dout) {{
     if (id < 0 || id >= {len(sets)}) return 3;
@@ -288,13 +291,21 @@ static int {P}r_solve(int id, double t, const double* z, const double* p, double
     {P}r_quadratic(t, z, p, R, c0);
     {P}r_limits(t, z, p, 0, 0, limits);
     {P}control_bounds(t, z, p, lo, hi);
-    for (int i = 0; i < {m}; ++i) held[i] = 0;
-    for (int iter = 0; iter < {4 * m + 8} && !solved; ++iter) {{
-        int which, to;
-        rc = {P}r_system(id, R, limits, c0, lo, hi, held, K, piv, v, dout);
-        if (rc) break;
-        if ({P}r_check(id, v, lo, hi, held, &which, &to)) solved = 1;
-        else held[which] = to;
+    /* The program is strictly convex, so its solution is unique and does not depend on
+       where the active-set search starts. Along an integration the held set rarely
+       changes between calls, so the search starts from the last one found for this set
+       of limits (per thread), and from nothing held if that does not converge. */
+    for (int start = 0; start < 2 && !solved; ++start) {{
+        if (start == 0 && !{P}r_warm_ok[id]) continue;
+        for (int i = 0; i < {m}; ++i) held[i] = start == 0 ? {P}r_warm[id][i] : 0;
+        rc = 0;
+        for (int iter = 0; iter < {4 * m + 8} && !solved; ++iter) {{
+            int which, to;
+            rc = {P}r_system(id, R, limits, c0, lo, hi, held, K, piv, v, dout);
+            if (rc) break;
+            if ({P}r_check(id, v, lo, hi, held, &which, &to)) solved = 1;
+            else held[which] = to;
+        }}
     }}
     if (!solved) {{
         int pow3 = 1;
@@ -333,7 +344,8 @@ static int {P}r_solve(int id, double t, const double* z, const double* p, double
         }}
         if (!solved) return 4;     /* these limits cannot be ridden within the bounds */
     }}
-    for (int i = 0; i < {m}; ++i) u[i] = v[i];
+    for (int i = 0; i < {m}; ++i) {{ u[i] = v[i]; {P}r_warm[id][i] = held[i]; }}
+    {P}r_warm_ok[id] = 1;
     for (int k = 0; k < {nr}; ++k) mr[k] = 0.0;
     for (int i = 0; i < s; ++i) {{
         const int c = {P}r_set[id][i];
@@ -381,6 +393,41 @@ static int {P}r_sensitivity(int c, double t, const double* z, const double* p, c
 
 int {P}riding_jac(int c, double t, const double* z, const double* p, double* A) {{
     {P}R_LOCALS;
+    double Fx[{n * n}], Fu[{n * m}], Hxx[{n * n}], Hxu[{n * m}];
+    double L2[{n * n + n * m}], Gx[{nr * n}], D[{dim * nz}];
+    const double* Lxx = L2;
+    const double* Lxu = L2 + {n * n};
+    const int s = {P}r_size[c];
+    {P}r_derivatives(t, z, p, u, Fx, Fu, Hxx, Hxu);
+    {P}r_lagrangian_hess(t, z, p, u, mr, L2);
+    {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, Lxu, Gx);
+    for (int j = 0; j < {nz}; ++j) {{
+        for (int i = 0; i < {n}; ++i) {{
+            double a = j < {n} ? Fx[i * {n} + j] : 0.0;
+            double b = j < {n} ? -(Hxx[i * {n} + j] + Lxx[i * {n} + j]) : -Fx[(j - {n}) * {n} + i];
+            for (int q = 0; q < {m}; ++q) {{
+                a += Fu[i * {m} + q] * D[q * {nz} + j];
+                b -= (Hxu[i * {m} + q] + Lxu[i * {m} + q]) * D[q * {nz} + j];
+            }}
+            for (int q = 0; q < s; ++q) {{
+                const int l = {P}r_set[c][q];
+                b -= {P}r_sign[l] * Gx[{P}r_root[l] * {n} + i] * D[({m} + q) * {nz} + j];
+            }}
+            A[i * {nz} + j] = a;
+            A[({n} + i) * {nz} + j] = b;
+        }}
+    }}
+    return 0;
+}}
+
+/* The right-hand side and its Jacobian from one riding solve (the STM right-hand side
+   needs both at the same point). Same results as riding_rhs and riding_jac. */
+int {P}riding_rhs_jac(int c, double t, const double* z, const double* p, double* dz, double* A) {{
+    {P}R_LOCALS;
+    double Hx[{n}], Lx[{n}];
+    {P}r_flow(t, z, p, u, dz, Hx);
+    {P}r_lagrangian_x(t, z, p, u, mr, Lx);
+    for (int i = 0; i < {n}; ++i) dz[{n} + i] = -Hx[i] - Lx[i];
     double Fx[{n * n}], Fu[{n * m}], Hxx[{n * n}], Hxu[{n * m}];
     double L2[{n * n + n * m}], Gx[{nr * n}], D[{dim * nz}];
     const double* Lxx = L2;

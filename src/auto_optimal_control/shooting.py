@@ -335,6 +335,10 @@ class SingleShooting:
                                 nfev=int(getattr(sol, "nfev", 0)), result=sol,
                                 max_violation=violation)
 
+    #: How :meth:`solve_chord` treats its Jacobian between fresh evaluations: ``None``
+    #: keeps it (the chord method), ``"broyden"`` updates it after each accepted step.
+    chord_updates = None
+
     def solve_chord(self, guess, tol=1e-10, max_iterations=12, contraction=0.5):
         """Newton with one Jacobian reused while the residual falls by ``contraction``.
 
@@ -359,6 +363,12 @@ class SingleShooting:
             nfev += 1
             trial = float(np.linalg.norm(Rt))
             if np.isfinite(trial) and trial < contraction * err:
+                if self.chord_updates == "broyden":
+                    # Broyden's update: the secant condition J dv = dR at the cost of one
+                    # rank-one correction and a small LU, where a fresh Jacobian costs a
+                    # sensitivity integration (most of it on boundary arcs).
+                    J = J + np.outer((Rt - R) - J @ dv, dv) / float(dv @ dv)
+                    lu = lu_factor(J)
                 v, R, err, fresh = v + dv, Rt, trial, False
                 continue
             if fresh:
