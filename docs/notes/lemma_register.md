@@ -23,11 +23,11 @@ Standard results cited, and so prerequisites of any formalization:
 
 | | Result | Where it is used |
 |---|---|---|
-| S1 | The maximum principle with state constraints, in the direct-adjoining form, with a nonnegative measure (Hartl, Sethi & Vickson 1995, Thm 4.1), plus its relation to the indirect (BDD) form | H, J, K |
+| S1 | The maximum principle with state constraints, in the direct-adjoining form, with a nonnegative measure (Hartl, Sethi & Vickson 1995, Thm 4.1), plus its relation to the indirect (BDD) form | H, J, K, Q |
 | S2 | The implicit function theorem, and Hadamard's lemma (a smooth function that vanishes on $w = 0$ is $w$ times a smooth function) | E |
 | S3 | Smooth dependence of ODE solutions on initial values, times and parameters, including backward integration | E, R10 |
 | S4 | Sard's theorem, or the weaker fact that a $C^1$ image of a lower-dimensional manifold is Lebesgue-null | D |
-| S5 | Variational inequalities for convex minimization over a convex set | J, I′ |
+| S5 | Variational inequalities for convex minimization over a convex set | J, I′, Q |
 | S6 | The kinetic energy is $\tfrac12 \dot q^\top M(q) \dot q$ for the Newton-Euler model | A |
 | S7 | Danskin's theorem: directional derivatives of $\max_{t \in T} \phi(t, s)$ over a compact $T$ | N |
 
@@ -333,6 +333,51 @@ route stalls.
   bound, and the direct form of S1.
 - **Used by.** Diagnosis of rest 12 (O2). No rule yet.
 
+### Q. An order-1 touch carries no jump unless the controls absorb it — proved, relative to S1
+
+- **Statement.** Assume C1 to C3 and a time-invariant limit. Let $t_c$ be an
+  isolated contact: $g(x(t_c)) = 0$, $g \le 0$ near $t_c$, free arcs on both
+  sides, and a costate jump $\lambda^+ = \lambda^- - \nu \nabla g$ with
+  $\nu \ge 0$. If $\nu > 0$, then:
+  1. $\dot g^- = \dot g^+ = 0$;
+  2. the control is continuous at $t_c$;
+  3. $u^-$ minimizes $\tfrac12 u^\top R u + (G^\top\lambda^- - \nu a)^\top u$
+     over $U$ as well, so the jump is absorbed by the normal cone of $U$
+     at $u^-$. With a diagonal $R$, every control with $a_k \ne 0$ is at a
+     bound, and the shift $\nu a_k / R_{kk}$ leaves it there (Lemma L's
+     degenerate case).
+
+  So, outside that case, a contact of an order-1 limit carries no jump, and
+  a multiplier at a point has to be spread over an arc. This is Jacobson,
+  Lele & Speyer's "no touch points at order 1" for a strictly convex
+  Hamiltonian.
+- **Proof.**
+  - Since $\nabla g^\top G = a^\top$, adding the jump changes $H$ by a
+    multiple of the rate:
+    $H(\lambda^+, u) = H(\lambda^-, u) - \nu\,(a^\top u + d) = H(\lambda^-, u) - \nu\,\dot g(u)$.
+  - Minimality of $u^+$ gives $H^+ \le H(\lambda^+, u^-) = H^- - \nu \dot g^-$.
+    Minimality of $u^-$ gives $H^- \le H(\lambda^-, u^+) = H^+ + \nu \dot g^+$.
+  - $H$ is continuous at $t_c$ (time-invariant data, S1's jump conditions).
+    So $\nu \dot g^- \le 0 \le \nu \dot g^+$. Feasibility gives
+    $\dot g^- \ge 0 \ge \dot g^+$, hence (1).
+  - Then $H^- \le H(\lambda^-, u^+) = H^+ = H^-$. So $u^+$ also minimizes
+    $H(\lambda^-, \cdot)$, which is strictly convex, and $u^+ = u^-$: (2).
+  - (3) is the variational inequality (S5) for both minimizations at the
+    same point.
+- **Depends on.** S1 (the jump and $H$ continuity), S5.
+- **To formalize.** Short once S1 is a hypothesis: two inequalities, and
+  uniqueness of the minimizer of a strictly convex function on a convex set.
+- **Seen in.** Rest 11's `tau1_max` contact at $t \approx 0.631$. Joints 1–3
+  are at their bounds there. Joints 4 and 5 are free, with tiny $a_k$
+  (0.015 and −0.005). So the route's solution is *nearly* degenerate. As an
+  order-1 touch it solves, with $\nu = 5.3 \times 10^{-6}$, but the rate
+  after the jump is $1.2 \times 10^{-4}$, not 0. The extremal is an arc too
+  short to solve as one: as an arc at fixed route parameter, the Jacobian's
+  condition number is $4 \times 10^5$ to $5 \times 10^{10}$, against
+  $4 \times 10^4$ as a touch.
+- **Used by.** R20, which carries the touch only as a stand-in on the route
+  and gives the exact problem the arc.
+
 ### Observation O3: what the direct comparison shows for the unsolved cases
 
 The direct transcription (`auto_optimal_control.direct`) was run at 120 and 240
@@ -354,6 +399,9 @@ percent.
     are not singular.
   - R12 was refuted on the drift toy, where the single control is saturated.
     It has not been tried on the arm.
+  - Lemma Q settles which it is: with a strictly convex Hamiltonian it is an
+    arc. R20 carries it as a touch on the route only, and gives the exact
+    problem the arc. Rest 11 and rest 12 solve with it.
 - **Rest 4's contact is not settled.** Its multiplier halves from 120 to 240
   intervals.
 - **Goal 9 at 80%** has a short `tau6_min` arc, [0.282, 0.287]. Its multiplier

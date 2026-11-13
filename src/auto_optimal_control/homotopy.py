@@ -308,6 +308,12 @@ class Homotopy:
         #: Rule R18: an arc whose multiplier rises from its entry (to its exit) is
         #: trimmed to where the rise ends (starts), before any split is tried.
         self.trim_rising = False
+        #: Rule R20: an order-1 arc that collapses to zero width with a positive jump is
+        #: carried on as an order-1 touch point, and an order-1 birth is offered as a
+        #: touch too (after the arc). By Jacobson, Lele & Speyer an order-1 touch is not
+        #: an extremal with a strictly convex Hamiltonian; it stands in for an arc too
+        #: short to solve, and grows back into one when a violation appears beside it.
+        self.collapsed_touches = False
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
         #: oracles on every path solution (slow: for development).
@@ -1052,6 +1058,7 @@ class Homotopy:
         """Shooting on the regularized kernels with exact arcs ``arcs`` and penalties off."""
         p = self.regularized_params(eps, np.zeros(self.nc), off)
         shoot = (MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, open_end=True,
+                                  order1_touches=True if self.collapsed_touches else None,
                                   **self.path_options)
                  if arcs else SingleShooting(self.kr, p, **self.path_options))
         shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
@@ -1249,6 +1256,7 @@ class Homotopy:
             return (val[0], val[0]) if kind == "touch" else (val[0], val[1])
 
         groups, born = [], []              # groups: [set of arc indices, [(a, b), ...]]
+        touch_born = {}                    # R20: index in born -> the birth as a touch
         for c, a, b, _ in violations:
             hits = {i for i, (_, cc) in enumerate(arcs)
                     if cc == c and a - near <= span(i)[1] and b + near >= span(i)[0]}
@@ -1283,6 +1291,8 @@ class Homotopy:
                     if self.holdable_births:
                         lo, hi = self._holdable(shoot, v, c, lo, hi)
                     born.append((("boundary", c), (lo, hi, np.zeros(q))))
+                    if self.collapsed_touches:
+                        touch_born[len(born) - 1] = (("touch", c), (self._peak_time(shoot, v, c, a, b), 0.0))
                 continue
             for g in groups:
                 if g[0] & hits:
@@ -1368,7 +1378,49 @@ class Homotopy:
             if alternative[0] != options[0][0]:
                 options.append(alternative)
             options.append(build(False, narrow=True))
+        if touch_born:
+            # Rule R20: the order-1 births as touch points, offered after the arcs.
+            options.append(build(False, [touch_born.get(i, b) for i, b in enumerate(born)]))
         return options
+
+    def _touch_arcs(self, shoot, v, widths=(1e-4, 1e-3, 1e-2)):
+        """Rule R20: the structure with each order-1 touch point made a boundary arc
+        centred on it, carrying its jump, for each relative width in ``widths``."""
+        if not isinstance(shoot, MultiArcShooting):
+            return []
+        arcs, values = self._arcs_of(shoot, v)
+        if not any(k_ == "touch" and self.kr.CONSTRAINT_ORDERS[c] == 1 for k_, c in arcs):
+            return []
+        T = shoot.unpack(v)[3] - shoot.t0
+        out = []
+        for rel in widths:
+            new_v = []
+            for (kind, c), val in zip(arcs, values):
+                if kind == "touch" and self.kr.CONSTRAINT_ORDERS[c] == 1:
+                    w = 0.5 * rel * T
+                    new_v.append((val[0] - w, val[0] + w, np.array([float(val[1])])))
+                else:
+                    new_v.append(val)
+            new_a = [("boundary", c) if kind == "touch" and self.kr.CONSTRAINT_ORDERS[c] == 1
+                     else (kind, c) for kind, c in arcs]
+            out.append((new_a, new_v))
+        return out
+
+    def _peak_time(self, shoot, v, c, a, b, n_points=2001):
+        """The time of the largest value of limit ``c`` on ``[a, b]`` at ``v``."""
+        best_t, best_g = 0.5 * (a + b), -np.inf
+        try:
+            samples = self._free_samples(shoot, v, n_points)
+        except _FAILURES:
+            return best_t
+        for t, g, active in samples:
+            inside = (t >= a) & (t <= b)
+            if c in active or not inside.any():
+                continue
+            j = np.flatnonzero(inside)[int(np.argmax(g[inside, c]))]
+            if g[j, c] > best_g:
+                best_t, best_g = float(t[j]), float(g[j, c])
+        return best_t
 
     def _on_limit(self, shoot, v, c, which):
         """Whether the true limit ``c`` holds at the start (0) or the end (-1) of the motion."""
@@ -1611,7 +1663,11 @@ class Homotopy:
         for (kind, c), val in zip(arcs, values):
             if kind == "boundary" and val[1] - val[0] < 1e-6 * T:
                 changed = True
-                if self.kr.CONSTRAINT_ORDERS[c] >= 2:
+                if self.kr.CONSTRAINT_ORDERS[c] >= 2 or (
+                        self.collapsed_touches and float(val[2][0]) > 1e-12):
+                    # Rule R20 at order 1: a collapsed arc that still carries a jump.
+                    if self.kr.CONSTRAINT_ORDERS[c] == 1:
+                        self.diagnostics.fired("R20 collapse")
                     out_a.append(("touch", c))
                     out_v.append((0.5 * (val[0] + val[1]), float(val[2][0])))
                 continue
@@ -2330,6 +2386,20 @@ class Homotopy:
                         0.0, candidates=1, structure=tuple(entries))
             steps.append(step)
             hit = self._exact_jump(entries, v, tol)
+            if hit is None and self.collapsed_touches:
+                # Rule R20: an order-1 touch stands in for an arc too short to solve on
+                # the route (Lemma Q: it is not an extremal itself unless degenerate);
+                # the exact problem gets the arc, centred on it with the touch's jump.
+                for arcs_x, values_x in self._touch_arcs(sh, v):
+                    entries_x, vals_x = self._mas_entries(arcs_x, values_x)
+                    v_x = self._smoothed(entries_x, None, state["off"]).pack_arcs(
+                        v[:sh.n_base], vals_x)
+                    hit = self._exact_jump(entries_x, v_x, tol)
+                    if hit is not None:
+                        self.diagnostics.fired("R20 exact")
+                        entries = self._mas_entries(arcs_x, values_x, names=True)[0]
+                        arcs = arcs_x
+                        break
             self._say(f"active set at eps = {step.eps:.3g}: {self._names(arcs)}, "
                       f"exact {'accepted' if hit else 'not accepted'}")
             if hit is not None:

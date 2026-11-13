@@ -975,6 +975,67 @@ are gained: their routes had the right structure and only ran out of
 wall-clock budget. The common answers agree to 1e-15. Unsolved: goal 2 and
 goal 4 at 70%, goal 9 at 80%, and rest 4, 11 and 12.
 
+### Rule R20 (an arc too short to solve is carried as a touch)
+
+*Observed:* in rest 11 two `tau1_max` contacts are born about 0.003 apart in
+the route parameter: a late arc on $[1.1665, 1.1679]$, and then a contact
+near $t = 0.631$. Every offer of the second as an arc fails, even right at
+its birth.
+
+- MINPACK, from the census's own seed, finds the answer only now and then.
+  When it does, the arc at 0.631 has zero width and a jump of
+  $2.7 \times 10^{-6}$.
+- `_retire` then drops it as a dead order-1 arc. The violation returns, and
+  the route cycles.
+- The direct transcription (comparison only) shows the contact as an atom of
+  the multiplier, as it does in rest 1 and rest 4.
+- As an arc at a fixed route parameter, the Jacobian's condition number is
+  $4 \times 10^5$ to $5 \times 10^{10}$.
+- As an order-1 touch point, the seed residual is 0.05, not 30, and the
+  condition number is $4 \times 10^4$. The cheap chord solve converges in
+  0.1 s to the same point.
+
+*Lemma Q* (in the register) says the touch is not itself an extremal. With a
+strictly convex Hamiltonian, a contact with a jump $\nu > 0$ needs
+$\dot g = 0$ on both sides and a continuous control. That is only possible
+when every control that moves $g$ is at a bound that absorbs the jump.
+
+At rest 11's contact, joints 1–3 are at their bounds, and the free joints 4
+and 5 barely move $g$ ($a_k = 0.015$ and $-0.005$). So the contact is nearly
+degenerate: the touch's rate after the jump is $1.2 \times 10^{-4}$, not 0.
+It stands for an arc too short to solve as one.
+
+*Rule:* `Homotopy.collapsed_touches`.
+
+- An order-1 arc that collapses to zero width with a positive jump becomes
+  a touch point carrying that jump, as arcs of higher order already do.
+- An order-1 birth is also offered as a touch at its peak, after the arc
+  offers.
+- A violation beside the touch grows it back into an arc with its jump as
+  $\pi$, through the existing rule for touch points.
+- The exact problem never sees an order-1 touch. Each one goes in as an arc
+  centred on it, carrying its jump, with widths $10^{-4}$, $10^{-3}$ and
+  $10^{-2}$ of the motion's time tried in turn.
+
+*Why it is sound:* the touch exists only on the route, which is never an
+answer. What the exact problem is given changes only its seed. Its
+acceptance checks are unchanged.
+
+*Result: on in the census.* With R1, R2, R15 (parallel routes) and R16, on
+physical cores:
+
+- 41 of 45 solve, against 39.
+- It gains rest 11 (160 s) and rest 12 (265 s; never solved before), and
+  loses none. Rest 12's final time, 1.56473, is just above the direct
+  transcription's 1.56052, which enforces the limits only at its nodes.
+- 27 solve under 60 s, against 26, and the median time is 26.7 s.
+- The 39 common answers agree to 9e-16, and their total time is 2% lower.
+- R20 collapsed an arc into a touch 10 times. In rest 11, the exact solve
+  accepted the arc grown from the touch.
+
+Every case still unsolved (goal 2 and goal 4 at 70%, goal 9 at 80%, rest 4)
+has an isolated point contact in the direct transcription, except goal 4.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
