@@ -962,6 +962,19 @@ against 37. R17 fired 144 times. It lost goal 9 at 70%, a case that already
 took 168 s, and the total time of the common cases is about the same (3%
 less). Deaths are not what stops the "not converged" steps.
 
+### Measuring the census on physical cores
+
+Censuses up to this point ran five cases at once with three routes each: 15
+processes on homebox-node-1's 8 physical cores. Two processes shared each core,
+and every case ran at about half speed.
+
+Run two cases at a time instead (6 processes), with the rules unchanged (R1, R2,
+R15 with parallel routes, R16) and the riding warm start of PR #48. Then 39 of
+45 solve, 26 under 60 s, with a median of 23.1 s. Goal 0 at 70% and rest 1
+are gained: their routes had the right structure and only ran out of
+wall-clock budget. The common answers agree to 1e-15. Unsolved: goal 2 and
+goal 4 at 70%, goal 9 at 80%, and rest 4, 11 and 12.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
