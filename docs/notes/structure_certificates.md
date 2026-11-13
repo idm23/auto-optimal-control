@@ -949,6 +949,32 @@ median time is 36.3 s, against 52.0 s. The 35 common answers agree to 1e-15,
 and take 23% less time in total. Overshooting steps fell from 4,126 to 1,357,
 and steps in all from about 26,500 to 17,400.
 
+### Rule R17 (step past a death), tried
+
+*Rule:* when a step fails while a finite order-1 arc is shrinking, extrapolate
+$w^2$ linearly in $s$ through the last two consistent points. Lemma E makes
+$w^2$ a $C^1$ function of $s$ with a nonzero slope at a death. If the
+predicted death $s^*$ falls inside the failed step, solve the structure
+without the arc just past $s^*$ (`Homotopy.locate_deaths`).
+
+*Result: neutral, off by default.* With R16 on as well, 36 of 45 solve
+against 37. R17 fired 144 times. It lost goal 9 at 70%, a case that already
+took 168 s, and the total time of the common cases is about the same (3%
+less). Deaths are not what stops the "not converged" steps.
+
+### Measuring the census on physical cores
+
+Censuses up to this point ran five cases at once with three routes each: 15
+processes on homebox-node-1's 8 physical cores. Two processes shared each core,
+and every case ran at about half speed.
+
+Run two cases at a time instead (6 processes), with the rules unchanged (R1, R2,
+R15 with parallel routes, R16) and the riding warm start of PR #48. Then 39 of
+45 solve, 26 under 60 s, with a median of 23.1 s. Goal 0 at 70% and rest 1
+are gained: their routes had the right structure and only ran out of
+wall-clock budget. The common answers agree to 1e-15. Unsolved: goal 2 and
+goal 4 at 70%, goal 9 at 80%, and rest 4, 11 and 12.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

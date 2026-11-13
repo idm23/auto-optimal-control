@@ -10,6 +10,11 @@ and 15 rest-to-rest motions with fixed limits (``rest<i>``). Each row records th
 outcome, the time, and ``HomotopyResult.diagnostics``: failed evaluations by class,
 route steps by outcome, converged answers rejected by check, and rules fired.
 
+With ``--parallel-routes`` each case runs one process per route (three by default).
+Keep ``workers * 3`` within the machine's *physical* cores: on hyperthreads two
+processes share a core, every case runs at about half speed, and cases near their
+wall-clock budget fail (homebox-node-1 has 8 cores: use ``--workers 2``).
+
 ``--solves`` caps the route's path solves (``Homotopy.max_path_solves``), a budget
 that does not depend on the machine or its load. ``--set`` sets a Homotopy attribute
 (``--set offset_start=staggered --set width_steps=True``); ``--set
