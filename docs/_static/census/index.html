@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arm census</title>
+<style>
+:root {
+  --bg: #fbfbfa; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e4e2;
+  --arm: #2f5d8a; --joint: #1d1d1f; --shadow: rgba(0,0,0,0.10); --trail: #c9a227;
+  --start: rgba(47,93,138,0.25); --goal: #8a8a8f; --limit: #c0392b; --ok: #2e7d4f; --bad: #b3261e;
+  --tau: #2f5d8a; --grid: #ececea; --accent: #2f5d8a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141416; --panel: #1c1c1f; --ink: #ececef; --muted: #9a9aa2; --line: #2c2c31;
+    --arm: #7fb0e0; --joint: #ececef; --shadow: rgba(255,255,255,0.08); --trail: #e0c060;
+    --start: rgba(127,176,224,0.25); --goal: #77777e; --limit: #ff6b5e; --ok: #5cc28a; --bad: #ff7a70;
+    --tau: #7fb0e0; --grid: #26262a; --accent: #7fb0e0;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141416; --panel: #1c1c1f; --ink: #ececef; --muted: #9a9aa2; --line: #2c2c31;
+  --arm: #7fb0e0; --joint: #ececef; --shadow: rgba(255,255,255,0.08); --trail: #e0c060;
+  --start: rgba(127,176,224,0.25); --goal: #77777e; --limit: #ff6b5e; --ok: #5cc28a; --bad: #ff7a70;
+  --tau: #7fb0e0; --grid: #26262a; --accent: #7fb0e0;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+.lede { color: var(--muted); margin: 0 0 18px; max-width: 760px; }
+.summary { display: flex; gap: 24px; flex-wrap: wrap; margin: 0 0 18px; }
+.stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 13px; }
+.viewer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; margin-bottom: 22px; }
+@media (max-width: 760px) { .viewer { grid-template-columns: 1fr; } }
+.viewer h2 { font-size: 18px; margin: 0; }
+.viewer .meta { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
+#arm { width: 100%; aspect-ratio: 5 / 4; display: block; touch-action: none; cursor: grab; border-radius: 6px; }
+#tau { width: 100%; height: 330px; display: block; }
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+button, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button.on { background: var(--accent); color: var(--panel); border-color: var(--accent); }
+input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.hint { color: var(--muted); font-size: 12px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.filters .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  cursor: pointer; transition: border-color .15s; }
+.card:hover, .card.sel { border-color: var(--accent); }
+.card canvas { width: 100%; aspect-ratio: 6 / 5; display: block; }
+.card .row { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 13px; }
+.card .name { font-weight: 600; }
+.card .st { font-size: 12px; font-variant-numeric: tabular-nums; }
+.ok { color: var(--ok); } .bad { color: var(--bad); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.sw { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+.empty { color: var(--muted); padding: 30px 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Arm census</h1>
+<p class="lede">Every minimum-time motion of the six-joint arm benchmark, as the solver finds it.
+Each case is a jerk-limited move with a torque limit on every joint. A torque trace turns red where its
+joint rides its limit. Unsolved cases show the start pose (faint) and the goal pose (grey).</p>
+<div class="summary" id="summary"></div>
+
+<section class="viewer" id="viewer" hidden>
+  <div>
+    <h2 id="v-name"></h2>
+    <div class="meta" id="v-meta"></div>
+    <canvas id="arm" aria-label="The arm's motion"></canvas>
+    <div class="controls">
+      <button id="play">Pause</button>
+      <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Time">
+      <select id="speed" aria-label="Speed">
+        <option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option>
+      </select>
+    </div>
+    <div class="hint">Drag the arm to turn the view.</div>
+  </div>
+  <div>
+    <canvas id="tau" aria-label="Joint torques against their limits"></canvas>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--tau)"></i>torque ÷ limit</span>
+      <span><i class="sw" style="background:var(--limit)"></i>on the limit</span>
+      <span><i class="sw" style="background:var(--trail)"></i>tool path</span>
+    </div>
+  </div>
+</section>
+
+<div class="filters" id="filters"></div>
+<div class="grid" id="grid"></div>
+</main>
+
+<script>
+"use strict";
+const DATA = "data/";
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let colors = {};
+function readColors() {
+  for (const k of ["arm", "joint", "shadow", "trail", "start", "goal", "limit", "tau", "grid", "muted", "line", "ink"])
+    colors[k] = css("--" + k);
+}
+readColors();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readColors(); redrawAll(); });
+
+const cache = new Map();
+function load(file) {
+  if (!cache.has(file)) cache.set(file, fetch(DATA + file).then(r => r.json()));
+  return cache.get(file);
+}
+
+// ---- projection --------------------------------------------------------------
+const view = { yaw: -0.9, pitch: 0.42 };
+function project(p, w, h, scale) {
+  const [x, y, z] = p, c = Math.cos(view.yaw), s = Math.sin(view.yaw);
+  const xr = x * c - y * s, yr = x * s + y * c;
+  const up = z * Math.cos(view.pitch) + yr * Math.sin(view.pitch);
+  return [w / 2 + xr * scale, h * 0.56 - up * scale];
+}
+function sizeCanvas(cv) {
+  const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  const W = Math.max(1, Math.round(r.width * d)), H = Math.max(1, Math.round(r.height * d));
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  return [W, H, d];
+}
+function frameAt(d, tau) {   // index and blend at fraction tau of the motion
+  const n = d.points.length, x = tau * (n - 1), i = Math.min(n - 2, Math.floor(x));
+  return [i, x - i];
+}
+function lerpPts(a, b, f) { return a.map((p, k) => p.map((v, j) => v + (b[k][j] - v) * f)); }
+
+function reach(d) {   // the farthest any point gets from the base: the drawing's scale
+  if (!d._reach) {
+    let r = 0.3;
+    for (const P of [d.start, d.goal, ...(d.points || [])])
+      for (const [x, y, z] of P) r = Math.max(r, Math.hypot(x, y, z));
+    d._reach = r;
+  }
+  return d._reach;
+}
+function drawPose(ctx, pts, w, h, sc, color, width, dots) {
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath();
+  pts.forEach((p, k) => { const [u, v] = project(p, w, h, sc); k ? ctx.lineTo(u, v) : ctx.moveTo(u, v); });
+  ctx.stroke();
+  if (dots) {
+    ctx.fillStyle = colors.joint;
+    for (const p of pts) { const [u, v] = project(p, w, h, sc); ctx.beginPath(); ctx.arc(u, v, width * 0.45, 0, 7); ctx.fill(); }
+  }
+}
+let reach0 = 1;
+function drawFloor(ctx, w, h, sc) {
+  ctx.strokeStyle = colors.grid; ctx.lineWidth = Math.max(1, sc / 300);
+  for (const r of [0.4 * reach0, 0.8 * reach0]) {
+    ctx.beginPath();
+    for (let k = 0; k <= 48; k++) {
+      const a = k / 48 * 2 * Math.PI, [u, v] = project([r * Math.cos(a), r * Math.sin(a), 0], w, h, sc);
+      k ? ctx.lineTo(u, v) : ctx.moveTo(u, v);
+    }
+    ctx.stroke();
+  }
+}
+function drawArm(cv, d, tau, big) {
+  const [w, h, dpr] = sizeCanvas(cv), ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  const sc = Math.min(w, h) * (big ? 0.46 : 0.5) / reach(d);
+  reach0 = reach(d); drawFloor(ctx, w, h, sc);
+  const lw = (big ? 7 : 4) * dpr;
+  if (!d.points) {
+    drawPose(ctx, d.start, w, h, sc, colors.start, lw, false);
+    ctx.setLineDash([4 * dpr, 4 * dpr]);
+    drawPose(ctx, d.goal, w, h, sc, colors.goal, lw * 0.7, false);
+    ctx.setLineDash([]);
+    return;
+  }
+  const [i, f] = frameAt(d, tau), pts = lerpPts(d.points[i], d.points[i + 1], f);
+  // shadow
+  drawPose(ctx, pts.map(([x, y]) => [x, y, 0]), w, h, sc, colors.shadow, lw, false);
+  // tool path
+  ctx.strokeStyle = colors.trail; ctx.lineWidth = (big ? 2 : 1.2) * dpr; ctx.beginPath();
+  d.points.forEach((P, k) => { const [u, v] = project(P[P.length - 1], w, h, sc); k ? ctx.lineTo(u, v) : ctx.moveTo(u, v); });
+  ctx.stroke();
+  if (big) { ctx.setLineDash([4 * dpr, 4 * dpr]); drawPose(ctx, d.goal, w, h, sc, colors.goal, 1.5 * dpr, false); ctx.setLineDash([]); }
+  drawPose(ctx, pts, w, h, sc, colors.arm, lw, big);
+}
+
+function drawTau(cv, d, tau) {
+  const [w, h, dpr] = sizeCanvas(cv), ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = `${12 * dpr}px system-ui, sans-serif`; ctx.textBaseline = "middle";
+  const rows = 6, gap = 8 * dpr, left = 64 * dpr, right = 8 * dpr, rh = (h - gap * (rows - 1)) / rows;
+  if (!d.tau) {
+    ctx.fillStyle = colors.muted; ctx.fillText("Not solved: " + (d.message || ""), 0, h / 2); return;
+  }
+  const T = d.t[d.t.length - 1], n = d.t.length;
+  for (let j = 0; j < rows; j++) {
+    const top = j * (rh + gap), lim = d.torque_limits[j] || 1;
+    const X = t => left + (w - left - right) * t / T, Y = r => top + rh / 2 - r * (rh / 2) * 0.9;
+    ctx.fillStyle = colors.muted; ctx.fillText(`joint ${j + 1}`, 0, top + rh / 2 - 7 * dpr);
+    ctx.fillText(`±${lim.toPrecision(3)}`, 0, top + rh / 2 + 8 * dpr);
+    ctx.strokeStyle = colors.grid; ctx.lineWidth = dpr;
+    for (const r of [1, 0, -1]) { ctx.beginPath(); ctx.moveTo(left, Y(r)); ctx.lineTo(w - right, Y(r)); ctx.stroke(); }
+    // trace, red where the joint rides its limit
+    for (let k = 1; k < n; k++) {
+      const r0 = d.tau[k - 1][j] / lim, r1 = d.tau[k][j] / lim;
+      const on = Math.abs(r0) > 0.999 && Math.abs(r1) > 0.999;
+      ctx.strokeStyle = on ? colors.limit : colors.tau; ctx.lineWidth = (on ? 3 : 1.6) * dpr;
+      ctx.beginPath(); ctx.moveTo(X(d.t[k - 1]), Y(r0)); ctx.lineTo(X(d.t[k]), Y(r1)); ctx.stroke();
+    }
+  }
+  const x = left + (w - left - right) * tau;
+  ctx.strokeStyle = colors.ink; ctx.lineWidth = dpr; ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); ctx.globalAlpha = 1;
+}
+
+// ---- state -------------------------------------------------------------------
+let manifest = [], current = null, playing = true, speed = 1, clock = 0, last = performance.now();
+const filters = { family: "all", status: "all", sort: "name" };
+const cards = new Map(), visible = new Set();
+
+function fmtCase(c) {
+  return c.solved ? `<span class="st ok">${c.seconds?.toFixed?.(0) ?? "?"} s</span>` : `<span class="st bad">unsolved</span>`;
+}
+function summary() {
+  const n = manifest.length, solved = manifest.filter(c => c.solved);
+  const times = solved.map(c => c.seconds).sort((a, b) => a - b);
+  const med = times.length ? times[Math.floor((times.length - 1) / 2)] : NaN;
+  document.getElementById("summary").innerHTML = [
+    [`${solved.length} / ${n}`, "solved"], [solved.filter(c => c.seconds < 60).length, "under 60 s"],
+    [isNaN(med) ? "–" : `${med.toFixed(0)} s`, "median solve time"]]
+    .map(([b, s]) => `<div class="stat"><b>${b}</b><span>${s}</span></div>`).join("");
+}
+function buildFilters() {
+  const fams = [...new Set(manifest.map(c => c.family))];
+  const el = document.getElementById("filters");
+  const group = (key, opts) => opts.map(([v, label]) =>
+    `<button data-k="${key}" data-v="${v}" class="${filters[key] === v ? "on" : ""}">${label}</button>`).join("");
+  el.innerHTML = group("family", [["all", "All"], ...fams.map(f => [f, f])]) + `<span class="sep"></span>`
+    + group("status", [["all", "Any"], ["solved", "Solved"], ["unsolved", "Unsolved"]]) + `<span class="sep"></span>`
+    + group("sort", [["name", "By name"], ["seconds", "By solve time"], ["tf", "By motion time"]]);
+  el.querySelectorAll("button").forEach(b => b.onclick = () => { filters[b.dataset.k] = b.dataset.v; buildFilters(); buildGrid(); });
+}
+function order(a, b) {
+  if (filters.sort === "seconds") return (a.solved ? a.seconds : 1e9) - (b.solved ? b.seconds : 1e9);
+  if (filters.sort === "tf") return (a.tf ?? 1e9) - (b.tf ?? 1e9);
+  return a.family.localeCompare(b.family) || a.index - b.index
+    || String(b.setting ?? "").localeCompare(String(a.setting ?? ""), undefined, { numeric: true });
+}
+const io = new IntersectionObserver(es => es.forEach(e => {
+  const name = e.target.dataset.name;
+  if (e.isIntersecting) {
+    visible.add(name);
+    const c = cards.get(name);
+    if (!c.data) load(c.meta.file).then(d => { c.data = d; drawCard(c); });
+  } else visible.delete(name);
+}), { rootMargin: "200px" });
+function buildGrid() {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = ""; io.disconnect(); visible.clear();
+  const list = manifest.filter(c => (filters.family === "all" || c.family === filters.family)
+    && (filters.status === "all" || (filters.status === "solved") === c.solved)).sort(order);
+  if (!list.length) { grid.innerHTML = `<div class="empty">No cases match.</div>`; return; }
+  for (const meta of list) {
+    const el = document.createElement("div");
+    el.className = "card" + (current && current.name === meta.name ? " sel" : "");
+    el.dataset.name = meta.name;
+    el.innerHTML = `<canvas></canvas><div class="row"><span class="name">${meta.name}</span>${fmtCase(meta)}</div>`;
+    el.onclick = () => select(meta.name, true);
+    grid.appendChild(el);
+    const prev = cards.get(meta.name);
+    cards.set(meta.name, { meta, el, canvas: el.querySelector("canvas"), data: prev?.data });
+    io.observe(el);
+  }
+}
+function drawCard(c) {
+  if (!c.data) return;
+  const d = c.data, dur = d.t ? d.t[d.t.length - 1] : 1;
+  const cycle = dur + 0.6, t = (clock % cycle) / dur;
+  drawArm(c.canvas, d, Math.min(1, t), false);
+}
+function redrawAll() {
+  for (const n of visible) drawCard(cards.get(n));
+  if (current) drawViewer();
+}
+
+// ---- viewer ------------------------------------------------------------------
+let vt = 0;   // fraction of the motion shown in the viewer
+async function select(name, scroll) {
+  const meta = manifest.find(c => c.name === name);
+  if (!meta) return;
+  current = await load(meta.file);
+  vt = 0; playing = true; document.getElementById("play").textContent = "Pause";
+  document.getElementById("viewer").hidden = false;
+  document.getElementById("v-name").textContent = current.name;
+  const lim = current.torque_limits.map(v => v.toPrecision(3)).join(", ");
+  document.getElementById("v-meta").innerHTML = (current.solved
+    ? `<span class="ok">Solved</span> in ${current.seconds} s · motion time ${current.tf.toFixed(4)} s`
+    : `<span class="bad">Not solved</span> · ${current.message ?? ""}`)
+    + `<br>${current.setting ? `limits at ${current.setting} · ` : ""}torque limits [${lim}]`;
+  document.querySelectorAll(".card").forEach(e => e.classList.toggle("sel", e.dataset.name === name));
+  if (location.hash.slice(1) !== name) history.replaceState(null, "", "#" + encodeURIComponent(name));
+  if (scroll) document.getElementById("viewer").scrollIntoView({ behavior: "smooth", block: "start" });
+  drawViewer();
+}
+function drawViewer() {
+  drawArm(document.getElementById("arm"), current, vt, true);
+  drawTau(document.getElementById("tau"), current, vt);
+  document.getElementById("scrub").value = Math.round(vt * 1000);
+}
+document.getElementById("play").onclick = e => { playing = !playing; e.target.textContent = playing ? "Pause" : "Play"; };
+document.getElementById("scrub").oninput = e => { vt = e.target.value / 1000; playing = false;
+  document.getElementById("play").textContent = "Play"; drawViewer(); };
+document.getElementById("speed").onchange = e => speed = +e.target.value;
+(() => {   // drag to turn the view
+  const cv = document.getElementById("arm"); let drag = null;
+  cv.addEventListener("pointerdown", e => { drag = [e.clientX, e.clientY, view.yaw, view.pitch]; cv.setPointerCapture(e.pointerId); cv.style.cursor = "grabbing"; });
+  cv.addEventListener("pointermove", e => {
+    if (!drag) return;
+    view.yaw = drag[2] + (e.clientX - drag[0]) * 0.01;
+    view.pitch = Math.max(-0.2, Math.min(1.45, drag[3] + (e.clientY - drag[1]) * 0.01));
+    redrawAll();
+  });
+  cv.addEventListener("pointerup", () => { drag = null; cv.style.cursor = "grab"; });
+})();
+
+function tick(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now; clock += dt;
+  if (current && current.t && playing) {
+    const T = current.t[current.t.length - 1];
+    vt += dt * speed / T;
+    if (vt > 1.25) vt = 0;   // hold the end pose briefly
+    const shown = vt; vt = Math.min(vt, 1.25);
+    drawArm(document.getElementById("arm"), current, Math.min(1, shown), true);
+    drawTau(document.getElementById("tau"), current, Math.min(1, shown));
+    document.getElementById("scrub").value = Math.round(Math.min(1, shown) * 1000);
+  }
+  for (const n of visible) drawCard(cards.get(n));
+  requestAnimationFrame(tick);
+}
+window.addEventListener("resize", redrawAll);
+
+fetch(DATA + "manifest.json").then(r => r.json()).then(m => {
+  manifest = m.cases;
+  summary(); buildFilters(); buildGrid();
+  const want = decodeURIComponent(location.hash.slice(1));
+  const first = manifest.find(c => c.name === want) || manifest.filter(c => c.solved).sort(order)[0] || manifest[0];
+  if (first) select(first.name, false);
+  requestAnimationFrame(tick);
+}).catch(err => {
+  document.getElementById("grid").innerHTML =
+    `<div class="empty">Could not load the census data (${err}). Export it with
+     <code>benchmarks/arm_census.py OUT --export docs/_static/census/data</code>.</div>`;
+});
+</script>
+</body>
+</html>
