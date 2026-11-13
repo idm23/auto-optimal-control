@@ -89,3 +89,66 @@ def test_birth_fraction_is_the_secant_root():
     # The smallest fraction over the limits that overshot, clipped to [0.05, 0.9].
     assert h._birth_fraction(None, None, {0: 0.9, 1: 1e6}, scale) == pytest.approx(0.05)
     assert h._birth_fraction(None, None, {}, scale) is None
+
+
+def _stub_structure(arcs, values, orders, T=2.0):
+    """A Homotopy and a stand-in multi-arc shooting whose structure is ``(arcs, values)``."""
+    import types
+
+    import numpy as np
+
+    from auto_optimal_control.homotopy import MultiArcShooting
+
+    h = Homotopy.__new__(Homotopy)
+    h.kr = types.SimpleNamespace(CONSTRAINT_ORDERS=np.asarray(orders))
+    h.diagnostics = Diagnostics()
+    h._arcs_of = lambda shoot, v: (list(arcs), list(values))
+    shoot = MultiArcShooting.__new__(MultiArcShooting)
+    shoot.t0 = 0.0
+    shoot.unpack = lambda v: (None, None, None, T)
+    shoot.in_order = lambda v: True
+    return h, shoot
+
+
+def test_collapsed_order1_arc_becomes_a_touch_only_under_r20():
+    """Rule R20: an order-1 arc of zero width that still carries a jump is kept as a
+    touch point; without the rule, or with no jump, it goes."""
+    import numpy as np
+
+    arcs = [("boundary", 0), ("boundary", 1)]
+    values = [(0.1, 0.4, np.array([0.015])), (0.6312, 0.6312, np.array([2.7e-6]))]
+    h, shoot = _stub_structure(arcs, values, [1, 1])
+    h.collapsed_touches = False
+    assert h._retire(shoot, None) == ([("boundary", 0)], [values[0]])
+    h.collapsed_touches = True
+    out_a, out_v = h._retire(shoot, None)
+    assert out_a == [("boundary", 0), ("touch", 1)]
+    assert out_v[1] == pytest.approx((0.6312, 2.7e-6))
+    assert h.diagnostics.rules.get("R20 collapse") == 1
+    # A collapsed arc whose jump is zero is gone, as before.
+    values[1] = (0.6312, 0.6312, np.array([0.0]))
+    h, shoot = _stub_structure(arcs, values, [1, 1])
+    h.collapsed_touches = True
+    assert h._retire(shoot, None) == ([("boundary", 0)], [values[0]])
+
+
+def test_order1_touches_become_short_arcs_for_the_exact_solve():
+    """Rule R20: the exact problem gets each order-1 touch as an arc centred on it,
+    carrying its jump; touches of higher order stay touches."""
+    import numpy as np
+
+    arcs = [("boundary", 0), ("touch", 1), ("touch", 2)]
+    values = [(0.1, 0.4, np.array([0.015])), (0.63, 3e-6), (1.2, 0.5)]
+    h, shoot = _stub_structure(arcs, values, [1, 1, 2], T=1.5)
+    out = h._touch_arcs(shoot, None, widths=(1e-3, 1e-2))
+    assert len(out) == 2
+    for (new_a, new_v), rel in zip(out, (1e-3, 1e-2)):
+        assert new_a == [("boundary", 0), ("boundary", 1), ("touch", 2)]
+        lo, hi, pi = new_v[1]
+        assert (lo + hi) / 2 == pytest.approx(0.63)
+        assert hi - lo == pytest.approx(rel * 1.5)
+        assert pi.tolist() == [3e-6]
+        assert new_v[2] == (1.2, 0.5)
+    # Nothing to do without an order-1 touch.
+    h, shoot = _stub_structure(arcs[:1] + arcs[2:], values[:1] + values[2:], [1, 1, 2])
+    assert h._touch_arcs(shoot, None) == []

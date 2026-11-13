@@ -565,9 +565,12 @@ class MultiArcShooting(SingleShooting):
     backward_fallback_default = False      # rule R10b: tried, no gain (see the note)           # rule R9: tried, worse on the census (see the note)
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
-                 atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1):
+                 atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1,
+                 order1_touches=None):
         super().__init__(kernels, params, x0=x0, method=method, rtol=rtol, atol=atol,
                          n_interior=0)
+        if order1_touches is None:
+            order1_touches = MultiArcShooting.order1_touches_default
         self.nodes = int(nodes)
         if self.nodes < 1:
             raise ValueError("nodes must be at least 1")
@@ -637,8 +640,7 @@ class MultiArcShooting(SingleShooting):
                     raise ValueError(f"path constraint {k.CONSTRAINT_NAMES[c]!r}: {why}")
                 q = k.CONSTRAINT_ORDERS[c]
                 if kind == "touch" and q < 2 and not (
-                        MultiArcShooting.order1_touches_default
-                        and k.system.problem.control_sets and not k.N_SWITCHING):
+                        order1_touches and k.system.problem.control_sets and not k.N_SWITCHING):
                     raise ValueError("touch points are for constraints of order 2 or more "
                                      "(or order 1 with bounded controls and no bang-bang)")
                 if kind == "boundary":
