@@ -314,6 +314,12 @@ class Homotopy:
         #: an extremal with a strictly convex Hamiltonian; it stands in for an arc too
         #: short to solve, and grows back into one when a violation appears beside it.
         self.collapsed_touches = False
+        #: The exact solve starts with Newton steps (fresh Jacobians) from the path
+        #: solution, and falls back to MINPACK only if they do not reach the tolerance.
+        self.exact_newton = True
+        #: The separate seed traces all moving components at once (one integration per
+        #: step) rather than one at a time.
+        self.joint_seed = True
         #: Rule R21: an exact solution rejected because an order-1 arc's multiplier
         #: rises (Lemma H) is split there, settled on the route at the end of the
         #: offsets (new violations brought in), and solved exactly again.
@@ -539,6 +545,34 @@ class Homotopy:
         rng = np.random.default_rng(0)
         start = max(float(_draw(final_time, rng)) for _ in range(8)) if callable(final_time) \
             else float(np.max(final_time[1]))
+        if self.joint_seed:
+            # The components are independent, so one trace of all the moving ones at once
+            # ends where the whole system's H is zero: the same common time the
+            # one-at-a-time traces interpolate to, for one integration per step instead
+            # of one per component.
+            moving = []
+            for states, rows in blocks:
+                system = self._block_system(shoot, states, rows)
+                if np.max(np.abs(system(np.zeros(len(states)), start, False)[0])) >= tol:
+                    moving.append((states, rows))
+            if not moving:
+                return None
+            states = np.concatenate([np.atleast_1d(st) for st, _ in moving])
+            rows = np.concatenate([np.atleast_1d(rw) for _, rw in moving])
+            system = self._block_system(shoot, states, rows)
+            path = self._shrink(shoot, system, states, start, tol)
+            if path is not None and path[-1][2] == 0.0:
+                T, lam = path[-1][0], path[-1][1]
+                self._say(f"separate seed: t_f = {T:.6f}")
+                lam0 = np.zeros(n)
+                lam0[states] = lam
+                try:
+                    r = whole._propagate(np.concatenate([whole.x0, lam0]), T, stm=False)
+                except _FAILURES:
+                    r = None
+                if r is not None:
+                    return whole.pack(lam0, r["z"][n:n + k.N_MULTIPLIERS], T)
+            # Otherwise the one-at-a-time traces below.
         paths = []
         for states, rows in blocks:
             system = self._block_system(shoot, states, rows)
@@ -2054,9 +2088,11 @@ class Homotopy:
                     sol = shoot.solve_damped(v, tol=tol, max_seconds=60.0)
                 else:
                     # A good path solution is one or two Newton steps away; MINPACK can
-                    # throw it far off.
-                    sol = shoot.solve(v, method=method, tol=tol,
-                                      options=_budget(method, 4 * self.attempt_evaluations))
+                    # throw it far off, and takes many more evaluations to get there.
+                    sol = shoot.solve_newton(v, tol=tol) if self.exact_newton else None
+                    if sol is None or not sol.success:
+                        sol = shoot.solve(v, method=method, tol=tol,
+                                          options=_budget(method, 4 * self.attempt_evaluations))
                     if not sol.success and method == "hybr" and kx.system.riding is not None:
                         other = shoot.solve_chord(v, tol=tol)
                         sol = other if other.residual_norm < sol.residual_norm else sol

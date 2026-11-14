@@ -70,6 +70,27 @@ def test_min_time_solve_matches_closed_form(compiled):
     np.testing.assert_allclose(tr["switch_times"], [ts], rtol=1e-10)
 
 
+def test_newton_polishes_a_near_guess_past_the_tolerance(compiled):
+    """solve_newton: from a guess close to the answer it converges quadratically, takes
+    one step past ``tol`` (``polish``), and stops at the first step that does not help."""
+    k = compiled["min_time"][2]
+    shoot = SingleShooting(k, MIN_TIME)
+    umax, a = MIN_TIME[0], MIN_TIME[1]
+    ts = np.sqrt(a / umax)
+    exact = shoot.solve(shoot.guess_multipliers([1.0 / (umax * ts), 1.0 / umax], tf=2 * ts))
+    assert exact.success
+    near = exact.v * (1 + 1e-5)
+    sol = shoot.solve_newton(near, tol=1e-8)
+    assert sol.success and sol.residual_norm < 1e-8
+    np.testing.assert_allclose(sol.v, exact.v, rtol=1e-10)
+    loose = shoot.solve_newton(near, tol=1e-8, polish=0)
+    assert loose.success and loose.nfev <= sol.nfev
+    assert sol.residual_norm <= loose.residual_norm
+    # A guess too far for Newton fails cleanly and leaves MINPACK to the caller.
+    far = shoot.solve_newton(exact.v * 3.0, tol=1e-12, max_iterations=1, polish=0)
+    assert not far.success
+
+
 def test_zermelo_solve(compiled):
     k = compiled["zermelo"][2]
     p = [1.0, 1.0, 1.0, 0.5]
