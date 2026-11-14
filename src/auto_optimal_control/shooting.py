@@ -396,6 +396,46 @@ class SingleShooting:
                                 residual_norm=err, success=err < tol, nfev=nfev, result=None,
                                 max_violation=0.0)
 
+    def solve_newton(self, guess, tol=1e-10, max_iterations=5, polish=1):
+        """Newton's method with a fresh Jacobian at every step, for a guess already
+        close to a solution (a path solution handed to the exact problem).
+
+        Every residual is the one evaluated with the Jacobian, the same one MINPACK
+        judges convergence by: the residual alone is integrated without the
+        sensitivities and can sit a little above it. A step counts only if it lowers
+        ``||R||``; the iteration stops at the first that does not. Once below ``tol``,
+        ``polish`` more steps are taken (convergence is quadratic there), so the answer
+        is as tight as the integration allows rather than just inside ``tol``. Returns
+        a ``ShootingSolution`` (``max_violation`` is not computed)."""
+        v = np.asarray(guess, dtype=float).copy()
+        R, J = self._safe(v)
+        err = float(np.linalg.norm(R))
+        nfev = 1
+        extra = polish
+        for _ in range(max_iterations + polish):
+            if not np.isfinite(err):
+                break
+            if err < tol:
+                if extra <= 0:
+                    break
+                extra -= 1
+            try:
+                dv = np.linalg.solve(J, -R)
+            except np.linalg.LinAlgError:
+                break
+            if not np.all(np.isfinite(dv)):
+                break
+            Rt, Jt = self._safe(v + dv)
+            nfev += 1
+            trial = float(np.linalg.norm(Rt))
+            if not (np.isfinite(trial) and trial < err):
+                break
+            v, R, J, err = v + dv, Rt, Jt, trial
+        x0, lam0, nu, tf = self.unpack(v)
+        return ShootingSolution(v=v, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
+                                residual_norm=err, success=bool(err < tol), nfev=nfev,
+                                result=None, max_violation=0.0)
+
     def multistart(self, sample, n_tries=50, seed=0, **solve_options):
         """Solve from random guesses ``sample(rng) -> v`` until one succeeds.
 
