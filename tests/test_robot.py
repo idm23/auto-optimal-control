@@ -251,6 +251,48 @@ def test_bounded_jerks_at_run_time_agree_with_the_clipped_law(clipped_two_ways):
 
 
 @pytest.mark.slow
+def test_held_set_events_follow_the_riding_in_fewer_steps(clipped_two_ways):
+    """With held-set events a boundary arc's flow and STM are those of stepping across
+    the riding's kinks, closer to a tight reference, in fewer evaluations; an arc whose
+    held set does not change is integrated as before, and kernels without run-time
+    riding ignore the option."""
+    ks, kn = clipped_two_ways
+    p = np.array([1, 1, 1, 1, 1.5, 1, 1.0, 2.2, 2.0])
+    rng = np.random.default_rng(3)
+    opts = dict(rtol=1e-12, atol=1e-12, stm=True)
+    nfev_old = nfev_new = changed = unchanged = 0
+    err_old, err_new = [], []
+    for arc in range(4):
+        for _ in range(40):
+            z = rng.uniform(-1.5, 1.5, ks.N_Z)
+            z[ks.N_STATES:] *= rng.choice([0.01, 0.05, 0.3])
+            try:
+                kn.boundary_control(arc, 0.3, z, p)
+                a = kn.propagate_boundary(arc, 0.3, z, 0.8, p, **opts)
+            except RuntimeError:
+                continue
+            b = kn.propagate_boundary(arc, 0.3, z, 0.8, p, held_events=True, **opts)
+            assert b["held_resets"] is not None          # no fallback
+            np.testing.assert_allclose(b["z"], a["z"], rtol=0, atol=1e-9)
+            if not b["held_resets"]:
+                unchanged += 1
+                np.testing.assert_allclose(b["stm"], a["stm"], rtol=0, atol=1e-10)
+                continue
+            changed += 1
+            nfev_old += a["nfev"]
+            nfev_new += b["nfev"]
+            ref = kn.propagate_boundary(arc, 0.3, z, 0.8, p, held_events=True,
+                                        **dict(opts, rtol=1e-14, atol=1e-15))
+            err_old.append(np.max(np.abs(a["stm"] - ref["stm"])))
+            err_new.append(np.max(np.abs(b["stm"] - ref["stm"])))
+    assert changed >= 10 and unchanged >= 10
+    assert nfev_new < 0.5 * nfev_old
+    assert np.median(err_new) < 0.1 * np.median(err_old) and max(err_new) < 1e-8
+    z = np.zeros(ks.N_Z)
+    assert ks.propagate_boundary(0, 0.0, z, 0.1, p, held_events=True)["held_resets"] is None
+
+
+@pytest.mark.slow
 @pytest.mark.parametrize("taus, t_f", [((2.2, 2.0), 3.656661), ((1.5, 0.4), 4.164857)])
 def test_minimum_time_through_run_time_arcs(kernel_cache, taus, t_f):
     # The same answers as the symbolic route: the benchmark's times, seeded with no draws.
