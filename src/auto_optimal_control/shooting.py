@@ -602,10 +602,11 @@ class MultiArcShooting(SingleShooting):
     backward_default = True
     #: Where riding backward fails, continue the negative-width arc on the free law
     #: (rule R10b): continuous, so Newton can step back.
+    backward_fallback_default = False      # rule R10b: tried, no gain (see the note)
     #: On a boundary arc ridden at run time, stop the step where the riding's held set
     #: changes (an event per control) rather than step across the kink in the flow.
-    held_events_default = False
-    backward_fallback_default = False      # rule R10b: tried, no gain (see the note)           # rule R9: tried, worse on the census (see the note)
+    #: The flow is continuous there, so the STM carries straight through.
+    held_events_default = True
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1,

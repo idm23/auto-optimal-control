@@ -378,6 +378,43 @@ route stalls.
 - **Used by.** R20, which carries the touch only as a stand-in on the route
   and gives the exact problem the arc.
 
+### R. A change of held set is continuous, so the STM does not jump — proved
+
+- **Statement.** Assume C1 and the hypotheses of Lemma B on a boundary arc,
+  so the riding program (minimize $\tfrac12 u^\top R u + c(z)^\top u$
+  subject to $A(z) u + b(z) = 0$ and $u \in U$, a box) has a unique solution
+  $u^*(z)$. For a held set $B$, let $u_B(z)$ be the solution of the KKT
+  system with the controls in $B$ fixed at their bounds and the rest free,
+  with bound multipliers $\nu_B(z)$. Let $t_e$ be a time where control $k$'s
+  guard is zero: either $k \notin B$ and $u_{B,k} $ is at a bound, or
+  $k \in B$ and $\nu_{B,k} = 0$. Let $B' = B \,\triangle\, \{k\}$. Then:
+  1. $u_B(z(t_e)) = u_{B'}(z(t_e))$, so the vector field is continuous at
+     $t_e$;
+  2. if the guard crosses zero transversally, the saltation matrix is the
+     identity, and the STM passes through $t_e$ unchanged.
+- **Proof.**
+  - Case $k \notin B$ at a bound. The point $u_B$ satisfies stationarity with
+    no multiplier on control $k$. Fixing $k$ at that bound, with
+    $\nu_k = 0$, it satisfies the $B'$ system too. Lemma B makes that system
+    nonsingular, so its solution is unique and equals $u_B$.
+  - Case $k \in B$ with $\nu_{B,k} = 0$. Releasing $k$ removes a constraint
+    whose multiplier is zero. So $u_B$ satisfies the $B'$ system's
+    stationarity, and $k$'s value is its bound. By uniqueness again,
+    $u_{B'} = u_B$.
+  - The saltation matrix at a transversal crossing of a guard $h$ is
+    $I + (f^+ - f^-)\,\nabla h^\top / (\nabla h^\top f^-)$. By (1),
+    $f^+ = f^-$, so it is $I$.
+- **Depends on.** Lemma B; the saltation formula (S3 for each smooth piece,
+  plus the implicit function theorem at the crossing, S2).
+- **Gap.** A grazing guard ($\nabla h^\top f^- = 0$) is not covered. The
+  integrator then re-probes the guard and, if the held set it computes is
+  the same, stays on it; more than 64 changes on one arc fall back to the
+  integration without events.
+- **To formalize.** Short: uniqueness for a nonsingular linear system, and
+  the saltation formula.
+- **Used by.** R22. It is a rule of the machinery: the flow integrated is
+  the same flow, so no answer is accepted on its account.
+
 ### Observation O3: what the direct comparison shows for the unsolved cases
 
 The direct transcription (`auto_optimal_control.direct`) was run at 120 and 240
