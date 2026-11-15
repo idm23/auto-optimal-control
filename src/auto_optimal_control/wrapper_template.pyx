@@ -58,6 +58,10 @@ cdef extern from "{{header}}" nogil:
     int P_hamiltonian "{{P}}hamiltonian"(double t, const double* z, const double* p, double* H)
     int P_cost_rate "{{P}}cost_rate"(double t, const double* z, const double* p, double* L)
     int P_cost_rate_arc "{{P}}cost_rate_arc"(double t, const double* z, const double* p, const int* arc, double* L)
+    int P_b_held_start "{{P}}boundary_held_start"(int c, double t, const double* z, const double* p, int* held)
+    int P_b_held_fix "{{P}}boundary_held_fix"(int c, const int* held)
+    int P_b_held_guards "{{P}}boundary_held_guards"(int c, double t, const double* z, const double* p, double* g)
+    int P_b_held_flip "{{P}}boundary_held_flip"(int c, double t, const double* z, const double* p, int k, int* held)
     int P_residual "{{P}}residual"(const double* z0, const double* zf, const double* nu, double tf, const double* p, double* R)
     int P_residual_jac "{{P}}residual_jac"(const double* z0, const double* zf, const double* nu, double tf, const double* p, double* Rz0, double* Rzf, double* Rnu, double* Rtf, double* Rp)
 
@@ -87,6 +91,9 @@ cdef enum:
     NE = {{NM}} + {{NC}} + {{NK}}
     NE1 = {{NM1}} + {{NC1}} + {{NK1}}
     NNU1 = {{NNU1}}
+    # Held-set guards on a boundary arc whose riding is solved at run time: one per control
+    NH = {{NH}}
+    NH1 = {{NH1}}
 
 N_STATES = NZ // 2
 N_Z = NZ
@@ -1514,17 +1521,142 @@ def tangency_gradient(c, double t, z, params=None):
 
 def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, cost=False,
                        method="DOP853", double rtol=1e-10, double atol=1e-12, first_step=None,
-                       double max_step=np.inf, Py_ssize_t max_nfev=0, stm_rtol=None):
+                       double max_step=np.inf, Py_ssize_t max_nfev=0, stm_rtol=None,
+                       held_events=False, Py_ssize_t max_held_resets=64):
     """Integrate along a boundary arc of constraint ``c`` from ``t0`` to ``t1``.
 
-    No events are watched: the arc's control holds ``g^(q) = 0``, so ``g``
-    stays at zero if ``N = 0`` at ``t0``. ``max_nfev`` is as in
-    :func:`propagate`. Returns a dict with ``t``, ``z``,
-    ``stm`` (NZ, NZ) or None, ``cost`` or None, ``dz_dt1``, ``nfev`` and
-    ``status``.
+    The arc's control holds ``g^(q) = 0``, so ``g`` stays at zero if ``N = 0``
+    at ``t0``: its own limit is not watched. With ``held_events`` (riding
+    solved at run time) the held set of the riding program is fixed between
+    events, one guard per control marks where it changes, and the step restarts
+    there instead of crossing the kink in the flow; the flow is continuous
+    through it, so ``z`` and the STM do not jump. More than ``max_held_resets``
+    changes, or a change the riding cannot follow, falls back to the integration
+    without events. ``max_nfev`` is as in :func:`propagate`. Returns a dict with
+    ``t``, ``z``, ``stm`` (NZ, NZ) or None, ``cost`` or None, ``dz_dt1``,
+    ``nfev``, ``status`` and ``held_resets`` (None without events).
     """
+    if held_events and NH:
+        r = _propagate_held(_exact(c), t0, z0, t1, params, stm, cost, method, rtol, atol,
+                            first_step, max_step, max_nfev, stm_rtol, max_held_resets)
+        if r is not None:
+            return r
     return _propagate_on(_exact(c), 0, t0, z0, t1, params, stm, cost, method, rtol, atol,
                          first_step, max_step, max_nfev, stm_rtol)
+
+
+cdef struct _held_shared:
+    double t
+    double z[NZ]
+    int filled
+    double g[NH1]
+    int failed
+
+
+cdef struct _held_ctx:
+    const double* p
+    int c
+    int k
+    _held_shared* shared
+
+
+cdef int _held_fn(double t, const double* y, Py_ssize_t n, void* ctx, double* g) noexcept nogil:
+    cdef _held_ctx* h = <_held_ctx*> ctx
+    cdef _held_shared* v = h.shared
+    cdef int rc
+    if not (v.filled and v.t == t and memcmp(v.z, y, NZ * sizeof(double)) == 0):
+        rc = P_b_held_guards(h.c, t, y, h.p, v.g)
+        if rc != 0:
+            return rc
+        v.t = t
+        memcpy(v.z, y, NZ * sizeof(double))
+        v.filled = 1
+    g[0] = v.g[h.k]
+    return 0
+
+
+cdef int _held_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n, void* ctx) noexcept nogil:
+    """At a root of guard ``event``: the next held set becomes the fixed one. The flow is
+    continuous through the change, so ``y`` (and the STM in it) is left alone."""
+    cdef _held_ctx* h = (<_held_ctx*> ctx) + event
+    cdef int held[NH1]
+    if P_b_held_flip(h.c, t, y, h.p, h.k, held) != 0:
+        h.shared.failed = 1
+        return FNI_RESET_STOP
+    h.shared.filled = 0
+    return FNI_RESET_CONTINUE
+
+
+def _propagate_held(int c, double t0, z0, double t1, params, stm, cost, method, double rtol,
+                    double atol, first_step, double max_step, Py_ssize_t max_nfev, stm_rtol,
+                    Py_ssize_t max_resets):
+    """:func:`propagate_boundary` with held-set events, or None to integrate without."""
+    cdef _b_ctx ctx
+    cdef fni_options opt
+    cdef fni_hybrid_options hopt
+    cdef fni_stats st
+    cdef fni_event events[NH1]
+    cdef _held_ctx hc[NH1]
+    cdef _held_shared shared
+    cdef int held[NH1]
+    cdef int rc, meth, k
+    cdef Py_ssize_t ny = NZ + (NZ * NZ if stm else 0) + (1 if cost else 0)
+    if method not in _METHODS:
+        raise ValueError(f"method must be one of {list(_METHODS)}")
+    meth = _METHODS[method]
+    ctx.c = c
+    ctx.singular = 0
+    ctx.calls = 0
+    ctx.max_calls = max_nfev
+    _setup_options(&opt, rtol, atol, first_step, max_step, 0)
+    cdef double[::1] rvec, avec
+    if stm and stm_rtol is not None:
+        tolerances = _tolerances(ny, NZ * NZ, rtol, atol, float(stm_rtol))
+        rvec, avec = tolerances
+        opt.rtol_vec = &rvec[0]
+        opt.atol_vec = &avec[0]
+    p_arr = _params(params)
+    y = _initial_y(_buffer(z0, NZ, "z0")[:NZ], stm, ny)
+    y_out = np.zeros(ny)
+    cdef double[::1] pv = p_arr
+    cdef double[::1] yv = y
+    cdef double[::1] yo = y_out
+    cdef fni_rhs_fn fn = _b_stm_fn if stm else _b_rhs_fn
+    ctx.p = &pv[0]
+    shared.filled = 0
+    shared.failed = 0
+    for k in range(NH):
+        hc[k].p = &pv[0]
+        hc[k].c = c
+        hc[k].k = k
+        hc[k].shared = &shared
+        events[k].fn = _held_fn
+        events[k].ctx = &hc[k]
+        events[k].direction = 0.0
+        events[k].max_events = 1.0
+    hopt.max_resets = max_resets
+    hopt.min_dwell = 0.0
+    hopt.reselect_step = False
+    with nogil:
+        rc = P_b_held_start(c, t0, &yv[0], &pv[0], held)
+        if rc == 0:
+            P_b_held_fix(c, held)
+            rc = fni_integrate_hybrid(meth, fn, &ctx, ny, t0, &yv[0], t1, &opt, events, NH,
+                                      _held_reset, &hc[0], &hopt, &yo[0], NULL, NULL, NULL,
+                                      NULL, NULL, 0, &st, NULL)
+        P_b_held_fix(c, NULL)
+    if rc != FNI_OK or shared.failed or st.status != 0:
+        return None
+    return {
+        "t": st.t_final,
+        "z": y_out[:NZ].copy(),
+        "stm": y_out[NZ:NZ + NZ * NZ].reshape(NZ, NZ).copy() if stm else None,
+        "cost": float(y_out[ny - 1]) if cost else None,
+        "dz_dt1": boundary_rhs(c, st.t_final, y_out[:NZ], p_arr[:NP] if NP else None),
+        "nfev": st.nfev,
+        "status": st.status,
+        "held_resets": st.n_records,
+    }
 
 
 def _propagate_on(int c, int singular, double t0, z0, double t1, params, stm, cost, method,
@@ -1571,6 +1703,7 @@ def _propagate_on(int c, int singular, double t0, z0, double t1, params, stm, co
             ctx.c, st.t_final, y_out[:NZ], p_arr[:NP] if NP else None),
         "nfev": st.nfev,
         "status": st.status,
+        "held_resets": None,
     }
 
 

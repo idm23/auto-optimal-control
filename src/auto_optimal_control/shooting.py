@@ -602,7 +602,11 @@ class MultiArcShooting(SingleShooting):
     backward_default = True
     #: Where riding backward fails, continue the negative-width arc on the free law
     #: (rule R10b): continuous, so Newton can step back.
-    backward_fallback_default = False      # rule R10b: tried, no gain (see the note)           # rule R9: tried, worse on the census (see the note)
+    backward_fallback_default = False      # rule R10b: tried, no gain (see the note)
+    #: On a boundary arc ridden at run time, stop the step where the riding's held set
+    #: changes (an event per control) rather than step across the kink in the flow.
+    #: The flow is continuous there, so the STM carries straight through.
+    held_events_default = True
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1,
@@ -626,6 +630,7 @@ class MultiArcShooting(SingleShooting):
         self.past_edge = MultiArcShooting.past_edge_default
         self.backward_segments = MultiArcShooting.backward_default
         self.backward_fallback = MultiArcShooting.backward_fallback_default
+        self.held_events = MultiArcShooting.held_events_default
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -917,7 +922,8 @@ class MultiArcShooting(SingleShooting):
                 Fa = k.rhs_arc(ta, z, p, r["arc0"] if k.N_MODES else None)
             elif kind == "boundary":
                 r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost,
-                                         max_nfev=self.max_nfev, **tolerance, **self.options)
+                                         max_nfev=self.max_nfev, held_events=self.held_events,
+                                         **tolerance, **self.options)
                 Fa = k.boundary_rhs(c, ta, z, p)
             else:
                 r = k.propagate_singular(c, ta, z, tb, p, stm=jac, cost=cost,

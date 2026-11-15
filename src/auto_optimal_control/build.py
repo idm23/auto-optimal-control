@@ -113,6 +113,7 @@ def _render_wrapper(pmp, prefix, header_name, macros):
         "NC1": str(max(macros["NC"], 1)),
         "NM1": str(max(macros["NM"], 1)),
         "NK1": str(max(macros["NK"], 1)),
+        "NH1": str(max(macros["NH"], 1)),
         "free_tf": repr(bool(macros["FREE_TF"])),
         "NP1": str(max(macros["NP"], 1)),
         "NSW1": str(max(macros["NSW"], 1)),

@@ -1071,6 +1071,35 @@ same exact checks.
 So the route arrives at the wrong arrangement of arcs, and a single
 discrete change at the end is too far from the right one.
 
+### Rule R22 (stop at each change of the held set)
+
+*Observed:* on a boundary arc ridden at run time, the riding program's held
+set changes where a free jerk reaches its bound or a held jerk's multiplier
+changes sign. The flow has a kink there. DOP853 steps across it with many
+rejected steps, and the STM it carries is only as good as the step that
+straddles the kink.
+
+*Rule:* fix the held set between events. Then the riding law is one linear
+solve per stage, with no active-set search. One guard per control (the
+distance to the nearer bound for a free jerk, the bound's multiplier for a
+held one) stops the step at each change, where the held set is flipped. A
+change the riding cannot follow, or more than 64 on an arc, falls back to the
+integration without events (`MultiArcShooting.held_events`, on by default).
+
+*Why it is sound:* Lemma R. The flow is continuous at each change, so the
+state and the STM carry through unchanged. The rule changes how the same
+flow is integrated, not which answer is accepted.
+
+*Result (census on 8 physical cores, against #52):*
+
+- 43/45 solved, against 41/45. Goal 2 at 70% and rest 4 are gained.
+- 747 s against 2409 s on the 41 common cases, 3.2× faster. 36 cases are
+  faster and none slower. The median is 9.6 s against 22.8 s.
+- Final times agree to $10^{-8}$ on every common case but one. Rest 9 now
+  solves on the forward route in 98 s, at $t_f = 1.370023$, where the
+  reversed route (R4) found $1.368515$ in 521 s: a different extremal, 0.11%
+  slower. The route accepts the first extremal that passes its checks.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

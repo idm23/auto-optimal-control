@@ -281,6 +281,10 @@ static int {P}r_check(int id, const double* v, const double* lo, const double* h
    unique: an active set from nothing held, and every combination if that cycles. */
 static _Thread_local int {P}r_warm[{max(len(sets), 1)}][{max(m, 1)}];
 static _Thread_local int {P}r_warm_ok[{max(len(sets), 1)}];
+/* A held set fixed by the integrator between held-set events (boundary_held_fix): the
+   riding law is then one linear system, smooth in z, with no search. */
+static _Thread_local int {P}r_fixed_on = 0;
+static _Thread_local int {P}r_fixed[{max(m, 1)}];
 
 static int {P}r_solve(int id, double t, const double* z, const double* p, double* u, double* ms,
                       double* mr, double* K, int* piv, double* c0, int* dout) {{
@@ -295,6 +299,12 @@ static int {P}r_solve(int id, double t, const double* z, const double* p, double
        where the active-set search starts. Along an integration the held set rarely
        changes between calls, so the search starts from the last one found for this set
        of limits (per thread), and from nothing held if that does not converge. */
+    if ({P}r_fixed_on) {{
+        for (int i = 0; i < {m}; ++i) held[i] = {P}r_fixed[i];
+        rc = {P}r_system(id, R, limits, c0, lo, hi, held, K, piv, v, dout);
+        if (rc) return rc;
+        solved = 1;
+    }}
     for (int start = 0; start < 2 && !solved; ++start) {{
         if (start == 0 && !{P}r_warm_ok[id]) continue;
         for (int i = 0; i < {m}; ++i) held[i] = start == 0 ? {P}r_warm[id][i] : 0;
@@ -352,6 +362,93 @@ static int {P}r_solve(int id, double t, const double* z, const double* p, double
         ms[i] = v[{m} + i];
         mr[{P}r_root[c]] += {P}r_sign[c] * v[{m} + i];
     }}
+    return 0;
+}}
+
+/* Held-set events. Between them the riding law is one linear system (the held set
+   fixed); each guard is positive while its control's part of that system is the
+   program's solution: for a free control its distance to the nearer bound, for a held
+   one its bound's multiplier with the sign that holds it. A guard crosses zero where
+   the held set changes, so an integrator can stop there instead of stepping across the
+   kink (the flow is continuous through it: no jump in z or the STM). Each guard is
+   offset by a little more than the active-set check's own tolerance, so the set the
+   full solve accepts starts every guard positive. */
+int {P}boundary_held_start(int c, double t, const double* z, const double* p, int* held) {{
+    double u[{m}], ms[{mset}], mr[{max(nr, 1)}], K[{dim * dim}], c0[{m}];
+    int piv[{dim}], d;
+    const int saved = {P}r_fixed_on;
+    {P}r_fixed_on = 0;
+    int rc = {P}r_solve(c, t, z, p, u, ms, mr, K, piv, c0, &d);
+    {P}r_fixed_on = saved;
+    if (rc) return rc;
+    for (int i = 0; i < {m}; ++i) held[i] = {P}r_warm[c][i];
+    return 0;
+}}
+
+int {P}boundary_held_fix(int c, const int* held) {{
+    (void)c;
+    if (held == 0) {{ {P}r_fixed_on = 0; return 0; }}
+    for (int i = 0; i < {m}; ++i) {P}r_fixed[i] = held[i];
+    {P}r_fixed_on = 1;
+    return 0;
+}}
+
+int {P}boundary_held_guards(int c, double t, const double* z, const double* p, double* g) {{
+    if (c < 0 || c >= {len(sets)}) return 3;
+    const int s = {P}r_size[c];
+    double R[{m * m}], limits[{nr * m + nr}], v[{dim}], lo[{m}], hi[{m}], K[{dim * dim}], c0[{m}];
+    int piv[{dim}], d;
+    {P}r_quadratic(t, z, p, R, c0);
+    {P}r_limits(t, z, p, 0, 0, limits);
+    {P}control_bounds(t, z, p, lo, hi);
+    int rc = {P}r_system(c, R, limits, c0, lo, hi, {P}r_fixed, K, piv, v, &d);
+    if (rc) return rc;
+    int row = {m} + s;
+    for (int i = 0; i < {m}; ++i) {{
+        if (!{P}r_fixed[i]) {{
+            const double up = hi[i] - v[i], down = v[i] - lo[i];
+            g[i] = (up < down ? up : down) + 1e-11 * (1.0 + fabs(v[i]));
+        }} else {{
+            g[i] = ({P}r_fixed[i] > 0 ? v[row] : -v[row]) + 1e-11 * (1.0 + fabs(v[row]));
+            ++row;
+        }}
+    }}
+    return 0;
+}}
+
+/* The held set just past guard k's root: the search starts from the fixed set with
+   control k flipped (freed, or held at the bound it reached), and must end on a set
+   other than the fixed one. It becomes the fixed set. */
+int {P}boundary_held_flip(int c, double t, const double* z, const double* p, int k, int* held) {{
+    if (c < 0 || c >= {len(sets)} || k < 0 || k >= {m}) return 3;
+    double lo[{m}], hi[{m}], u[{m}], ms[{mset}], mr[{max(nr, 1)}], K[{dim * dim}], c0[{m}];
+    int piv[{dim}], d, old[{m}];
+    for (int i = 0; i < {m}; ++i) old[i] = {P}r_fixed[i];
+    {P}control_bounds(t, z, p, lo, hi);
+    int start[{m}];
+    for (int i = 0; i < {m}; ++i) start[i] = old[i];
+    if (start[k]) start[k] = 0;
+    else {{
+        double R[{m * m}], limits[{nr * m + nr}], v[{dim}];
+        {P}r_quadratic(t, z, p, R, c0);
+        {P}r_limits(t, z, p, 0, 0, limits);
+        int rc = {P}r_system(c, R, limits, c0, lo, hi, old, K, piv, v, &d);
+        if (rc) return rc;
+        start[k] = (hi[k] - v[k] < v[k] - lo[k]) ? 1 : -1;
+    }}
+    for (int i = 0; i < {m}; ++i) {P}r_warm[c][i] = start[i];
+    {P}r_warm_ok[c] = 1;
+    {P}r_fixed_on = 0;
+    int rc = {P}r_solve(c, t, z, p, u, ms, mr, K, piv, c0, &d);
+    if (rc) return rc;
+    int same = 1;
+    for (int i = 0; i < {m}; ++i) {{
+        held[i] = {P}r_warm[c][i];
+        if (held[i] != old[i]) same = 0;
+    }}
+    if (same) return 5;              /* no change: the caller integrates without events */
+    for (int i = 0; i < {m}; ++i) {P}r_fixed[i] = held[i];
+    {P}r_fixed_on = 1;
     return 0;
 }}
 
