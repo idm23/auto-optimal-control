@@ -56,7 +56,7 @@ viz = ["matplotlib>=3.8", "pillow>=10", "scipy>=1.13"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-auto_optimal_control = ["wrapper_template.pyx"]
+auto_optimal_control = ["wrapper_template.pyx", "chains_template.pyx"]
 
 # Co-developing with a local checkout of fast-numerical-integration: see
 # "Developing against a local fast-numerical-integration" in the README.

@@ -41,12 +41,32 @@ a smoothed problem, given the structure.
 from dataclasses import dataclass
 
 import time
+from pathlib import Path
+
 import numpy as np
 
 
 MAX_NFEV = 1000000                 # right-hand-side evaluations per propagation
 
 
+
+
+_CHAINS = {}
+
+
+def _chains_of(kernels):
+    """The closed-form free arcs of ``kernels``' problem, or ``None`` where its
+    certificate fails (cached per kernels)."""
+    key = id(kernels)
+    if key not in _CHAINS:
+        from .closed_form import IntegratorChains
+        system = getattr(kernels, "system", None)
+        chains = IntegratorChains.certify(system)[0] if system is not None else None
+        if chains is not None:
+            path = getattr(kernels, "path", None)
+            chains.use_compiled(Path(path).parent.parent if path is not None else None)
+        _CHAINS[key] = (kernels, chains)
+    return _CHAINS[key][1]
 
 
 class ShootingError(FloatingPointError):
@@ -607,6 +627,9 @@ class MultiArcShooting(SingleShooting):
     #: changes (an event per control) rather than step across the kink in the flow.
     #: The flow is continuous there, so the STM carries straight through.
     held_events_default = True
+    #: Free arcs of integrator chains in closed form, with an exact STM, where the
+    #: problem is certified for it (rule R23, Lemma T; ``closed_form.py``).
+    closed_free_default = True
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1,
@@ -631,6 +654,8 @@ class MultiArcShooting(SingleShooting):
         self.backward_segments = MultiArcShooting.backward_default
         self.backward_fallback = MultiArcShooting.backward_fallback_default
         self.held_events = MultiArcShooting.held_events_default
+        self.closed_free = MultiArcShooting.closed_free_default
+        self._chains = _chains_of(kernels) if self.closed_free else None
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -914,7 +939,10 @@ class MultiArcShooting(SingleShooting):
             raise ShootingError(f"arc times out of order: {ta} then {tb}", "negative_width")
         tolerance = {"stm_rtol": self.jacobian_rtol} if jac else {}
         try:
-            if kind is None:
+            if kind is None and self._chains is not None and not flags:
+                r = self._chains.propagate(ta, z, tb, p, stm=jac, cost=cost)
+                Fa = self._chains.rhs(z, p)
+            elif kind is None:
                 arc = self._free_arc(ta, z, flags)
                 r = k.propagate(ta, z, tb, p, stm=jac, cost=cost, constraint_events=False,
                                 arc=arc, frozen=sorted(flags), max_nfev=self.max_nfev,

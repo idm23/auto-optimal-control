@@ -1100,6 +1100,39 @@ flow is integrated, not which answer is accepted.
   reversed route (R4) found $1.368515$ in 521 s: a different extremal, 0.11%
   slower. The route accepts the first extremal that passes its checks.
 
+### Rule R23 (free arcs of integrator chains in closed form)
+
+*Observed:* on the arm, free arcs took 30–40% of the integration time (rest 4:
+43 s of 107 s), though their equations are six decoupled triple integrators.
+The torque limits act only on boundary arcs.
+
+*Rule:* where the problem is certified as integrator chains (each state's rate
+a state or a control, one control per chain, a cost of the controls alone,
+quadratic and uncoupled, box bounds, no penalty: `IntegratorChains.certify`),
+a free arc's flow, STM and cost are evaluated in closed form instead of
+integrated. The costates are polynomials, the control a clipped polynomial
+whose bound crossings are polynomial roots, and the states their exact
+integrals (`closed_form.py`, compiled from `chains_template.pyx`;
+`MultiArcShooting.closed_free`, on by default).
+
+*Why it is sound:* Lemma T. It is the same flow without integration error, so
+no answer is accepted on its account.
+
+*Result:*
+
+- **Per arc on the arm:** the STM agrees with DOP853 at $10^{-12}$ to
+  $8 \times 10^{-11}$, the integrator's own error, and $z$ to $2 \times 10^{-14}$.
+  It costs 34 µs with the STM against 4.0 ms integrated, and 30 µs without
+  against 0.41 ms.
+- **Census** (R1 R2 R15 R16 R20, 300 s, 2 workers, parallel routes), against
+  main with R22: still 43/45; 755 s against 958 s on the 43 solved (1.27×),
+  37 faster; the median 8.7 s against 9.6 s. Final times agree to $10^{-8}$
+  on every case. Goal 2 at 70% drops below 60 s (55 s); rest 4 goes from
+  142 s to 102 s, rest 9 from 98 s to 66 s.
+- The route's path changes slightly: the exact STM moves the chord's
+  accept-or-reject decisions. So single cases can be slower (six were, by at
+  most 0.4 s); only the totals compare.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
