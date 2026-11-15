@@ -6,9 +6,9 @@
    "family": "goal",
    "index": 0,
    "setting": "70%",
-   "solved": false,
-   "seconds": 635.2,
-   "tf": null
+   "solved": true,
+   "seconds": 68.3,
+   "tf": 1.1877365384349599
   },
   {
    "file": "goal0@80.json",
@@ -17,8 +17,8 @@
    "index": 0,
    "setting": "80%",
    "solved": true,
-   "seconds": 168.5,
-   "tf": 1.156634184100086
+   "seconds": 21.7,
+   "tf": 1.1566341840980972
   },
   {
    "file": "goal0@90.json",
@@ -27,8 +27,8 @@
    "index": 0,
    "setting": "90%",
    "solved": true,
-   "seconds": 11.1,
-   "tf": 1.156616086644625
+   "seconds": 3.8,
+   "tf": 1.1566160866445934
   },
   {
    "file": "goal1@70.json",
@@ -37,8 +37,8 @@
    "index": 1,
    "setting": "70%",
    "solved": true,
-   "seconds": 139.3,
-   "tf": 1.1675058733367567
+   "seconds": 17.4,
+   "tf": 1.1675058733367476
   },
   {
    "file": "goal1@80.json",
@@ -47,8 +47,8 @@
    "index": 1,
    "setting": "80%",
    "solved": true,
-   "seconds": 62.9,
-   "tf": 1.1674990130038598
+   "seconds": 8.3,
+   "tf": 1.167499013003859
   },
   {
    "file": "goal1@90.json",
@@ -57,8 +57,8 @@
    "index": 1,
    "setting": "90%",
    "solved": true,
-   "seconds": 13.4,
-   "tf": 1.1674987370971333
+   "seconds": 2.3,
+   "tf": 1.1674987370971328
   },
   {
    "file": "goal2@70.json",
@@ -66,9 +66,9 @@
    "family": "goal",
    "index": 2,
    "setting": "70%",
-   "solved": false,
-   "seconds": 619.8,
-   "tf": null
+   "solved": true,
+   "seconds": 55.0,
+   "tf": 1.1556941768402318
   },
   {
    "file": "goal2@80.json",
@@ -77,8 +77,8 @@
    "index": 2,
    "setting": "80%",
    "solved": true,
-   "seconds": 30.2,
-   "tf": 1.1434204471457299
+   "seconds": 4.8,
+   "tf": 1.1434204471505953
   },
   {
    "file": "goal2@90.json",
@@ -87,8 +87,8 @@
    "index": 2,
    "setting": "90%",
    "solved": true,
-   "seconds": 13.2,
-   "tf": 1.142991517873185
+   "seconds": 2.4,
+   "tf": 1.1429915178740044
   },
   {
    "file": "goal3@70.json",
@@ -97,8 +97,8 @@
    "index": 3,
    "setting": "70%",
    "solved": true,
-   "seconds": 98.5,
-   "tf": 1.147171028504635
+   "seconds": 19.5,
+   "tf": 1.1471710285052794
   },
   {
    "file": "goal3@80.json",
@@ -107,8 +107,8 @@
    "index": 3,
    "setting": "80%",
    "solved": true,
-   "seconds": 19.1,
-   "tf": 1.1471498186190483
+   "seconds": 6.3,
+   "tf": 1.1471498186190532
   },
   {
    "file": "goal3@90.json",
@@ -117,8 +117,8 @@
    "index": 3,
    "setting": "90%",
    "solved": true,
-   "seconds": 6.3,
-   "tf": 1.1471418817915415
+   "seconds": 3.1,
+   "tf": 1.147141881791547
   },
   {
    "file": "goal4@70.json",
@@ -127,7 +127,7 @@
    "index": 4,
    "setting": "70%",
    "solved": false,
-   "seconds": 536.2,
+   "seconds": 103.0,
    "tf": null
   },
   {
@@ -137,8 +137,8 @@
    "index": 4,
    "setting": "80%",
    "solved": true,
-   "seconds": 21.6,
-   "tf": 1.167490703011765
+   "seconds": 4.1,
+   "tf": 1.167490703011776
   },
   {
    "file": "goal4@90.json",
@@ -147,8 +147,8 @@
    "index": 4,
    "setting": "90%",
    "solved": true,
-   "seconds": 11.2,
-   "tf": 1.1674720736261162
+   "seconds": 2.7,
+   "tf": 1.1674720736261315
   },
   {
    "file": "goal5@70.json",
@@ -157,8 +157,8 @@
    "index": 5,
    "setting": "70%",
    "solved": true,
-   "seconds": 47.3,
-   "tf": 1.0530968715630424
+   "seconds": 10.4,
+   "tf": 1.0530968715629936
   },
   {
    "file": "goal5@80.json",
@@ -167,8 +167,8 @@
    "index": 5,
    "setting": "80%",
    "solved": true,
-   "seconds": 15.1,
-   "tf": 1.0530801619941654
+   "seconds": 3.8,
+   "tf": 1.05308016199416
   },
   {
    "file": "goal5@90.json",
@@ -177,8 +177,8 @@
    "index": 5,
    "setting": "90%",
    "solved": true,
-   "seconds": 6.4,
-   "tf": 1.053072143745882
+   "seconds": 2.7,
+   "tf": 1.0530721437458967
   },
   {
    "file": "goal6@70.json",
@@ -187,8 +187,8 @@
    "index": 6,
    "setting": "70%",
    "solved": true,
-   "seconds": 198.6,
-   "tf": 1.126093072502916
+   "seconds": 18.9,
+   "tf": 1.1260930722739833
   },
   {
    "file": "goal6@80.json",
@@ -197,8 +197,8 @@
    "index": 6,
    "setting": "80%",
    "solved": true,
-   "seconds": 33.2,
-   "tf": 1.1158180621312983
+   "seconds": 4.9,
+   "tf": 1.115818062131183
   },
   {
    "file": "goal6@90.json",
@@ -207,8 +207,8 @@
    "index": 6,
    "setting": "90%",
    "solved": true,
-   "seconds": 9.3,
-   "tf": 1.115785227682307
+   "seconds": 2.4,
+   "tf": 1.1157852276822047
   },
   {
    "file": "goal7@70.json",
@@ -217,8 +217,8 @@
    "index": 7,
    "setting": "70%",
    "solved": true,
-   "seconds": 72.4,
-   "tf": 1.0769652179328488
+   "seconds": 16.3,
+   "tf": 1.076965217932831
   },
   {
    "file": "goal7@80.json",
@@ -227,8 +227,8 @@
    "index": 7,
    "setting": "80%",
    "solved": true,
-   "seconds": 22.0,
-   "tf": 1.07695163406746
+   "seconds": 7.7,
+   "tf": 1.0769516340674423
   },
   {
    "file": "goal7@90.json",
@@ -237,8 +237,8 @@
    "index": 7,
    "setting": "90%",
    "solved": true,
-   "seconds": 39.0,
-   "tf": 1.0769341916303024
+   "seconds": 15.7,
+   "tf": 1.0769341916302952
   },
   {
    "file": "goal8@70.json",
@@ -247,8 +247,8 @@
    "index": 8,
    "setting": "70%",
    "solved": true,
-   "seconds": 120.6,
-   "tf": 1.1327314813076075
+   "seconds": 31.8,
+   "tf": 1.1327314810671347
   },
   {
    "file": "goal8@80.json",
@@ -257,8 +257,8 @@
    "index": 8,
    "setting": "80%",
    "solved": true,
-   "seconds": 39.2,
-   "tf": 1.1220754875540038
+   "seconds": 4.8,
+   "tf": 1.1220754875534469
   },
   {
    "file": "goal8@90.json",
@@ -267,8 +267,8 @@
    "index": 8,
    "setting": "90%",
    "solved": true,
-   "seconds": 11.2,
-   "tf": 1.1220647168173725
+   "seconds": 1.9,
+   "tf": 1.1220647168173756
   },
   {
    "file": "goal9@70.json",
@@ -277,8 +277,8 @@
    "index": 9,
    "setting": "70%",
    "solved": true,
-   "seconds": 233.9,
-   "tf": 1.1276667473189252
+   "seconds": 28.7,
+   "tf": 1.1276667473256172
   },
   {
    "file": "goal9@80.json",
@@ -287,7 +287,7 @@
    "index": 9,
    "setting": "80%",
    "solved": false,
-   "seconds": 633.6,
+   "seconds": 388.1,
    "tf": null
   },
   {
@@ -297,8 +297,8 @@
    "index": 9,
    "setting": "90%",
    "solved": true,
-   "seconds": 177.5,
-   "tf": 1.1275921826851045
+   "seconds": 43.0,
+   "tf": 1.1275921826859965
   },
   {
    "file": "rest0.json",
@@ -307,8 +307,8 @@
    "index": 0,
    "setting": null,
    "solved": true,
-   "seconds": 24.9,
-   "tf": 1.005648648103025
+   "seconds": 4.4,
+   "tf": 1.0056486481030242
   },
   {
    "file": "rest1.json",
@@ -316,9 +316,9 @@
    "family": "rest",
    "index": 1,
    "setting": null,
-   "solved": false,
-   "seconds": 610.4,
-   "tf": null
+   "solved": true,
+   "seconds": 37.0,
+   "tf": 1.6837318834392183
   },
   {
    "file": "rest10.json",
@@ -327,7 +327,7 @@
    "index": 10,
    "setting": null,
    "solved": true,
-   "seconds": 23.3,
+   "seconds": 2.6,
    "tf": 1.4461524092860216
   },
   {
@@ -336,9 +336,9 @@
    "family": "rest",
    "index": 11,
    "setting": null,
-   "solved": false,
-   "seconds": 633.2,
-   "tf": null
+   "solved": true,
+   "seconds": 21.7,
+   "tf": 1.5232762937357869
   },
   {
    "file": "rest12.json",
@@ -346,9 +346,9 @@
    "family": "rest",
    "index": 12,
    "setting": null,
-   "solved": false,
-   "seconds": 616.7,
-   "tf": null
+   "solved": true,
+   "seconds": 13.0,
+   "tf": 1.5647290108476022
   },
   {
    "file": "rest13.json",
@@ -357,8 +357,8 @@
    "index": 13,
    "setting": null,
    "solved": true,
-   "seconds": 76.0,
-   "tf": 1.2853086939572704
+   "seconds": 8.8,
+   "tf": 1.2853086939572733
   },
   {
    "file": "rest14.json",
@@ -367,7 +367,7 @@
    "index": 14,
    "setting": null,
    "solved": true,
-   "seconds": 3.2,
+   "seconds": 0.8,
    "tf": 1.2738436723589583
   },
   {
@@ -377,7 +377,7 @@
    "index": 2,
    "setting": null,
    "solved": true,
-   "seconds": 149.6,
+   "seconds": 14.0,
    "tf": 1.4513909275231192
   },
   {
@@ -387,8 +387,8 @@
    "index": 3,
    "setting": null,
    "solved": true,
-   "seconds": 95.7,
-   "tf": 1.4026544484693164
+   "seconds": 11.1,
+   "tf": 1.402654448469321
   },
   {
    "file": "rest4.json",
@@ -396,9 +396,9 @@
    "family": "rest",
    "index": 4,
    "setting": null,
-   "solved": false,
-   "seconds": 629.4,
-   "tf": null
+   "solved": true,
+   "seconds": 107.6,
+   "tf": 1.7943320555412912
   },
   {
    "file": "rest5.json",
@@ -407,8 +407,8 @@
    "index": 5,
    "setting": null,
    "solved": true,
-   "seconds": 220.6,
-   "tf": 1.7499272895751852
+   "seconds": 22.0,
+   "tf": 1.7499272895751832
   },
   {
    "file": "rest6.json",
@@ -417,8 +417,8 @@
    "index": 6,
    "setting": null,
    "solved": true,
-   "seconds": 263.3,
-   "tf": 1.5387226989893896
+   "seconds": 20.3,
+   "tf": 1.5387226989893856
   },
   {
    "file": "rest7.json",
@@ -427,7 +427,7 @@
    "index": 7,
    "setting": null,
    "solved": true,
-   "seconds": 18.2,
+   "seconds": 2.5,
    "tf": 1.3850275266539074
   },
   {
@@ -437,8 +437,8 @@
    "index": 8,
    "setting": null,
    "solved": true,
-   "seconds": 3.3,
-   "tf": 1.1867642584190146
+   "seconds": 0.8,
+   "tf": 1.1867642584190141
   },
   {
    "file": "rest9.json",
@@ -447,8 +447,8 @@
    "index": 9,
    "setting": null,
    "solved": true,
-   "seconds": 588.5,
-   "tf": 1.3685146027721018
+   "seconds": 59.0,
+   "tf": 1.3700230511657983
   }
  ]
 }
