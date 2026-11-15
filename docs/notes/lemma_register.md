@@ -415,6 +415,48 @@ route stalls.
 - **Used by.** R22. It is a rule of the machinery: the flow integrated is
   the same flow, so no answer is accepted on its account.
 
+### T. Free arcs of integrator chains have a closed form — proved
+
+- **Statement.** Assume the states split into chains $s_0, \dots, s_{L-1}$ with
+  $\dot s_m = s_{m+1}$ and $\dot s_{L-1} = u$, one control per chain. Assume
+  the running cost is $L(u) = L_0 + \sum_i L_i(u_i)$ with each $L_i$ quadratic
+  and $L_i'' = r_i > 0$ constant, the controls lie in a box with constant
+  bounds, and there is no penalty. On a free arc, with $\sigma$ the time since
+  its start:
+  1. $\lambda_m(\sigma) = \sum_{k \le m} \lambda_k(0)\,(-\sigma)^{m-k}/(m-k)!$;
+  2. $u(\sigma) = \operatorname{clip}(-(\lambda_{L-1}(\sigma) + c)/r,\ lo,\ hi)$,
+     a clipped polynomial of degree $L - 1$. It is polynomial between the real
+     roots of $\lambda_{L-1} + c = -r\,hi$ and $\lambda_{L-1} + c = -r\,lo$;
+  3. $s_m(\sigma) = \sum_{k \ge m} s_k(0)\,\sigma^{k-m}/(k-m)! + \int_0^\sigma K_m(\sigma - \rho)\,u(\rho)\,d\rho$,
+     with $K_m(x) = x^{L-1-m}/(L-1-m)!$. So $L$-point Gauss–Legendre
+     quadrature on each piece is exact;
+  4. the STM is block diagonal, one $2L \times 2L$ block per chain. Its
+     $\partial s / \partial \lambda(0)$ block is
+     $\int_0^\sigma K_m(\sigma - \rho)\,\partial u/\partial \lambda_k(0)\,d\rho$,
+     with no terms from the moving roots.
+- **Proof.**
+  - $H = L(u) + \sum \lambda_m s_{m+1} + \lambda_{L-1} u$ has
+    $H_{s_0} = 0$ and $H_{s_{m}} = \lambda_{m-1}$, which gives (1).
+  - (2) is the minimizer of a strictly convex quadratic over an interval.
+  - (3) is the variation-of-constants formula for a nilpotent linear system.
+    The integrand has degree at most $2L - 2$ per piece, within the
+    $2L - 1$ that $L$ Gauss points integrate exactly (the code uses $L + 1$).
+  - For (4), differentiate (3) in $\lambda_k(0)$. The integrand is
+    Lipschitz, and $u$ is continuous where it meets a bound, so the
+    derivative passes under the integral (dominated convergence).
+    $\partial u / \partial \lambda_k(0)$ is zero where $u$ is at a bound and
+    $-(-\rho)^{L-1-k}/((L-1-k)!\,r)$ inside, except at the finitely many
+    roots.
+- **Depends on.** Nothing beyond calculus. The certificate is checked
+  symbolically from the problem's own expressions
+  (`IntegratorChains.certify`).
+- **Gap.** A double root (the control touching a bound without crossing it)
+  makes $u$ only Lipschitz there. The flow is still exact, and so is the STM
+  away from that measure-zero set of $\lambda(0)$.
+- **To formalize.** Short: the closed forms are polynomial identities.
+- **Used by.** R23. It is a rule of the machinery: it computes the same flow
+  without integration error, so no answer is accepted on its account.
+
 ### Observation O3: what the direct comparison shows for the unsolved cases
 
 The direct transcription (`auto_optimal_control.direct`) was run at 120 and 240
