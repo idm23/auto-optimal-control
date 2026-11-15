@@ -91,6 +91,30 @@ def test_newton_polishes_a_near_guess_past_the_tolerance(compiled):
     assert not far.success
 
 
+def test_chord_and_newton_stop_where_the_start_cannot_be_propagated(compiled):
+    """A start whose propagation fails has no Jacobian. _safe's stand-in (a large
+    residual, the identity) read as one gives the step -R, moving every unknown by
+    1e6, so both iterations stop there instead, with _safe's residual."""
+    from auto_optimal_control.shooting import ShootingError
+    k = compiled["min_time"][2]
+    shoot = SingleShooting(k, MIN_TIME)
+    v = shoot.guess_multipliers([1.0, 1.0], tf=1.0)
+    calls = []
+
+    def fails(x, *a, **kw):
+        calls.append(np.array(x))
+        raise ShootingError("propagation failed", "free_failed")
+
+    shoot.residual_jacobian = fails
+    shoot.residual = fails
+    for solve in (shoot.solve_chord, shoot.solve_newton):
+        calls.clear()
+        sol = solve(v)
+        assert not sol.success and sol.nfev == 1 and len(calls) == 1
+        np.testing.assert_array_equal(sol.v, v)
+        assert sol.residual_norm == np.linalg.norm(np.full(len(v), 1e6))
+
+
 def test_zermelo_solve(compiled):
     k = compiled["zermelo"][2]
     p = [1.0, 1.0, 1.0, 0.5]

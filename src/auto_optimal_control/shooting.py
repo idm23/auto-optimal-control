@@ -41,12 +41,32 @@ a smoothed problem, given the structure.
 from dataclasses import dataclass
 
 import time
+from pathlib import Path
+
 import numpy as np
 
 
 MAX_NFEV = 1000000                 # right-hand-side evaluations per propagation
 
 
+
+
+_CHAINS = {}
+
+
+def _chains_of(kernels):
+    """The closed-form free arcs of ``kernels``' problem, or ``None`` where its
+    certificate fails (cached per kernels)."""
+    key = id(kernels)
+    if key not in _CHAINS:
+        from .closed_form import IntegratorChains
+        system = getattr(kernels, "system", None)
+        chains = IntegratorChains.certify(system)[0] if system is not None else None
+        if chains is not None:
+            path = getattr(kernels, "path", None)
+            chains.use_compiled(Path(path).parent.parent if path is not None else None)
+        _CHAINS[key] = (kernels, chains)
+    return _CHAINS[key][1]
 
 
 class ShootingError(FloatingPointError):
@@ -292,6 +312,19 @@ class SingleShooting:
             m = len(v)
             return np.full(m, 1e6), np.eye(m)
 
+    def _try(self, v):
+        """``(R, J)`` at ``v``, or ``None`` where the propagation fails.
+
+        For Newton-type iterations of our own. :meth:`_safe`'s stand-in (a large
+        residual with the identity for its Jacobian) steers MINPACK back, but read as
+        a Jacobian it gives the step ``-R``: every unknown, the junction times among
+        them, moved by ``1e6``."""
+        try:
+            return self.residual_jacobian(v)
+        except (ShootingError, RuntimeError, ValueError) as exc:
+            self._failed(exc)
+            return None
+
     def _safe_residual(self, v):
         try:
             return self.residual(v)
@@ -348,10 +381,13 @@ class SingleShooting:
         Returns a ``ShootingSolution`` (``max_violation`` is not computed)."""
         from scipy.linalg import lu_factor, lu_solve
         v = np.asarray(guess, dtype=float).copy()
-        R, J = self._safe(v)
-        err = float(np.linalg.norm(R))
-        fresh = True
         nfev = 1
+        fresh = True
+        start = self._try(v)
+        if start is None:
+            return self._failed_start(v, nfev)
+        R, J = start
+        err = float(np.linalg.norm(R))
         lu = None if not np.isfinite(err) else lu_factor(J)
         for _ in range(max_iterations):
             if err < tol or lu is None:
@@ -384,16 +420,30 @@ class SingleShooting:
                     step *= 0.5
                 if not moved:
                     break
-                R, J = self._safe(v)
+                fresh_RJ = self._try(v)
                 nfev += 1
+                if fresh_RJ is None:
+                    break
+                R, J = fresh_RJ
                 lu = lu_factor(J)
                 continue
-            R, J = self._safe(v)
+            fresh_RJ = self._try(v)
             nfev += 1
+            if fresh_RJ is None:
+                break
+            R, J = fresh_RJ
             lu, fresh = lu_factor(J), True
         x0, lam0, nu, tf = self.unpack(v)
         return ShootingSolution(v=v, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
                                 residual_norm=err, success=err < tol, nfev=nfev, result=None,
+                                max_violation=0.0)
+
+    def _failed_start(self, v, nfev):
+        """The result of an iteration whose starting point cannot be propagated. Its
+        residual is :meth:`_safe`'s stand-in, as before."""
+        x0, lam0, nu, tf = self.unpack(v)
+        return ShootingSolution(v=v, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
+                                residual_norm=float(np.linalg.norm(np.full(len(v), 1e6))), success=False, nfev=nfev, result=None,
                                 max_violation=0.0)
 
     def solve_newton(self, guess, tol=1e-10, max_iterations=5, polish=1):
@@ -408,9 +458,12 @@ class SingleShooting:
         is as tight as the integration allows rather than just inside ``tol``. Returns
         a ``ShootingSolution`` (``max_violation`` is not computed)."""
         v = np.asarray(guess, dtype=float).copy()
-        R, J = self._safe(v)
-        err = float(np.linalg.norm(R))
         nfev = 1
+        start = self._try(v)
+        if start is None:
+            return self._failed_start(v, nfev)
+        R, J = start
+        err = float(np.linalg.norm(R))
         extra = polish
         for _ in range(max_iterations + polish):
             if not np.isfinite(err):
@@ -425,8 +478,11 @@ class SingleShooting:
                 break
             if not np.all(np.isfinite(dv)):
                 break
-            Rt, Jt = self._safe(v + dv)
+            trial_RJ = self._try(v + dv)
             nfev += 1
+            if trial_RJ is None:
+                break
+            Rt, Jt = trial_RJ
             trial = float(np.linalg.norm(Rt))
             if not (np.isfinite(trial) and trial < err):
                 break
@@ -607,6 +663,9 @@ class MultiArcShooting(SingleShooting):
     #: changes (an event per control) rather than step across the kink in the flow.
     #: The flow is continuous there, so the STM carries straight through.
     held_events_default = True
+    #: Free arcs of integrator chains in closed form, with an exact STM, where the
+    #: problem is certified for it (rule R23, Lemma T; ``closed_form.py``).
+    closed_free_default = True
 
     def __init__(self, kernels, params=(), arcs=(), *, x0=None, method="DOP853", rtol=1e-12,
                  atol=1e-12, max_nfev=200000, junctions="auto", open_end=False, nodes=1,
@@ -631,6 +690,8 @@ class MultiArcShooting(SingleShooting):
         self.backward_segments = MultiArcShooting.backward_default
         self.backward_fallback = MultiArcShooting.backward_fallback_default
         self.held_events = MultiArcShooting.held_events_default
+        self.closed_free = MultiArcShooting.closed_free_default
+        self._chains = _chains_of(kernels) if self.closed_free else None
         k = kernels
         self.entries = tuple(arcs)
         self.arcs = []
@@ -914,7 +975,10 @@ class MultiArcShooting(SingleShooting):
             raise ShootingError(f"arc times out of order: {ta} then {tb}", "negative_width")
         tolerance = {"stm_rtol": self.jacobian_rtol} if jac else {}
         try:
-            if kind is None:
+            if kind is None and self._chains is not None and not flags:
+                r = self._chains.propagate(ta, z, tb, p, stm=jac, cost=cost)
+                Fa = self._chains.rhs(z, p)
+            elif kind is None:
                 arc = self._free_arc(ta, z, flags)
                 r = k.propagate(ta, z, tb, p, stm=jac, cost=cost, constraint_events=False,
                                 arc=arc, frozen=sorted(flags), max_nfev=self.max_nfev,
