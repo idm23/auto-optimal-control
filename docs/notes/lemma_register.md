@@ -29,7 +29,9 @@ Standard results cited, and so prerequisites of any formalization:
 | S4 | Sard's theorem, or the weaker fact that a $C^1$ image of a lower-dimensional manifold is Lebesgue-null | D |
 | S5 | Variational inequalities for convex minimization over a convex set | J, I′, Q |
 | S6 | The kinetic energy is $\tfrac12 \dot q^\top M(q) \dot q$ for the Newton-Euler model | A |
-| S7 | Danskin's theorem: directional derivatives of $\max_{t \in T} \phi(t, s)$ over a compact $T$ | N |
+| S7 | Danskin's theorem: directional derivatives of $\max_{t \in T} \phi(t, s)$ over a compact $T$ | N, V2 |
+| S8 | The parametric transversality (Sard) theorem, as in Chow, Mallet-Paret & Yorke (1978) | V3, V5 |
+| S9 | Pseudo-arclength continuation through a simple fold (Keller 1977) | V4 (E8) |
 
 Mathlib has S2 (`HasStrictFDerivAt.implicitFunction`), S5 (as first-order
 optimality on convex sets), S4 for $C^1$ maps between equal dimensions
@@ -505,6 +507,38 @@ route stalls.
   as in Lemma T's gap).
 - **Used by.** R24. Soundness rests on (1) only: no answer is accepted on (2)'s
   account, which only explains why the route is shorter.
+
+### V1–V5. The route as a one-parameter family
+
+The arguments are in `route_family.md`. A *leg* is a segment
+$\theta(s)$ of the route parameters (offsets, weight, smoothing), fixed when
+it starts; $S$ is the structure, $\Psi_S(v, s) = 0$ the square shooting
+system, and a *monitor* is a scalar that must stay $\ge 0$ (peak, width,
+jump, density, gap, order, bound, end, held sign).
+
+- **V1. Acceptance is the monitors — proved, relative to S1.** At $s = 1$,
+  `_verdict` accepts exactly when every monitor is $\ge 0$. Depends on H.
+- **V2. Continuation with a fixed structure — proved.** With $D_v\Psi_S$
+  nonsingular and the implicit events transversal, there is a unique $C^1$
+  branch; the monitors are continuous along it, and wherever they are all
+  positive the branch is a curve of accepted extremals. Depends on S2, S3,
+  S7, R, N.
+- **V3. Events are isolated, one at a time — sketch.** Under a
+  transversality hypothesis (T), for almost every draw of the offsets each
+  event is one monitor crossing zero transversally, no two coincide, and
+  folds are simple. Depends on S8. *Gap:* (T) is checked only for births
+  (Lemma D's mechanism).
+- **V4. The event table for order 1 — partly proved.** Birth (E1) and death
+  (E2) by Lemma E; fold (E8) by S9; split (E3) and merge (E4) open (outside
+  Bonnans–Hermant's strict complementarity); reorder (E5) a sketch from B
+  and J; an arc reaching an end (E6) open; constraint regularity failing,
+  the corner and saturation cases (E7), open.
+- **V5. A leg ends at $s = 1$, or fails visibly — sketch.** From a regular
+  start, if every event met has a proved continuation and the curve stays
+  bounded, it reaches $s = 1$ after finitely many events. Depends on V2 to
+  V4, S8. *Gaps:* the table (V4) and boundedness, which must be detected.
+- **Used by.** Phase 2's follower (planned). Today, R1 (V3), R2, R10, R16,
+  R17 (E1, E2), R5, R18, R21 (E3) and R11 (E4) are pieces of it.
 
 ### Observation O3: what the direct comparison shows for the unsolved cases
 
