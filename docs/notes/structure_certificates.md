@@ -869,8 +869,9 @@ of the edge, where the exact one does not exist (Lemma B fails there).
 ### Rule R15 (a portfolio of routes)
 
 *Rule:* when the active-set route fails, try the next route of a portfolio:
-another draw of the offsets, then sequential births, then (Rule R24) the
-route started at ten times the secondary weight (`Homotopy.portfolio`).
+another draw of the offsets, then sequential births, then (Rule R24) these
+three routes again, started at ten times the secondary weight
+(`Homotopy.portfolio`).
 Every route may use all the time left, and a route that sets no new low of
 its offsets for `stall_seconds` (60 s) yields to the next.
 
@@ -1219,8 +1220,9 @@ $O(1/w)$, so Newton's radius is $O(w)$.
   | goal 9 at 80% | unsolved | 219.8 s | 217.0 s |
   | goal 4 at 70% | unsolved | unsolved | unsolved |
 
-*Deployed:* on as the fourth route of R15's portfolio (`{"weight_start": 10}`
-in `DEFAULT_PORTFOLIO`), the 44/45 variant above. The member is dropped when
+*Deployed:* on in R15's portfolio as main's three routes again at $10w$ (the
+six-route variant above: `{"weight_start": 10}` alone and with each of the
+other two members, in `DEFAULT_PORTFOLIO`). The member is dropped when
 the policy has no numeric weight, or when the problem has bang-bang smoothing
 (the route walks $\epsilon$ there, and the member would repeat the first route).
 
