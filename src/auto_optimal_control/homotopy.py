@@ -84,7 +84,8 @@ import numpy as np
 import sympy as sp
 
 from auto_optimal_control.build import build_kernels
-from auto_optimal_control.policy import Lexicographic, SecondaryCost, analyze, resolve
+from auto_optimal_control.policy import (Lexicographic, SecondaryCost, _effort, _penalized,
+                                         analyze, resolve)
 from auto_optimal_control.pontryagin import OUTLINE_ABOVE_OPS, bang_bang_controls, derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
 from auto_optimal_control.diagnostics import Diagnostics
@@ -97,6 +98,7 @@ SEED_ACCEPT = 100.0                # a seed is a guess: how far above tol a stal
 EPS = "eps_reg"
 RHO = "rho_reg_"
 OFF = "off_reg_"
+WEIGHT = "w_secondary"
 _FAILURES = (ShootingError, RuntimeError, ValueError, FloatingPointError, np.linalg.LinAlgError)
 
 
@@ -348,7 +350,26 @@ class Homotopy:
         self.variants = 3
         self.candidate_seconds = 2.0
         self.bang_bang = bang_bang_controls(problem)
-        self.regularized, self.eps_symbol, self.rho_symbols = regularize(problem, self.bang_bang)
+        # A numeric secondary weight is a runtime parameter of the kernels, after the
+        # problem's own: rule R24 walks it down to its value along the route.
+        self.weight_symbol, self.weight_value = None, None
+        kernel_problem = problem
+        if isinstance(self.policy, SecondaryCost) and sp.sympify(self.policy.weight).is_number:
+            w = sp.Symbol(WEIGHT, positive=True)
+            controls = (_penalized(self.analysis) if self.policy.controls is None
+                        else tuple(self.policy.controls))
+            kernel_problem = _copy(self.stated, name=problem.name,
+                                   running_cost=self.stated.running_cost
+                                   + w * _effort(self.stated, controls),
+                                   params=[*self.stated.params, w],
+                                   path_constraints=self.stated.path_constraints)
+            self.weight_symbol, self.weight_value = w, float(self.policy.weight)
+        #: Rule R24: the active-set route brings the limits in with the secondary weight
+        #: this many times its value, then walks it down to its value (Lemma W); None
+        #: or 1: at its value throughout.
+        self.weight_start = None
+        self.regularized, self.eps_symbol, self.rho_symbols = regularize(kernel_problem,
+                                                                        self.bang_bang)
         # Limits ridden at run time have no penalty route, and a penalty's tape in every
         # kernel takes most of the compile.
         self.outline_above = outline_above
@@ -396,10 +417,49 @@ class Homotopy:
         """The regularized problem's parameter vector at smoothing ``eps``, penalty
         weights ``rho`` and limit offsets ``off`` (default zero: the exact limits)."""
         p = list(self.params)
+        if self.weight_symbol is not None:
+            # On a problem without bang-bang controls ``eps`` is the secondary weight
+            # (rule R24); None is its value.
+            p.append(self.weight_value if self.bang_bang or eps is None else eps)
         if self.bang_bang:
             p.append(eps)
         off = np.zeros(self.nc) if off is None else off
         return np.array(p + list(rho) + list(off), dtype=float)
+
+    def _weight_route(self):
+        """Rule R24 applies: a numeric secondary weight and no bang-bang smoothing (with
+        smoothing the route walks eps, and a weight route would repeat the first)."""
+        return self.weight_symbol is not None and not self.bang_bang
+
+    def _eps_at(self, le):
+        """The ``eps`` argument of :meth:`regularized_params` at route coordinate ``le``:
+        the smoothing weight, the secondary weight while rule R24 has it away from its
+        value, else None."""
+        if self.bang_bang:
+            return 10.0 ** le
+        if self.weight_symbol is not None and abs(le - np.log10(self.weight_value)) > 1e-12:
+            return 10.0 ** le
+        return None
+
+    def _weight_moved(self, sol, le_from, le_to, tol=1e-10):
+        """Rule R24: the unconstrained solution ``sol`` at secondary weight ``10^le_from``
+        carried to ``10^le_to`` by Newton steps along ``log w`` (halved on failure):
+        ``(sol, le_to)``, or None. Off the limits the path is smooth in ``w``."""
+        le, v, ds, r = le_from, np.asarray(sol.v, dtype=float), le_to - le_from, sol
+        while abs(le_to - le) > 1e-12:
+            if abs(ds) < 1e-3:
+                return None
+            nxt = le_to if abs(ds) >= abs(le_to - le) else le + ds
+            shoot = self._smoothed([], self._eps_at(nxt), np.zeros(self.nc))
+            try:
+                r = shoot.solve_newton(v, tol=tol, max_iterations=12)
+            except _FAILURES:
+                r = None
+            if r is None or not r.success:
+                ds *= 0.5
+                continue
+            le, v = nxt, r.v
+        return r, le_to
 
     def objective(self, shooting, v):
         """``phi(t_f, x(t_f)) + int L`` of the exact problem at ``v``."""
@@ -1681,7 +1741,7 @@ class Homotopy:
                          f"residuals of the originals {[round(results[j][1], 9) for j in range(0, len(tasks), per) if j in results]}; "
                          f"moved (d t_in, d t_out, pi ratio) {moved}")
             entries, _ = self._mas_entries(arcs, values)
-            sh = self._smoothed(entries, 10.0 ** le if self.bang_bang else None, off)
+            sh = self._smoothed(entries, self._eps_at(le), off)
             r = sh.solve_chord(v, tol=max(1e-6, 0.0)) if self.kr.system.riding is not None else \
                 sh.solve(v, tol=1e-6, options=_budget("hybr", self.path_evaluations))
             if r.success:
@@ -1802,7 +1862,7 @@ class Homotopy:
         if state is None:
             state = {"solves": 0}
         entries, values = self._mas_entries(arcs, values)
-        sh = self._smoothed(entries, 10.0 ** le if self.bang_bang else None, off)
+        sh = self._smoothed(entries, self._eps_at(le), off)
         guess = sh.pack_arcs(base, values) if arcs else np.asarray(base, dtype=float)
         state["solves"] += 1
         if isinstance(sh, MultiArcShooting) and (sh._open or sh._started):
@@ -1869,8 +1929,8 @@ class Homotopy:
 
         def params(sv):
             le, off = point(sv)
-            return np.asarray(self.regularized_params(10.0 ** le if self.bang_bang else None,
-                                                      np.zeros(self.nc), off), dtype=float)
+            return np.asarray(self.regularized_params(self._eps_at(le), np.zeros(self.nc), off),
+                              dtype=float)
 
         def resid(x, jac):
             shoot.params = params(x[-1])
@@ -2149,7 +2209,20 @@ class Homotopy:
         def key(arcs, values):
             return tuple(self._mas_entries(arcs, values, True)[0])
 
-        shoot = self._smoothed([], eps0, np.zeros(self.nc))
+        le_start = np.log10(eps0) if self.bang_bang else 0.0
+        le_target = None
+        if self._weight_route():
+            le_start = le_target = np.log10(self.weight_value)
+            factor = float(self.weight_start) if self.weight_start else 1.0
+            if factor != 1.0:
+                # Rule R24: the unconstrained solution at the larger weight, by Newton
+                # along log w from the one at its value (no arcs: a smooth path).
+                moved = self._weight_moved(sol, le_target, le_target + np.log10(factor))
+                if moved is not None:
+                    self.diagnostics.fired("R24")
+                    sol, le_start = moved
+        shoot = self._smoothed([], self._eps_at(le_start) if not self.bang_bang else eps0,
+                               np.zeros(self.nc))
         (_, g, _), = self._free_samples(shoot, sol.v)
         # Violations are measured against how much each limit's g moves along the
         # unconstrained solution, or, when it hardly moves there (a joint the motion
@@ -2164,8 +2237,7 @@ class Homotopy:
             draw = np.random.default_rng(self.offset_seed).uniform(0.5, 1.5, self.nc)
             off0 = peaks * (1.0 + draw) + 1e-3 * scale
         peaks0 = g.max(axis=0)
-        state = {"shoot": shoot, "v": sol.v, "le": np.log10(eps0) if self.bang_bang else 0.0,
-                 "off": off0.copy(), "solves": 0}
+        state = {"shoot": shoot, "v": sol.v, "le": le_start, "off": off0.copy(), "solves": 0}
         log_eps_min = state["le"] - s_max
         state["best_tight"], state["progress_at"] = np.inf, time.perf_counter()
 
@@ -2539,6 +2611,15 @@ class Homotopy:
         if not anneal():
             self._say("active set: tightening stalled")
             return None
+        if le_target is not None and state["le"] != le_target:
+            # Rule R24: the limits are in at the larger weight; walk it down to its value
+            # with the structure following, and solve the exact problem there.
+            self._say(f"active set: secondary weight from {10.0 ** state['le']:.3g} "
+                      f"to {self.weight_value:.3g}")
+            if not advance(le_target, np.zeros(self.nc), ds_min=1e-4):
+                self._say("active set: lowering the secondary weight stalled")
+                return None
+            state["le"] = le_target
         if try_exact():
             return found[0]
         converted = self._end_structure(state["shoot"], state["v"])
@@ -2886,8 +2967,9 @@ class Homotopy:
             # Rule R15: a portfolio of routes. Each is a valid route (Lemma D: almost every
             # draw of the offsets separates the births), and which cases a route solves
             # depends on its path; on failure the next one gets the time that is left.
-            members = [{}] + [dict(m_) for m_ in self.portfolio]
-            if self.portfolio and self.parallel_routes:
+            members = [{}] + [dict(m_) for m_ in self.portfolio
+                              if "weight_start" not in m_ or self._weight_route()]
+            if len(members) > 1 and self.parallel_routes:
                 hit = self._routes_in_parallel(members, first, eps0, s_max, steps, tol)
                 if hit is None:
                     return None

@@ -304,6 +304,40 @@ def test_minimum_time_through_run_time_arcs(kernel_cache, taus, t_f):
     assert r.solution.tf == pytest.approx(t_f, abs=2e-6)
 
 
+def test_the_secondary_weight_is_a_runtime_parameter(kernel_cache):
+    """Rule R24: the policy's weight is a kernel parameter, at its value unless the
+    route moves it."""
+    h = Homotopy(examples.two_link_arm_min_time(), cache_dir=kernel_cache,
+                 policy=SecondaryCost(), outline_above=0)
+    n = len(h.problem.params)
+    assert str(h.regularized.params[n]) == "w_secondary" and h.weight_value == 0.01
+    h.params = np.arange(n, dtype=float)
+    zero = np.zeros(h.nc)
+    assert h.regularized_params(None, zero)[n] == 0.01
+    assert h.regularized_params(0.1, zero)[n] == 0.1
+    assert h.exact_params()[n] == 0.01
+    assert h._eps_at(np.log10(0.01)) is None
+    assert h._eps_at(-1.0) == pytest.approx(0.1)
+    assert h._weight_route()
+    plain = Homotopy(examples.two_link_arm_min_time(), cache_dir=kernel_cache,
+                     policy="as_stated", outline_above=0)
+    assert plain.weight_symbol is None and not plain._weight_route()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("taus, t_f", [((2.2, 2.0), 3.656661), ((1.5, 0.4), 4.164857)])
+def test_rule_R24_ends_at_the_stated_weight(kernel_cache, taus, t_f):
+    """Limits brought in at ten times the weight, which then falls to its value: the
+    same answers as the route at the stated weight."""
+    h = Homotopy(examples.two_link_arm_min_time(), cache_dir=kernel_cache,
+                 policy=SecondaryCost(), outline_above=0)
+    h.weight_start = 10
+    r = h.solve([1, 1, 1, 1, 1.5, 1.0, 1.0, *taus], ([-3] * 6, [3] * 6), (1.0, 20.0))
+    assert r.exact and r.diagnostics["rules"].get("R24") == 1
+    assert r.shooting.params[len(h.problem.params)] == 0.01
+    assert r.solution.tf == pytest.approx(t_f, abs=2e-6)
+
+
 def test_a_predicted_arc_past_zero_length_stays_an_arc(kernel_cache):
     h = Homotopy(examples.two_link_arm_min_time(), cache_dir=kernel_cache, policy=SecondaryCost())
     arcs = [("boundary", 0), ("boundary", 2)]

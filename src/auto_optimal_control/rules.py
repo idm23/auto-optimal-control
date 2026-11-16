@@ -102,6 +102,10 @@ RULES = (
          "evaluate it, its STM and its cost in closed form instead of integrating",
          ("T",), "Lemma T (the closed form is the flow; the STM is exact)",
          "free-arc cost (integration time)", "MultiArcShooting.closed_free_default"),
+    Rule("R24", "route start", "the policy's secondary cost has a numeric weight w",
+         "bring the limits in at k w, then walk the weight down to w along the route",
+         ("W", "N"), "Lemma W (the flow's curvature is O(1/w), so Newton's radius is O(w))",
+         "not converged", "weight_start=10"),
     Rule("R9", "evaluation", "a single limit's riding fails before its exit",
          "continue past the edge on the free law", ("K",), "heuristic", "riding_failed",
          "MultiArcShooting.past_edge_default"),
@@ -109,8 +113,9 @@ RULES = (
 
 BY_NAME = {r.name: r for r in RULES}
 
-#: The portfolio rule R15 turns on: another draw of the offsets, then sequential births.
-DEFAULT_PORTFOLIO = ({"offset_seed": 1}, {"offset_order": "sequential"})
+#: The portfolio rule R15 turns on: another draw of the offsets, sequential births, and
+#: (Rule R24, for a policy with a numeric secondary weight) the route started at 10 w.
+DEFAULT_PORTFOLIO = ({"offset_seed": 1}, {"offset_order": "sequential"}, {"weight_start": 10})
 
 
 def enabled(h):
