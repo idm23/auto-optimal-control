@@ -127,7 +127,8 @@ margin is zero exactly when the corner is the only control that holds $g$.
   are taken as smooth maps by hypothesis (S3).
 - **Gap.** Jerks at bounds at $t^*$ (a corner contact) are not covered; see
   the one-sided entry below.
-- **Used by.** R2, R10.
+- **Used by.** R2, R10, R26 (a violation separated from its limit's arc by a
+  stretch with $g < 0$ is a birth, not a widening).
 
 ### F. Time reversal — proved
 
@@ -537,8 +538,9 @@ jump, density, gap, order, bound, end, held sign).
   start, if every event met has a proved continuation and the curve stays
   bounded, it reaches $s = 1$ after finitely many events. Depends on V2 to
   V4, S8. *Gaps:* the table (V4) and boundedness, which must be detected.
-- **Used by.** Phase 2's follower (planned). Today, R1 (V3), R2, R10, R16,
-  R17 (E1, E2), R5, R18, R21 (E3) and R11 (E4) are pieces of it.
+- **Used by.** R25 (V2: the density at a fixed time is $C^1$ in the route
+  parameter). Phase 2's follower (planned). Today, R1 (V3), R2, R10, R16,
+  R17 (E1, E2), R5, R18, R21, R25 (E3) and R11 (E4) are pieces of it.
 
 ### Observation O3: what the direct comparison shows for the unsolved cases
 

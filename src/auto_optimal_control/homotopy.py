@@ -308,6 +308,14 @@ class Homotopy:
         #: negative inside it), place the next one at the split by a secant on the
         #: density (V2), not by settling the split far from it.
         self.locate_splits = False
+        #: How large an event inside a step may be and still be repaired where the step
+        #: landed (relative: a birth's peak excess to the limit's scale, a split's rise
+        #: to max(1, |mu|)); a larger one is located first (R16, R25).
+        self.locate_tol = 1e-3
+        #: Rule R26: a violation near an arc of its limit is born as a new arc when the
+        #: limit is strictly below its level somewhere between them (event E1, Lemma E),
+        #: rather than widening the arc over it.
+        self.separate_births = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -1442,9 +1450,32 @@ class Homotopy:
 
         groups, born = [], []              # groups: [set of arc indices, [(a, b), ...]]
         touch_born = {}                    # R20: index in born -> the birth as a touch
+        split_off = getattr(self, "separate_births", False)
+        samples = self._free_samples(shoot, v) if split_off else []
+
+        def separated(c, lo, hi):
+            """Rule R26: the limit is strictly below its level somewhere in the free
+            time between ``lo`` and ``hi``, so a violation there is its own peak."""
+            if not hi > lo:
+                return False
+            gs = [g[(t > lo) & (t < hi), c] for t, g, active in samples if c not in active]
+            gs = [x for x in gs if len(x)]
+            if not gs:
+                return False
+            reach = max(float(np.abs(g[:, c]).max()) for t, g, active in samples if c not in active)
+            return float(min(x.min() for x in gs)) < -1e-6 * max(reach, 1e-300)
+
         for c, a, b, _ in violations:
             hits = {i for i, (_, cc) in enumerate(arcs)
                     if cc == c and a - near <= span(i)[1] and b + near >= span(i)[0]}
+            if split_off:
+                # Lemma E (event E1): a violation is a birth unless the limit stays at its
+                # level between it and the arc; only then does the arc widen over it.
+                kept = {i for i in hits
+                        if not (separated(c, span(i)[1], a) or separated(c, b, span(i)[0]))}
+                if kept != hits:
+                    self.diagnostics.fired("R26")
+                hits = kept
             q = kr.CONSTRAINT_ORDERS[c]
             if q == 1 and not hits:
                 # On the limit at an end of the motion: the arc reaches that end.
@@ -2349,7 +2380,8 @@ class Homotopy:
             if self.locate_splits and not changed:
                 # Rule R25: the step crossed a split (an arc's density turned negative
                 # inside it): a shorter step, to the event, before any repair.
-                theta = self._split_fraction(state["shoot"], state["v"], sh, r.v)
+                theta = self._split_fraction(state["shoot"], state["v"], sh, r.v,
+                                             too_far=self.locate_tol)
                 if theta is not None:
                     state["why"] = "density negative"
                     state["split_at"] = theta
@@ -2359,7 +2391,7 @@ class Homotopy:
                 viol = self._free_violations(sh, r.v, scale)
                 if viol:
                     worst = max(peak / scale[c] for c, _, _, peak in viol)
-                    if worst > 1e-3 and not changed:
+                    if worst > self.locate_tol and not changed:
                         self._detail("    violation too large: a shorter step ("
                                      + ", ".join(f"{self.kr.CONSTRAINT_NAMES[c]} {peak / scale[c]:.1e}"
                                                  f" at [{a:.5f}, {b:.5f}]"
@@ -2488,7 +2520,8 @@ class Homotopy:
                 located = None
                 if (done is None and self.locate_births
                         and outcome == "settle failed: violation too large"):
-                    located = self._birth_fraction(sh0, v0, state.get("overshoot"), scale)
+                    located = self._birth_fraction(sh0, v0, state.get("overshoot"), scale,
+                                                   target=0.2 * self.locate_tol)
                 if done is None and outcome == "settle failed: density negative":
                     self.diagnostics.fired("R25")
                     self._detail(f"    split located at {state['split_at']:.2f} of the step")
