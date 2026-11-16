@@ -11,10 +11,12 @@ torque limit on every joint. There are two families of cases:
 - **`rest<i>`**: between two random poses, at rest at both ends, with one
   fixed table of torque limits.
 
-The data shown is from the census of 2026-11-15: rules R1, R2, R15, R16 and R20 turned on, with
-held-set events (R22) and closed-form free arcs (R23) on by default, 300 s per case, two
-workers with parallel routes, on 8 physical cores. 43 of 45 cases solve, 41 of them in
-under 60 s.
+The data shown is from the census of 2026-11-16 (release 0.4.0). Rules R1, R2, R15,
+R16, R20, R25 and R26 are turned on, with held-set events (R22) and closed-form free arcs
+(R23) on by default. R15's portfolio has six routes: two draws of the offsets and
+sequential births, each also at ten times the secondary weight (R24). The routes run in
+parallel, one case at a time, with 300 s per case, on 8 physical cores. All 45 cases
+solve, all in under 60 s: the median is 8.2 s and the slowest 45.2 s.
 
 Pick a case to watch it. Its torque traces turn red where the joint rides its
 limit. The page is drawn from the data in `_static/census/data`. Exporting a
