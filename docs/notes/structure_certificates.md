@@ -1226,6 +1226,69 @@ other two members, in `DEFAULT_PORTFOLIO`). The member is dropped when
 the policy has no numeric weight, or when the problem has bang-bang smoothing
 (the route walks $\epsilon$ there, and the member would repeat the first route).
 
+### Rule R25 (place the step at the split)
+
+*Observed:* R5 looks at the rise of $\mu$ on every consistent point inside
+`settle`, but it acts wherever the step lands. A step that crosses a split
+(V4's event E3, in `route_family.md`) lands past it, and R5 splits the arc far
+from the event. The split it offers either fails to solve or is solved and
+rejected at the end ("mu negative", "mu rises"). In the census below, R5
+fired 597 times.
+
+*Rule:* on each step's own solution, before any repair, compute the density
+$\eta = -\dot\mu$ of every order-1 arc (`Homotopy._densities`). Act when both
+of these hold:
+- on some arc, $\eta < 0$ at its minimum $t^*$, and the continuous part of
+  $\mu$ rises by more than $10^{-3} \max(1, |\mu|)$ along it;
+- at the step's start, an arc of the same limit covered $t^*$ with
+  $\eta(t^*) > 0$.
+
+Then the event is inside the step. Take the next step at the fraction
+$\theta = (\eta_0 - 0.1\, \eta_1) / (\eta_0 - \eta_1)$ of it, clipped to
+$[0.05, 0.9]$ (`Homotopy.locate_splits`). Here $\eta_0$ and $\eta_1$ are
+$\eta(t^*)$ at the two ends, so $\theta$ is just past the zero, where R5's
+split is small. The continuous part of the rise leaves out a jump of $\mu$
+between two samples at one time (another limit's junction), which is not the
+density's doing.
+
+*Why it is sound:* only the step length changes. The step is solved, settled
+and judged like any other. Effectiveness is V2: on a fixed structure,
+$\eta(t^*)$ at a fixed time is $C^1$ in the route parameter. So the secant is
+within $O(ds^2)$ of the zero, as R16's is for a birth (Lemma N). The minimum
+of $\eta$ over the arc is only Lipschitz, and $\eta(t^*) \ge \min \eta$. So
+the secant is an upper bound on the event's position, and the next step
+checks it again.
+
+*Not what it was built for:* goal 4 at 70% fails on its first route for a
+different reason. Along that route the density is positive all the way, and
+the failure is a birth just beside an exit:
+- `tau6_min` leaves at $t = 0.9497$, and its $g$ crosses the limit again
+  near $t = 0.954$;
+- the violation is under `settle`'s threshold, so it is brought in on the
+  spot, and the arc grows over it;
+- $\mu$ then rises inside that arc, R5 splits it, the violation returns, and
+  so on until R5's three tries are spent.
+
+*Result* (six routes, R1 R2 R16 R20, 300 s, one case at a time, against main):
+45/45 solved and 44 under 60 s, against 44/45 and 42.
+- **Common cases:** the 44 both solve take 693 s against 753 s, the
+  answers agree to $4 \times 10^{-16}$, and the median is 8.5 s against 7.9 s.
+- **Firings:** R25 fired 128 times, in five cases:
+
+  | Case | main | R25 | R25 fired |
+  |---|---|---|---|
+  | goal 4 at 70% | unsolved (108 s) | 45.4 s | 21 |
+  | goal 2 at 70% | 67.1 s | 39.9 s | 7 |
+  | goal 9 at 70% | 54.6 s | 39.0 s | 2 |
+  | goal 9 at 80% | 217.0 s | 185.7 s | 90 |
+  | goal 0 at 80% | 19.9 s | 19.3 s | 8 |
+
+  Two repeat runs of the first three give the same answers, within 1 s.
+- **Goal 4 at 70%:** solved in another route of the portfolio, with
+  $t_f = 1.167506$.
+- **Still over 60 s:** only goal 9 at 80%. On it, 291 steps fail with
+  "structure changes did not settle".
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

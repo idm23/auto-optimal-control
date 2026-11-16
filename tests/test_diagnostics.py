@@ -91,6 +91,36 @@ def test_birth_fraction_is_the_secant_root():
     assert h._birth_fraction(None, None, {}, scale) is None
 
 
+def test_split_fraction_is_the_secant_root():
+    """Rule R25: the step to a split is the secant root of the density at the time of
+    its minimum (V2), aimed a tenth of the way past it."""
+    import numpy as np
+    from types import SimpleNamespace
+
+    h = Homotopy.__new__(Homotopy)
+    h.kr = SimpleNamespace(CONSTRAINT_NAMES=["g0", "g1"])
+    h._detail = lambda *a: None
+    t = np.linspace(0.0, 1.0, 11)
+    start = [(1, t, np.full(11, 2.0), 0.0, 5.0)]
+    # The density at t = 0.5 goes from 2 to -1 over the step; mu rises by 0.1 there.
+    dip = np.full(11, 2.0)
+    dip[5] = -1.0
+    end = [(1, t, dip, 0.1, 5.0)]
+    h._densities = lambda shoot, v: start if shoot == "start" else end
+    # eta(0.5) = 2 + theta * (-1 - 2) = 0.1 * (-1): theta = 2.1 / 3.
+    assert h._split_fraction("start", None, "end", None) == pytest.approx(0.7)
+    # A rise below the threshold, or a step that starts past the zero, is left to R5.
+    end[0] = (1, t, dip, 1e-4, 5.0)
+    assert h._split_fraction("start", None, "end", None) is None
+    end[0] = (1, t, dip, 0.1, 5.0)
+    start[0] = (1, t, np.full(11, -0.5), 0.0, 5.0)
+    assert h._split_fraction("start", None, "end", None) is None
+    # A rise from a jump of mu (no negative density) is not a split.
+    start[0] = (1, t, np.full(11, 2.0), 0.0, 5.0)
+    end[0] = (1, t, np.full(11, 2.0), 0.1, 5.0)
+    assert h._split_fraction("start", None, "end", None) is None
+
+
 def _stub_structure(arcs, values, orders, T=2.0):
     """A Homotopy and a stand-in multi-arc shooting whose structure is ``(arcs, values)``."""
     import types
