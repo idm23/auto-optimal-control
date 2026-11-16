@@ -88,7 +88,7 @@ def rebuild(h, snap, at="attempt"):
     arcs, values, base = side["arcs"], side["values"], side["base"]
     le, off = side["le"], np.asarray(side["off"], dtype=float)
     entries, values = h._mas_entries(arcs, values)
-    sh = h._smoothed(entries, 10.0 ** le if h.bang_bang else None, off)
+    sh = h._smoothed(entries, h._eps_at(le), off)
     guess = sh.pack_arcs(base, values) if arcs else np.asarray(base, dtype=float)
     return sh, guess, le, off
 

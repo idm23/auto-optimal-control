@@ -869,7 +869,8 @@ of the edge, where the exact one does not exist (Lemma B fails there).
 ### Rule R15 (a portfolio of routes)
 
 *Rule:* when the active-set route fails, try the next route of a portfolio:
-another draw of the offsets, then sequential births (`Homotopy.portfolio`).
+another draw of the offsets, then sequential births, then (Rule R24) the
+route started at ten times the secondary weight (`Homotopy.portfolio`).
 Every route may use all the time left, and a route that sets no new low of
 its offsets for `stall_seconds` (60 s) yields to the next.
 
@@ -1132,6 +1133,96 @@ no answer is accepted on its account.
 - The route's path changes slightly: the exact STM moves the chord's
   accept-or-reject decisions. So single cases can be slower (six were, by at
   most 0.4 s); only the totals compare.
+
+### Rule R24 (the secondary weight as a route parameter)
+
+*Observed:* on rest 4, 148 of the route's 400 path steps failed with "not
+converged", and failed chord calls took 38 s of the 81 s solve. Every path step
+runs at the stated weight: the arm's jerks are not bang-bang as solved,
+because the default policy adds the secondary cost
+$w \sum_i (j_i / s_i)^2 / 2$ with $w = 0.01$. So there is no smoothing
+homotopy, and the jerk law $\operatorname{clip}(-s_i^2 \lambda_{a,i} / w)$
+has slope $9 \times 10^4$ in $\lambda_a$. Tracing every chord call showed:
+
+- the full Newton step fails to contract even on steps that end up
+  converging (median $\|R(v + \Delta v)\| / \|R(v)\| = 1.7$), with
+  $\|\Delta v\| \approx 0.01$;
+- along a failed step, $\|R(v + \alpha \Delta v) - (1 - \alpha) R(v)\|$
+  grows as $\alpha^2$, smooth rather than kinked, concentrated in R7's rate
+  rows (they read the arriving control) and in the end states;
+- the failures fall with the weight. Solving rest 4 as if $w$ were 0.03 or
+  0.1 (other problems, other answers) gives 77 of 217 and 15 of 51 failed
+  steps, in 41 s and 10 s.
+
+*Rule:* the secondary weight is a runtime parameter of the kernels
+(`w_secondary`, after the problem's own parameters). With
+`Homotopy.weight_start = k`, the active-set route:
+1. carries the unconstrained solution from $w$ to $k w$ by Newton steps in
+   $\log w$;
+2. brings the limits in there;
+3. walks the weight back down to $w$ with the structure following (the same
+   `advance` and `settle` as for the offsets);
+4. solves the exact problem at $w$.
+
+*Why it is sound:* Lemma W(1). Every problem on the path is one of the
+family, and the answer is the exact solve at the stated weight, judged by
+the same checks. W(2) explains why it helps: the curvature of the flow is
+$O(1/w)$, so Newton's radius is $O(w)$.
+
+*Result* (R1 R2 R15 R16 R20, 300 s, 2 workers, parallel routes, against main):
+
+- **R24 off, on the new kernels:** the weight is a loaded parameter instead
+  of a folded constant, so rounding moves by an ulp. On the six cases
+  checked, times match main (3.8, 10.7, 18.8, 17.0, 2.7, 2.9 s against 3.8,
+  10.4, 21.7, 16.3, 3.1, 2.7 s), with the same answers.
+- **All three routes at $10w$, slow cases only:**
+
+  | Case | main | R24 |
+  |---|---|---|
+  | rest 4 | 107.6 s | 33.1 s |
+  | rest 9 | 59.0 s | 20.4 s |
+  | goal 0 at 70% | 68.3 s | 36.5 s |
+  | goal 9 at 80% | unsolved | 183 s |
+  | goal 2 at 70% | 55.0 s | 256 s |
+  | goal 4 at 70% | unsolved | unsolved |
+
+  At $3w$: goal 9 at 80% takes 17 s, goal 2 at 70% 115 s, rest 4 81 s.
+- **Rest 9** now reaches $t_f = 1.368515$, the better extremal, which the
+  forward route had lost with R22 ($1.370023$).
+- **Routes at $10w$, $3w$ and $w$** (in place of the other offset draw and
+  sequential births): 42/45. Goal 5 at 80% and 70% fail, because the
+  seed-1 route that solves them in main was dropped. The members are
+  complementary.
+- **The three routes of main plus a fourth at $10w$** (8 processes): 44/45,
+  with goal 9 at 80% solved (220 s). 644 s against 738 s on the 43 both
+  solve (1.15×); the median 7.5 s against 8.8 s; 40 under 60 s against 41.
+- **All three routes at $10w$:** 43/45 and 41 under 60 s, but not the same
+  41 as main.
+  - Rest 4 (33 s) and goal 0 at 70% drop below 60 s, and goal 9 at 80% is
+    solved (162 s).
+  - Goal 9 at 70% fails, and goal 2 at 70% takes 329 s.
+  - No variant dominates. Which weight a case needs is route chaos, like the
+    offset draw, so the weight belongs in the portfolio beside the draw.
+
+- **Six routes: main's three at $w$ and the same three at $10w$** (one case
+  at a time, 6 processes): 44/45 and 42 under 60 s, 536 s against 738 s on
+  the 43 that main also solves (1.38×), median 7.9 s.
+
+  | Case | main | four routes | six routes |
+  |---|---|---|---|
+  | rest 4 | 107.6 s | 108.4 s | 33.2 s |
+  | rest 9 | 59.0 s | 17.7 s | 19.5 s |
+  | goal 0 at 70% | 68.3 s | 72.0 s | 36.3 s |
+  | goal 2 at 70% | 55.0 s | 72.6 s | 67.1 s |
+  | goal 9 at 70% | 28.7 s | 40.4 s | 54.6 s |
+  | goal 9 at 90% | 43.0 s | 9.9 s | 9.8 s |
+  | goal 9 at 80% | unsolved | 219.8 s | 217.0 s |
+  | goal 4 at 70% | unsolved | unsolved | unsolved |
+
+*Deployed:* on as the fourth route of R15's portfolio (`{"weight_start": 10}`
+in `DEFAULT_PORTFOLIO`), the 44/45 variant above. The member is dropped when
+the policy has no numeric weight, or when the problem has bang-bang smoothing
+(the route walks $\epsilon$ there, and the member would repeat the first route).
 
 ## Rules these license
 

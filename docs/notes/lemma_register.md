@@ -457,6 +457,55 @@ route stalls.
 - **Used by.** R23. It is a rule of the machinery: it computes the same flow
   without integration error, so no answer is accepted on its account.
 
+### W. The secondary weight is a route parameter, and Newton's radius grows with it — proved (1), sketch (2)
+
+- **Statement.** Take a problem solved under the policy `SecondaryCost` with a
+  numeric weight $w_* > 0$: running cost $L_0 + w \sum_i (u_i / s_i)^2 / 2$,
+  each $u_i$ in a box $[-s_i, s_i]$ and entering $H$ as $S_i u_i$, so that off
+  the limits $u_i = \operatorname{clip}(-s_i^2 S_i / w,\ -s_i,\ s_i)$.
+  1. *(The route.)* Every problem with $w \in [w_*, k w_*]$ belongs to the
+     same family: dynamics, limits and ends are unchanged, and $H$ is strictly
+     convex in $u$ with Hessian $\operatorname{diag}(w / s_i^2)$. The shooting
+     residual $R(v; w)$ is $C^1$ in $w$ wherever it is $C^1$ in $v$, because
+     $w$ enters only the control law and the cost, both smooth in $w > 0$. So
+     where $\partial R / \partial v$ is nonsingular, the extremal of a fixed
+     structure continues $C^1$ in $w$ (S2). Births and deaths along $w$ are the
+     events the route already handles along the offsets, and Lemma N is stated
+     for any route parameter. The answer is the exact solve at $w = w_*$,
+     judged by the same checks.
+  2. *(Why it helps.)* Suppose $S_i$ crosses the interior band
+     $|S_i| < w / s_i$ transversally ($\dot S_i \ne 0$) at the ends of a ramp
+     of $u_i$ on a free arc. The ramp lasts $2w / (s_i |\dot S_i|)$. On it,
+     $\partial u_i / \partial v = -(s_i^2 / w)\, \partial S_i / \partial v$.
+     So the flow's first derivative in the unknowns picks up a term of order 1
+     from the ramp: duration $O(w)$ times slope $O(1/w)$. Its second
+     derivative picks up a term of order $1/w$, from the ramp's ends moving:
+     $(s_i^2 / w)\,(\partial S_i / \partial v)^{\otimes 2} / |\dot S_i|$ at each
+     end. So the affine-covariant Lipschitz constant $\omega$ of the shooting
+     map (Deuflhard) is $O(1/w)$, and the Newton–Kantorovich radius $2/\omega$
+     is $\Omega(w)$.
+- **Proof.**
+  - (1) is the implicit function theorem applied to $R(v; w) = 0$, given S3.
+  - For (2), differentiate the variation-of-constants form of the flow twice
+    in $v$ (as in Lemma T(3)). The second derivative of
+    $\int \operatorname{clip}(a(\rho, v))\,d\rho$ with $a = -s^2 S / w$ is the
+    interior integral of $\partial^2 a$, plus $\pm(\partial a / \partial v)^2 / |\partial a / \partial \rho|$
+    at the two band crossings. That is $(s^2 / w)\,(\partial S / \partial v)^2 / |\dot S|$.
+    Through the dynamics the kernel multiplies this by a bounded factor.
+- **Depends on.** S2, S3, Lemma N.
+- **Gap.** (2) bounds the terms at the ramps. It does not show that they
+  dominate $\omega$; other terms (riding, $M(q)$) do not scale with $w$.
+  - The census says they dominate. On rest 4 the route's failed path steps
+    are 148 of 400 at $w = 0.01$, 77 of 217 at 0.03 and 15 of 51 at 0.1.
+  - Scans along failed Newton steps at $w = 0.01$ show the linearization error
+    growing as $\alpha^2$, concentrated in R7's rate rows, which read the
+    arriving control.
+- **To formalize.** (1) is routine. (2) needs the transversality of the band
+  crossings, which holds away from a measure-zero set of $v$ (a double root,
+  as in Lemma T's gap).
+- **Used by.** R24. Soundness rests on (1) only: no answer is accepted on (2)'s
+  account, which only explains why the route is shorter.
+
 ### Observation O3: what the direct comparison shows for the unsolved cases
 
 The direct transcription (`auto_optimal_control.direct`) was run at 120 and 240
