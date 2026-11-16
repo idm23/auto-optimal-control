@@ -304,6 +304,10 @@ class Homotopy:
         #: Rule R16: after a step that overshoots a birth, place the next one at the
         #: birth by a secant on the peak excess (Lemma N), not by halving.
         self.locate_births = False
+        #: Rule R25: after a step that crosses a split (an order-1 arc's density turns
+        #: negative inside it), place the next one at the split by a secant on the
+        #: density (V2), not by settling the split far from it.
+        self.locate_splits = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -1223,6 +1227,87 @@ class Homotopy:
             theta = (target - p0) / (p1 - p0)
             best = theta if best is None else min(best, theta)
         return None if best is None else float(np.clip(best, 0.05, 0.9))
+
+    def _densities(self, shoot, v, n_points=801):
+        """Per order-1 boundary arc, its measure's density along it:
+        ``[(c, t, eta, rise, mu_max)]``, with ``eta = -dmu/dt`` at the midpoints ``t``
+        of the samples of ``mu`` on the arc (Lemma H: ``mu(t) = int_t^{t_out} eta``),
+        and ``rise`` the largest rise of ``mu`` along it (0 when ``eta >= 0``)."""
+        if not isinstance(shoot, MultiArcShooting):
+            return []
+        k, p = shoot.kernels, shoot.params
+        arcs, values = self._arcs_of(shoot, v)
+        tr = shoot.trajectory(v, n_points)
+        out = []
+        for (kind, c), val in zip(arcs, values):
+            if kind != "boundary" or self.kr.CONSTRAINT_ORDERS[c] != 1:
+                continue
+            on = np.flatnonzero(tr["active"][:, c] & (tr["t"] >= val[0]) & (tr["t"] <= val[1]))
+            if len(on) < 3:
+                continue
+            mu = []
+            for j in on:
+                aid = tr["arc"][j]
+                m_ = k.boundary_multiplier(aid, tr["t"][j], tr["z"][j], p)
+                mu.append(float(np.atleast_1d(m_)[0]) if aid < k.N_CONSTRAINTS
+                          else float(np.atleast_1d(m_)[list(k.arc_constraints(aid)).index(c)]))
+            t, mu = tr["t"][on], np.asarray(mu)
+            dt = np.diff(t)
+            keep = dt > 0
+            eta = -np.diff(mu)[keep] / dt[keep]
+            # The rise of the continuous part of mu: a jump between two samples at one
+            # time (another limit's junction) is not the density's doing.
+            cont = np.concatenate([[0.0], np.cumsum(np.diff(mu)[keep])])
+            rise = float(np.max(cont - np.minimum.accumulate(cont)))
+            out.append((c, 0.5 * (t[1:] + t[:-1])[keep], eta, rise, float(np.abs(mu).max())))
+        return out
+
+    def _split_fraction(self, shoot0, v0, shoot1, v1, too_far=1e-3, target=0.1):
+        """Rule R25: the fraction of a step at which an order-1 arc's density first
+        reaches zero inside the arc, or None.
+
+        The step ends at ``(shoot1, v1)``, where the density ``eta`` of some arc is
+        negative enough that ``mu`` rises by more than ``too_far`` (relative to
+        ``max(1, |mu|)``, the scale of ``_verdict``'s check) along the arc; it started
+        at ``(shoot0, v0)``, where an arc of the same limit covered that time with
+        ``eta > 0`` there. So the event (V4's E3, a split) is inside the step.
+
+        At a fixed time ``t*`` the density is a C^1 function of the route parameter
+        while the structure is fixed (V2), so the secant on ``eta(t*)`` between the
+        two ends places the step where ``eta(t*) = target * eta_1(t*)``: just past
+        the zero, to O(ds^2), with a small rise for Rule R5 to split. Only the
+        step length changes; the step is solved and judged as any other."""
+        try:
+            new = self._densities(shoot1, v1)
+        except _FAILURES:
+            return None
+        worst = None
+        for c, t, eta, rise, mu_max in new:
+            if len(eta) == 0 or rise <= too_far * max(1.0, mu_max):
+                continue
+            j = int(np.argmin(eta))
+            if worst is None or rise > worst[0]:
+                worst = (rise, c, float(t[j]), float(eta[j]))
+        if worst is None:
+            return None
+        _, c, t_star, eta1 = worst
+        if not eta1 < 0.0:
+            return None
+        try:
+            old = self._densities(shoot0, v0)
+        except _FAILURES:
+            return None
+        for c0, t, eta, _, _ in old:
+            if c0 != c or len(t) < 2 or not (t[0] <= t_star <= t[-1]):
+                continue
+            eta0 = float(np.interp(t_star, t, eta))
+            if not eta0 > 0.0:
+                return None                # the step starts past the event: R5 splits
+            theta = (eta0 - target * eta1) / (eta0 - eta1)
+            self._detail(f"    {self.kr.CONSTRAINT_NAMES[c]}: density at t = {t_star:.5f} "
+                         f"falls from {eta0:.2e} to {eta1:.2e} over the step")
+            return float(np.clip(theta, 0.05, 0.9))
+        return None
 
     def _free_violations(self, shoot, v, scale):
         """``[(c, start, end, peak)]``: where each limit is violated while it is not ridden."""
@@ -2261,6 +2346,14 @@ class Homotopy:
             (le, off) is consistent; ``(shoot, sol)`` or None. ``changed``: the
             structure was just changed, so a large violation is that change's doing."""
             last = None
+            if self.locate_splits and not changed:
+                # Rule R25: the step crossed a split (an arc's density turned negative
+                # inside it): a shorter step, to the event, before any repair.
+                theta = self._split_fraction(state["shoot"], state["v"], sh, r.v)
+                if theta is not None:
+                    state["why"] = "density negative"
+                    state["split_at"] = theta
+                    return None
             for _ in range(2 * self.nc + 4):
                 optional = False
                 viol = self._free_violations(sh, r.v, scale)
@@ -2389,13 +2482,18 @@ class Homotopy:
                         self._detail(f"  step to {f:.6f} (ds {ds:.1e}): {exc}")
                         done = None
                         outcome = f"raised: {getattr(exc, 'failure', type(exc).__name__)}"
-                    if done is not None:
-                        break
+                    if done is not None or state["why"] == "density negative":
+                        break              # solved, or the split is inside the step
                 self.diagnostics.step(outcome)
                 located = None
                 if (done is None and self.locate_births
                         and outcome == "settle failed: violation too large"):
                     located = self._birth_fraction(sh0, v0, state.get("overshoot"), scale)
+                if done is None and outcome == "settle failed: density negative":
+                    self.diagnostics.fired("R25")
+                    self._detail(f"    split located at {state['split_at']:.2f} of the step")
+                    ds = (f - frac) * state["split_at"]
+                    continue
                 if done is None and attempt is not None and self.snapshot_dir is not None:
                     cur_arcs, cur_vals = self._arcs_of(sh0, v0)
                     self.diagnostics.snapshot(self.snapshot_dir, self.snapshot_tag, outcome, {
