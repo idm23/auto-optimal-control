@@ -275,7 +275,9 @@ def test_multiple_shooting_has_an_exact_jacobian_and_the_same_answer(smooth):
     R, J = shoot.residual_jacobian(w)
     FD = np.zeros_like(J)
     for i in range(len(w)):
-        h = 1e-6 * max(1.0, abs(w[i]))
+        # The residual carries the integrator's noise (about 1e-10), which a central
+        # difference divides by h: at h = 1e-6 that is about 1e-4, at the tolerance.
+        h = 1e-5 * max(1.0, abs(w[i]))
         a, b = w.copy(), w.copy()
         a[i] += h
         b[i] -= h
