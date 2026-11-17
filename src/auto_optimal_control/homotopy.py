@@ -326,6 +326,15 @@ class Homotopy:
         #: own control joins the held set, the piece is offered first leaving just
         #: before that moment.
         self.exit_before_saturation = False
+        #: Rule R30 (V1's order monitor on the route): a solution whose junctions have
+        #: crossed is not accepted. A crossing larger than ``locate_tol`` (of T) in one
+        #: step means a shorter step; a smaller one is the reorder (E5), and a reorder
+        #: that crosses back again has not continued the event.
+        self.watch_order = False
+        #: Rule R31 (V1's jump monitor on the route): an order-1 arc whose entry
+        #: multiplier pi is negative goes. By Lemma H, 0 <= mu <= pi on the arc, so at
+        #: pi = 0 the multiplier vanishes on it and the arc dies without moving the motion.
+        self.retire_negative = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -1909,6 +1918,13 @@ class Homotopy:
             if kind == "touch" and val[1] < -1e-9:
                 changed = True
                 continue
+            if (getattr(self, "retire_negative", False) and kind == "boundary"
+                    and self.kr.CONSTRAINT_ORDERS[c] == 1
+                    and float(np.atleast_1d(val[2])[0]) < -1e-7):
+                # Rule R31: the jump monitor of an order-1 arc is negative.
+                self.diagnostics.fired("R31")
+                changed = True
+                continue
             out_a.append((kind, c))
             out_v.append(val)
         return (out_a, out_v) if changed else None
@@ -2316,6 +2332,17 @@ class Homotopy:
                 return float(tr["t"][idx[q]])
         return None
 
+    @staticmethod
+    def _order_crossing(shoot, v):
+        """Rule R30: how far ``v``'s junctions have crossed, as a fraction of T: the
+        largest step back between consecutive event times (the order monitor of V1,
+        negated); 0 when they are in order."""
+        if not isinstance(shoot, MultiArcShooting) or not shoot.arcs:
+            return 0.0
+        times = [shoot.t0, *shoot.event_times(v), shoot.unpack(v)[3]]
+        back = max(a - b for a, b in zip(times, times[1:]))
+        return max(back, 0.0) / (times[-1] - times[0])
+
     def _split_resolved(self, shoot, v):
         """Rule R28: whether a split (or trim) solution has the density monitor of the
         limit it split back to zero: no rise of its multiplier beyond the final
@@ -2568,6 +2595,7 @@ class Homotopy:
             (le, off) is consistent; ``(shoot, sol)`` or None. ``changed``: the
             structure was just changed, so a large violation is that change's doing."""
             last = None
+            reorders = 0
             if self.locate_splits and not changed:
                 # Rule R25: the step crossed a split (an arc's density turned negative
                 # inside it): a shorter step, to the event, before any repair.
@@ -2579,7 +2607,21 @@ class Homotopy:
                     return None
             for _ in range(2 * self.nc + 4):
                 optional = False
-                viol = self._free_violations(sh, r.v, scale)
+                back = self._order_crossing(sh, r.v) if self.watch_order else 0.0
+                crossed = back > 0.0
+                if crossed:
+                    # Rule R30: the order monitor (V1) is negative.
+                    self.diagnostics.fired("R30")
+                    if back > self.locate_tol and not changed:
+                        self._detail(f"    junctions crossed by {back:.1e} of T: a shorter step")
+                        state["why"] = "junctions crossed"
+                        return None
+                    reorders += 1
+                    if reorders > 2:
+                        self._detail("    the reorder crosses back: not settled")
+                        state["why"] = "reorder did not settle"
+                        return None
+                viol = None if crossed else self._free_violations(sh, r.v, scale)
                 if viol:
                     worst = max(peak / scale[c] for c, _, _, peak in viol)
                     if worst > self.locate_tol and not changed:

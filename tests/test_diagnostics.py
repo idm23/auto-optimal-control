@@ -249,3 +249,36 @@ def test_a_split_is_taken_only_if_it_resolves_the_rise():
     h._arcs_of = lambda shoot, v: ([("boundary", 0), ("boundary", 0)],
                                    [(0.2, 0.4, np.zeros(1)), (0.4, 0.7, np.zeros(1))])
     assert not h._split_resolved(shoot, None)       # the gap closed
+
+
+def test_an_order1_arc_with_a_negative_entry_multiplier_goes_under_r31():
+    """Rule R31: 0 <= mu <= pi on an order-1 arc (Lemma H), so an arc whose entry
+    multiplier pi is negative is retired; without the rule it stays."""
+    import numpy as np
+
+    arcs = [("boundary", 0), ("boundary", 1)]
+    values = [(0.1, 0.4, np.array([0.015])), (0.2, 0.3, np.array([-5e-4]))]
+    h, shoot = _stub_structure(arcs, values, [1, 1])
+    h.retire_negative = False
+    assert h._retire(shoot, None) is None
+    h.retire_negative = True
+    assert h._retire(shoot, None) == ([("boundary", 0)], [values[0]])
+    assert h.diagnostics.rules.get("R31") == 1
+    # A jump at rounding level is not a death.
+    values[1] = (0.2, 0.3, np.array([-1e-12]))
+    h, shoot = _stub_structure(arcs, values, [1, 1])
+    h.retire_negative = True
+    assert h._retire(shoot, None) is None
+
+
+def test_the_order_monitor_measures_how_far_junctions_crossed():
+    """Rule R30: the largest step back between consecutive junctions, relative to T;
+    zero when they are in order."""
+    import numpy as np
+
+    h, shoot = _stub_structure([("boundary", 0), ("boundary", 1)], [], [1, 1], T=2.0)
+    shoot.arcs = [("boundary", 0, None), ("boundary", 1, None)]
+    shoot.event_times = lambda v: np.array([0.2, 0.5, 0.9, 1.1])
+    assert Homotopy._order_crossing(shoot, None) == 0.0
+    shoot.event_times = lambda v: np.array([0.2, 0.9, 0.86, 1.1])
+    assert Homotopy._order_crossing(shoot, None) == pytest.approx(0.04 / 2.0)
