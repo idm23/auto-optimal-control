@@ -282,3 +282,35 @@ def test_the_order_monitor_measures_how_far_junctions_crossed():
     assert Homotopy._order_crossing(shoot, None) == 0.0
     shoot.event_times = lambda v: np.array([0.2, 0.9, 0.86, 1.1])
     assert Homotopy._order_crossing(shoot, None) == pytest.approx(0.04 / 2.0)
+
+
+def test_the_exact_check_sees_violations_below_the_route_threshold():
+    """Rule R32: the route counts a violation from 1e-6 of the limit's scale; the
+    exact check from 1e-7. ``floor`` lowers the route's threshold to the exact one."""
+    import numpy as np
+
+    h, shoot = _stub_structure([], [], [1, 1])
+    h.nc = 2
+    t = np.linspace(0.0, 1.0, 11)
+    g = np.full((11, 2), -1.0)
+    g[5, 1] = 3e-7                       # above the exact check, below the route's
+    h._free_samples = lambda shoot, v: [(t, g, set())]
+    scale = np.ones(2)
+    assert h._free_violations(shoot, None, scale) == []
+    (c, a, b, peak), = h._free_violations(shoot, None, scale, floor=1e-7)
+    assert (c, a, b) == (1, t[4], t[6]) and peak == pytest.approx(3e-7)
+
+
+def test_touches_become_arcs_from_a_structure():
+    """Rule R20's conversion, from a structure rather than a shooting (R32 uses it on
+    the births it offers)."""
+    import numpy as np
+
+    h, _ = _stub_structure([], [], [1, 2])
+    arcs = [("boundary", 0), ("touch", 0), ("touch", 1)]
+    values = [(0.1, 0.3, np.array([0.2])), (0.5, 1e-5), (0.7, 0.1)]
+    (a1, v1), = h._touches_as_arcs(arcs, values, 2.0, widths=(1e-2,))
+    assert a1 == [("boundary", 0), ("boundary", 0), ("touch", 1)]
+    assert v1[1][0] == pytest.approx(0.49) and v1[1][1] == pytest.approx(0.51)
+    assert v1[1][2].tolist() == [1e-5] and v1[2] == (0.7, 0.1)
+    assert h._touches_as_arcs(arcs[:1] + arcs[2:], values[:1] + values[2:], 2.0) == []

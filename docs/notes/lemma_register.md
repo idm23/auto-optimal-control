@@ -128,7 +128,8 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Gap.** Jerks at bounds at $t^*$ (a corner contact) are not covered; see
   the one-sided entry below.
 - **Used by.** R2, R10, R26 (a violation separated from its limit's arc by a
-  stretch with $g < 0$ is a birth, not a widening).
+  stretch with $g < 0$ is a birth, not a widening), R32 (a birth the exact
+  check sees below the route's threshold).
 
 ### F. Time reversal — proved
 
@@ -371,7 +372,7 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Gap.** The held set must not change at the gap's ends in a way the
   released motion does not share. Rest 12 (O2), where a ridden limit's own
   jerk saturates, still cycles: it splits, the gap closes, it splits again.
-- **Used by.** R27.
+- **Used by.** R27, and R21 through it (the held-set window of goal 8 at 70%).
 
 ### Observation O1 — answers stay off the edge
 

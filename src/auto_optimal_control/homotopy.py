@@ -357,6 +357,11 @@ class Homotopy:
         #: rises (Lemma H) is split there, settled on the route at the end of the
         #: offsets (new violations brought in), and solved exactly again.
         self.exact_splits = False
+        #: Rule R32: an exact solution rejected because a limit is violated off its
+        #: arcs, by less than the route sees (its threshold is 1e-6 of the limit's
+        #: scale, the exact check's 1e-7), gets the birth there (E1, Lemma E), settled
+        #: on the route at the end of the offsets and solved exactly again, as R21.
+        self.exact_births = False
         self._last_rejected = None
         #: Diagnostics of the last solve; snapshots of failed steps go to ``snapshot_dir``
         #: (None: none), named by ``snapshot_tag``; ``check_lemmas`` runs the lemma
@@ -1345,14 +1350,16 @@ class Homotopy:
             return float(np.clip(theta, 0.05, 0.9))
         return None
 
-    def _free_violations(self, shoot, v, scale):
-        """``[(c, start, end, peak)]``: where each limit is violated while it is not ridden."""
+    def _free_violations(self, shoot, v, scale, floor=None):
+        """``[(c, start, end, peak)]``: where each limit is violated while it is not ridden
+        (by more than ``floor``, by default 1e-6 of its scale)."""
         out = []
         for t, g, active in self._free_samples(shoot, v):
             for c in range(self.nc):
                 if c in active:
                     continue
-                bad = g[:, c] > 1e-6 * scale[c]    # above rounding at tangential junctions
+                # Above rounding at tangential junctions.
+                bad = g[:, c] > (1e-6 * scale[c] if floor is None else floor)
                 if not bad.any():
                     continue
                 idx = np.flatnonzero(bad)
@@ -1633,9 +1640,12 @@ class Homotopy:
         if not isinstance(shoot, MultiArcShooting):
             return []
         arcs, values = self._arcs_of(shoot, v)
+        return self._touches_as_arcs(arcs, values, shoot.unpack(v)[3] - shoot.t0, widths)
+
+    def _touches_as_arcs(self, arcs, values, T, widths=(1e-4, 1e-3, 1e-2)):
+        """Rule R20's conversion of the structure ``(arcs, values)`` (of duration ``T``)."""
         if not any(k_ == "touch" and self.kr.CONSTRAINT_ORDERS[c] == 1 for k_, c in arcs):
             return []
-        T = shoot.unpack(v)[3] - shoot.t0
         out = []
         for rel in widths:
             new_v = []
@@ -2888,7 +2898,8 @@ class Homotopy:
                         break
             self._say(f"active set at eps = {step.eps:.3g}: {self._names(arcs)}, "
                       f"exact {'accepted' if hit else 'not accepted'}")
-            if hit is None and self.exact_splits and depth < 2 and self.split_rising:
+            if hit is None and depth < 2 and (self.exact_splits and self.split_rising
+                                              or self.exact_births):
                 hit = split_exact(depth)
             if hit is not None:
                 step.accepted = True
@@ -2900,12 +2911,36 @@ class Homotopy:
             """Rule R21: the last exact solution rejected for a rising multiplier, split
             where it rises (Lemma H, as R5), settled on the route and tried again."""
             rejected = self._last_rejected
-            if (rejected is None or rejected[2] != "mu rises (Lemma H)"
-                    or time.perf_counter() > deadline):
+            if rejected is None or time.perf_counter() > deadline:
                 return None
-            xs, xsol, _ = rejected
+            xs, xsol, why = rejected
             try:
-                options = self._split_rising(xs, xsol.v) or []
+                if why == "mu rises (Lemma H)" and self.exact_splits and self.split_rising:
+                    options = self._split_rising(xs, xsol.v) or []
+                elif why == "limit violated off its arcs" and self.exact_births:
+                    # Rule R32: the violation the exact check sees, brought in as the
+                    # route brings in any violation (births, widenings, R26). It is
+                    # below what the route resolves, so the options go to the exact
+                    # solve directly (order-1 touches as R20's short arcs).
+                    viol = self._free_violations(xs, xsol.v, scale, floor=1e-7)
+                    options = self._activate(xs, xsol.v, viol) if viol else []
+                    for arcs_b, vals_b in options:
+                        self.diagnostics.fired("R32")
+                        tries = [(arcs_b, vals_b)]
+                        if any(kind == "touch" and self.kr.CONSTRAINT_ORDERS[c] == 1
+                               for kind, c in arcs_b):
+                            tries = self._touches_as_arcs(
+                                arcs_b, vals_b, xs.unpack(xsol.v)[3] - xs.t0)
+                        for arcs_x, vals_x in tries:
+                            entries_x, ev_x = self._mas_entries(arcs_x, vals_x)
+                            v_x = self._smoothed(entries_x, None, state["off"]).pack_arcs(
+                                xsol.v[:xs.n_base], ev_x)
+                            hit = self._exact_jump(entries_x, v_x, tol)
+                            if hit is not None:
+                                return hit
+                    return None
+                else:
+                    return None
             except _FAILURES:
                 return None
             saved = dict(state)

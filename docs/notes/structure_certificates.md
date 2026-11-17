@@ -1561,6 +1561,56 @@ So the first route alone gains two, and the six-route census loses one
 case's margin to route chaos rather than to a wrong transition. Both
 monitors are V1's; what remains is the transitions those routes now reach.
 
+### Repairs at the exact solve: Rule R21 again, and Rule R32
+
+With R30 and R31 the first route alone still failed goal 4 and goal 8 at
+70%. Both forward routes end their offsets with nearly the answer's
+structure. The exact solve converges and is rejected, each time for a
+monitor the route did not see:
+
+- **Goal 8 at 70%: "mu rises" on `tau5_min`** (0.0033 against a peak of
+  0.33).
+  - The route carries `tau1_max` as an order-1 touch inside `tau5_min`'s
+    arc (R20). The exact solve widens it into a short arc, and while
+    `tau1_max` is held, `tau5_min`'s density is negative (Lemma P).
+  - The answer is the route's structure with `tau5_min` split around that
+    window: [0.56492, 0.57155], then `tau1_max` on [0.57229, 0.57326], then
+    [0.57399, 0.70809]. That is Lemma E3's held-set-window case.
+- **Goal 4 at 70%: `tau6_min` violated off its arcs by $1.4 \times 10^{-7}$.**
+  - The route's threshold is $10^{-6}$ of the limit's scale, and the exact
+    check's is $10^{-7}$, so the route never saw this violation.
+  - The answer has a second short `tau6_min` arc, [0.96094, 0.96405], just
+    after the first.
+
+*Rule R21* (exact splits, tried before with R5's split, no gain then). With
+R27 on, `_split_rising` offers Lemma E3's gap first. Goal 8 at 70% then
+solves on the forward route in 21 s.
+
+*Rule R32* (`Homotopy.exact_births`, from Lemma E and V1). When the exact
+solution is rejected for a violation off its arcs:
+- The violation is found at the exact check's threshold.
+- It is brought in as the route brings in any violation (`_activate`:
+  birth, widening, R26).
+- Each option goes to the exact solve directly, with order-1 touches as
+  R20's short arcs.
+
+The options do not go through the route: the route's tolerance (about
+$10^{-6}$) cannot resolve a violation this small, and there it retires the
+newborn arc again. Goal 4 at 70% then solves on the forward route in 11 s.
+
+*Result (first route alone, with R30 and R31 as well):*
+
+| | R27 | + R30 + R31 | + R21 + R32 |
+|---|---|---|---|
+| solved | 38/45 | 40/45 | 42/45 |
+| under 60 s | | 33 | 36 |
+| total | | 3264.9 s | 2516.5 s |
+
+The cases left on the first route:
+- **Failing:** goal 0 at 70%, goal 3 at 70% and rest 12.
+- **Over 60 s:** goal 5 at 70%, goal 2 at 70%, rest 4, rest 9, rest 2
+  (through R4) and goal 7 at 70% (through R4).
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
