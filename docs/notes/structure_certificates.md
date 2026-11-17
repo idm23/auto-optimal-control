@@ -1616,6 +1616,95 @@ The cases left on the first route:
 - **Over 60 s:** goal 5 at 70%, goal 2 at 70%, rest 4, rest 9, rest 2
   (through R4) and goal 7 at 70% (through R4).
 
+### Which arc to split, and the split's seed: Rules R33, R34
+
+With R21 and R32 the first route alone failed goal 3 at 70%. A trace of
+`tau2_min` along the route shows why:
+
+- Before `tau3_min` is born, `tau2_min` rides [0.137, 0.318] with
+  $\pi = 2.2 \times 10^{-4}$ and $\mu \ge 0$ on the whole arc.
+- `tau3_min` is then born inside it, at [0.289, 0.293]. While `tau3_min` is
+  held, `tau2_min`'s density is negative (Lemma P). So $\mu$ before the window
+  falls by about the window's mass, which grows with its width. At a window
+  of $7.5 \times 10^{-4}$, $\mu$ before it is $-1.5 \times 10^{-4}$, and a step
+  later $\pi$ itself is negative.
+- R31 then retires `tau2_min`. The structure without it does not converge
+  (residual 63). Neither does `tau2_min` with its entry moved to where $\mu$
+  turns positive (residuals $10^2$ to $10^7$). The arc's tail, where
+  $\mu > 0$, is still wanted.
+
+At the first state with `tau3_min` held and $\pi > 0$, R5 sees two rises on
+the window:
+- `tau2_min`: $\mu$ from $-1.5 \times 10^{-4}$ to $4.0 \times 10^{-5}$;
+- `tau6_min`: a larger absolute rise, on a multiplier of about 3.7.
+
+R5 splits the largest absolute rise, so it splits `tau6_min`. That solves,
+but `tau2_min` stays negative, and from there no split of `tau2_min` solves
+(residuals 31 to 98).
+
+Splitting `tau2_min` instead, from the same state, solves to a structure
+whose monitors are all non-negative:
+- `tau2_min` on [0.13252, 0.28732] with $\pi = 2.0 \times 10^{-4}$;
+- `tau3_min` on [0.28849, 0.29173];
+- `tau2_min` again on [0.29294, 0.32173];
+- `tau6_min` one arc again (its rise was the one induced);
+- no violation off the arcs.
+
+The answer has the same exchange near the end: `tau2_min` leaves at 0.218,
+just before `tau3_min` enters at 0.220.
+
+*Rule R33* (`Homotopy.relative_rise`). R5 splits the arc whose rise is
+largest relative to the arc's largest $|\mu|$. Scaling a limit's function
+$g_c \to k g_c$ scales $\mu_c \to \mu_c / k$ and changes nothing else. So
+only a scale-free measure can compare rises on different limits. It is an
+order of trial; acceptance is unchanged.
+
+*Rule R34* (`Homotopy.wide_gaps`, a seed). From that state, a `tau2_min`
+split solves or fails by the first piece's seed, at the same gap:
+
+| gap (window $w$ widened on each side by) | first piece's $\pi$: R5's $\pi - \mu_{\rm lo}$ | first piece's $\pi$: unchanged |
+|---|---|---|
+| $0.5\,w$ | fails (96) | solves ($1.6 \times 10^{-8}$) |
+| $2\,w$ | fails (90) | solves ($1.0 \times 10^{-7}$) |
+
+R5's value is the right answer to leading order: the solution's $\pi$ is
+$2.03 \times 10^{-4}$ against R5's $2.09 \times 10^{-4}$. But a different $\pi$
+moves the costate along the whole first piece. The unchanged $\pi$ reproduces
+the current solution up to the gap, so Newton only has to close the gap.
+With the gap R5 offers, 2% wider than the window, the seed fails whatever
+$\pi$ is ($10^6$ and up): the junctions nearly coincide with the held
+limit's (Lemma D). R34 therefore also offers the split seeded by
+continuity, with gaps wider by $0.5\,w$ and $2\,w$ on each side.
+
+*Result.* Goal 3 at 70% on the first route alone:
+
+| Rules on | Outcome |
+|---|---|
+| R33 and R34 | solves forward in 12 s (18 s in the census) |
+| R33 alone | solves only through R4, at 311 s |
+| R34 alone | fails: `tau6_min` is split first |
+
+*Census, first route alone (R30, R31, R21, R32 on as well):*
+
+| | + R21 + R32 | + R33 + R34 |
+|---|---|---|
+| solved | 42/45 | 42/45 |
+| under 60 s | 36 | 36 |
+| total | 3556.2 s | 3252.7 s |
+
+The final times agree where both solve (to $4 \times 10^{-16}$).
+- **Gained:** goal 3 at 70% (failed, now 18 s).
+- **Lost:** goal 7 at 70%. It solved at 510 s through R4, near the cap; now
+  it runs out of time at 595 s.
+- **Slower:** goal 5 at 80%, 59 s to 65 s (R33 fires there).
+
+Cases where neither rule fires take the same route; their times moved by up
+to about 20% between the two runs.
+
+With six routes and the same rules, all 45 solve under 60 s: total 464.5 s
+against 494.1 s, median 6.9 s, slowest 47.0 s (goal 2 at 70%). The rules
+stay off by default until the first route alone solves all 45 under 60 s.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

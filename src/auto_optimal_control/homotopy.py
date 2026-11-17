@@ -335,6 +335,17 @@ class Homotopy:
         #: multiplier pi is negative goes. By Lemma H, 0 <= mu <= pi on the arc, so at
         #: pi = 0 the multiplier vanishes on it and the arc dies without moving the motion.
         self.retire_negative = False
+        #: Rule R33: R5 splits the arc whose multiplier rises most relative to its own
+        #: largest value on the arc. Scaling a limit's function by k scales its
+        #: multiplier by 1/k, so only the relative rise compares limits; a rise one arc
+        #: induces in another (Lemma P: eta jumps where the held set changes) is small
+        #: relative to that arc's multiplier.
+        self.relative_rise = False
+        #: Rule R34: R5's split is also offered seeded by continuity (the first piece
+        #: keeps the arc's entry jump) with the gap wider, by half and twice the rise's
+        #: stretch on each side: Lemma E3's gap contains the held-set window, and the
+        #: arc held there widens once the split relieves it (a seed, not a structure).
+        self.wide_gaps = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -2232,6 +2243,7 @@ class Homotopy:
         tr = shoot.trajectory(v, n_points)
         T = shoot.unpack(v)[3] - shoot.t0
         best = None
+        best_abs = None
         for i, ((kind, c), val) in enumerate(zip(arcs, values)):
             if kind != "boundary" or self.kr.CONSTRAINT_ORDERS[c] != 1:
                 continue
@@ -2252,13 +2264,23 @@ class Homotopy:
                 continue
             j_lo = int(np.flatnonzero(mu[:j_hi + 1] == run_min[j_hi])[-1])
             t_lo, t_hi = float(tr["t"][on[j_lo]]), float(tr["t"][on[j_hi]])
-            if t_hi - t_lo < 1e-6 * T or (best is not None and rise[j_hi] <= best[0]):
+            score = rise[j_hi]
+            if getattr(self, "relative_rise", False):
+                score = rise[j_hi] / max(float(np.abs(mu).max()), 1e-300)
+            if t_hi - t_lo < 1e-6 * T:
                 continue
-            best = (rise[j_hi], i, t_lo, t_hi, mu[j_lo], mu[j_hi], j_lo == 0, j_hi == len(on) - 1,
+            if best_abs is None or rise[j_hi] > best_abs[0]:
+                best_abs = (rise[j_hi], i)
+            if best is not None and score <= best[0]:
+                continue
+            best = (score, i, t_lo, t_hi, mu[j_lo], mu[j_hi], j_lo == 0, j_hi == len(on) - 1,
                     tr["t"][on], mu, on)
         if best is None:
             return None
         _, i, t_lo, t_hi, mu_lo, mu_hi, at_entry, at_exit, t_on, mu_on, on_idx = best
+        if best_abs[1] != i:
+            # Rule R33 chose another arc than the largest absolute rise.
+            self.diagnostics.fired("R33")
         self._split_limit = arcs[i][1]
         a, b, pi = values[i]
         self.diagnostics.fired("R5")
@@ -2315,6 +2337,17 @@ class Homotopy:
             if not (lo > a and hi < b):
                 continue
             out.append((out_a, values[:i] + [(a, lo, pi1), (hi, b, pi2)] + values[i + 1:]))
+        if getattr(self, "wide_gaps", False):
+            # Rule R34: the same split seeded by continuity (the first piece keeps the
+            # arc's entry jump, so the seed is the current solution up to the gap),
+            # with the gap wider than the rise.
+            w = t_hi - t_lo
+            for f in (0.5, 2.0):
+                lo, hi = t_lo - f * w, t_hi + f * w
+                if lo > a and hi < b:
+                    self.diagnostics.fired("R34")
+                    out.append((out_a, values[:i] + [(a, lo, np.atleast_1d(np.asarray(pi, float)).copy()),
+                                                     (hi, b, pi2)] + values[i + 1:]))
         return out or None
 
     def _own_saturation(self, shoot, tr, idx, c, t_rise, samples=3):

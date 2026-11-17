@@ -55,7 +55,7 @@ event.
 | peak $m^{\rm pk}_{c,k}$ | $-\max(g_c - o_c)$ over the interior of free stretch $k$ | birth | sampled, threshold $10^{-6}$ of the scale (R16 on overshoot); the exact check's is $10^{-7}$, and R32 brings in what lies between |
 | width $m^{\rm w}_i$ | $t_{\rm out} - t_{\rm in}$ of arc $i$ | death | R10, R17 |
 | jump $m^{\pi}_i$ | entry jump $\pi_i$ (touch jump $\nu$) | collapse with a jump; for an order-1 arc of positive width, death by multiplier (E2″) | `_retire` (touches; order-1 arcs under R31), acceptance |
-| density $m^{\eta}_i$ | $\min$ over arc $i$ of the measure's density $\eta_i$ | split | R25 locates a crossing inside a step; R5 and R18 split where the step lands; R21 at the end |
+| density $m^{\eta}_i$ | $\min$ over arc $i$ of the measure's density $\eta_i$ | split | R25 locates a crossing inside a step; R5 and R18 split where the step lands (R33 picks the arc by relative rise, R34 adds continuity seeds with wider gaps); R21 at the end |
 | gap $m^{\rm g}_{c,k}$ | gap between consecutive arcs of limit $c$ | merge | R11, on touch or overlap |
 | order $m^{\rm o}_j$ | difference of consecutive junction times of different limits | reorder | acceptance ("out of order"); on the route under R30 |
 | bound $m^{\rm b}_i$ | how far the riding control on arc $i$ stays inside $U$ (Lemma I's margin bounds it) | corner | riding failures, R8, R9, R14 |
