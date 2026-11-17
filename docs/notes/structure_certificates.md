@@ -1701,6 +1701,10 @@ The final times agree where both solve (to $4 \times 10^{-16}$).
 Cases where neither rule fires take the same route; their times moved by up
 to about 20% between the two runs.
 
+With six routes and the same rules, all 45 solve under 60 s: total 464.5 s
+against 494.1 s, median 6.9 s, slowest 47.0 s (goal 2 at 70%). The rules
+stay off by default until the first route alone solves all 45 under 60 s.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
