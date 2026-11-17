@@ -319,6 +319,13 @@ class Homotopy:
         #: Rule R27: R5's split is offered first with the gap of Lemma E3's moment
         #: conditions: mu equal at its ends, and D (mu - mu(a)) integrating to zero.
         self.split_normal_form = False
+        #: Rule R28: a split R5 or R27 offers is taken only if the limit's multiplier no
+        #: longer rises on the solution and no piece or gap has zero width (V4).
+        self.split_must_resolve = False
+        #: Rule R29 (Lemma U): when an arc's multiplier starts to rise where the limit's
+        #: own control joins the held set, the piece is offered first leaving just
+        #: before that moment.
+        self.exit_before_saturation = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -2226,6 +2233,7 @@ class Homotopy:
         if best is None:
             return None
         _, i, t_lo, t_hi, mu_lo, mu_hi, at_entry, at_exit, t_on, mu_on, on_idx = best
+        self._split_limit = arcs[i][1]
         a, b, pi = values[i]
         self.diagnostics.fired("R5")
         self._detail(f"    {self.kr.CONSTRAINT_NAMES[arcs[i][1]]}: multiplier rises on "
@@ -2251,6 +2259,21 @@ class Homotopy:
             pi_t = pi2 if at_entry else pi1
             if hi_t - lo_t > 1e-6 * T:
                 out.append((arcs, values[:i] + [(lo_t, hi_t, pi_t)] + values[i + 1:]))
+        if self.exit_before_saturation:
+            t_s = self._own_saturation(shoot, tr, on_idx, arcs[i][1], t_lo)
+            if t_s is not None and t_s - a > 1e-6 * T:
+                # Rule R29 (Lemma U): the rise starts where the limit's own control joins
+                # the held set, so the piece leaves just before that moment: a gap from
+                # there to the rise's end, or, for a rise to the exit, a trim.
+                self.diagnostics.fired("R29")
+                t_e = t_s - 0.02 * (t_s - a)
+                p1 = np.atleast_1d(np.asarray(pi, float)).copy()
+                p1[0] -= float(np.interp(t_e, t_on, mu_on))
+                if at_exit or not t_hi + d < b:
+                    out.insert(0, (arcs, values[:i] + [(a, t_e, p1)] + values[i + 1:]))
+                else:
+                    out.insert(0, (out_a, values[:i] + [(a, t_e, p1), (t_hi + d, b, pi2)]
+                                   + values[i + 1:]))
         if self.split_normal_form:
             c_split = arcs[i][1]
             gap = self._split_gap(t_on, mu_on, self._split_weights(shoot, tr, on_idx, c_split))
@@ -2267,6 +2290,51 @@ class Homotopy:
                 continue
             out.append((out_a, values[:i] + [(a, lo, pi1), (hi, b, pi2)] + values[i + 1:]))
         return out or None
+
+    def _own_saturation(self, shoot, tr, idx, c, t_rise, samples=3):
+        """Lemma U: the time near ``t_rise`` (within ``samples`` samples of ``tr``) at
+        which a control of limit ``c``'s own (the largest ``|a_k|``) joins the held
+        set on the arc, or None. ``idx`` are the arc's samples in ``tr``."""
+        from .lemmas import LimitObjects
+        try:
+            obj = LimitObjects(shoot.kernels, shoot.params)
+        except ValueError:
+            return None
+        k, p = shoot.kernels, shoot.params
+        idx = np.asarray(idx)
+        j = int(np.argmin(np.abs(tr["t"][idx] - t_rise)))
+        a_vec = obj.rate_parts(c, tr["t"][idx[j]], tr["z"][idx[j]])[0]
+        own = int(np.argmax(np.abs(a_vec)))
+
+        def held(q):
+            lo, hi = (np.asarray(x, float) for x in k.control_bounds(tr["t"][q], tr["z"][q], p))
+            u = float(tr["u"][q][own])
+            return min(u - lo[own], hi[own] - u) <= 1e-6 * (hi[own] - lo[own])
+
+        for q in range(max(j - samples, 1), min(j + samples + 1, len(idx))):
+            if held(idx[q]) and not held(idx[q - 1]):
+                return float(tr["t"][idx[q]])
+        return None
+
+    def _split_resolved(self, shoot, v):
+        """Rule R28: whether a split (or trim) solution has the density monitor of the
+        limit it split back to zero: no rise of its multiplier beyond the final
+        check's tolerance (V1), and no arc of it of zero width."""
+        c = getattr(self, "_split_limit", None)
+        if c is None or not isinstance(shoot, MultiArcShooting):
+            return True
+        try:
+            dens = self._densities(shoot, v)
+        except _FAILURES:
+            return False
+        T = shoot.unpack(v)[3] - shoot.t0
+        arcs, values = self._arcs_of(shoot, v)
+        spans = sorted((val[0], val[1]) for (kind, cc), val in zip(arcs, values)
+                       if kind == "boundary" and cc == c)
+        if any(b - a <= 1e-6 * T for a, b in spans) or any(
+                n[0] - p[1] <= 1e-6 * T for p, n in zip(spans, spans[1:])):
+            return False
+        return all(rise <= 1e-6 * max(1.0, mu_max) for cc, _, _, rise, mu_max in dens if cc == c)
 
     def _split_weights(self, shoot, tr, idx, c):
         """``D = 1 / [(A_F R_F^{-1} A_F^T)^{-1}]_{cc}`` at the samples ``idx`` of
@@ -2576,6 +2644,13 @@ class Homotopy:
                         continue
                     self._detail(f"    try {self._mas_entries(arcs, values, True)[0]}: "
                                  f"residual {nr.residual_norm:.1e}")
+                    if nr.success and optional and self.split_must_resolve \
+                            and not self._split_resolved(nsh, nr.v):
+                        # Rule R28: a split that leaves the rise (or closes its gap) has
+                        # not continued the event (V4); the next option is tried.
+                        self.diagnostics.fired("R28")
+                        self._detail("    the split leaves the multiplier rising: not taken")
+                        continue
                     if nr.success:
                         break
                 else:

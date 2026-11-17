@@ -231,3 +231,21 @@ def test_split_gap_is_the_normal_form():
     assert 0.497 < a < 0.5 and 0.52 < b < 0.523
     # The density nowhere negative: no split.
     assert Homotopy._split_gap(t, -np.cumsum(np.full_like(t, 1e-3))) is None
+
+
+def test_a_split_is_taken_only_if_it_resolves_the_rise():
+    """Rule R28: a split solution counts only with no rise left on the limit's arcs and
+    no piece or gap of zero width (V4)."""
+    import numpy as np
+
+    h, shoot = _stub_structure([("boundary", 0), ("boundary", 0)],
+                               [(0.2, 0.4, np.zeros(1)), (0.5, 0.7, np.zeros(1))], [1])
+    h._split_limit = 0
+    h._densities = lambda shoot, v: [(0, None, None, 0.0, 1.0), (0, None, None, 0.0, 1.0)]
+    assert h._split_resolved(shoot, None)
+    h._densities = lambda shoot, v: [(0, None, None, 1e-3, 1.0), (0, None, None, 0.0, 1.0)]
+    assert not h._split_resolved(shoot, None)
+    h._densities = lambda shoot, v: [(0, None, None, 0.0, 1.0)]
+    h._arcs_of = lambda shoot, v: ([("boundary", 0), ("boundary", 0)],
+                                   [(0.2, 0.4, np.zeros(1)), (0.4, 0.7, np.zeros(1))])
+    assert not h._split_resolved(shoot, None)       # the gap closed

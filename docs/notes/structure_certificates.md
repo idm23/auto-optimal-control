@@ -1428,6 +1428,62 @@ interior controls made it fire once in the census.
 
 R27 is on in the census.
 
+### Lemma U (an arc leaves before its own control saturates) and Rules R28, R29, tried
+
+*Observed (O2, rest 12):* on the first route, `tau1_max` splits, its gap
+closes, and it splits again, with R27 firing 161 times.
+- **Where the rise starts:** every rise of $\mu$ on the arc starts exactly
+  where joint 1's own jerk joins the held set.
+- **What the answer does:** the arc leaves at 0.41610, before that jerk
+  saturates at 0.42511.
+- **Why the route cycles:** `settle` takes the first split option that
+  converges. Here that is R27's seed, which converges to a split with a gap
+  $3 \times 10^{-5}$ wide at the end of the rise. The rise is still there,
+  so R5 fires again.
+
+*Lemma U* (`lemma_register.md`, proved relative to P and J). Where the
+density turns negative at the moment the limit's own control saturates, the
+extremal cannot ride through (H). It cannot leave at that moment unless
+$\mu = 0$ there (J: no jump at an order-1 exit). So the piece leaves before
+it. Trims on the route bear this out: leaving 2% or 5% earlier, the piece
+solves to an exit at 0.34525, before the saturation at 0.3458, with no rise
+and no violation. Started exactly at the saturation, it converges back to
+the rising solution.
+
+*Rule R28* (`Homotopy.split_must_resolve`, from V4): a split R5 or R27
+offers is taken only if the limit's multiplier no longer rises (to the final
+check's tolerance) and no piece or gap of it has zero width. Otherwise the
+next option is tried.
+
+*Rule R29* (`Homotopy.exit_before_saturation`, from Lemma U): when the rise
+starts within three samples of the limit's own control (the largest
+$|a_k|$) joining the held set, it offers first the piece leaving 2% before
+that moment. If the rise ends inside the arc, the gap runs to the rise's
+end; if the rise reaches the exit, the arc is trimmed.
+
+*Result: mixed, off by default.*
+
+| | R27 | + R28 | + R28 + R29 |
+|---|---|---|---|
+| first route alone: solved | 38/45 | 39/45 | 39/45 |
+| six routes: under 60 s | 45 | 44 | 44 |
+| six routes: total | 478.0 s | 592.5 s | 596.5 s |
+
+On the first route alone:
+- **Gains:** rest 12 (26 s; it failed with R27 alone) and goal 7 at 70%
+  (565 s; never solved by this route before). Goal 2 at 70% takes 184 s
+  against 231 s.
+- **Loss:** goal 4 at 70%. Its route had relied on a degenerate split of
+  `tau6_min` (a gap of zero width, with $\mu$ rising by 0.8), which R28 now
+  refuses; without it the route stalls.
+
+With six routes, goal 2 at 70% takes about 149 s against 37 s.
+
+So refusing inconsistent repairs is right by V4, but some routes make
+progress only through them. The follower's discipline pays only once the
+events those repairs stand in for have transitions of their own. Here that
+is the `tau6_min` birth beside an exit on goal 4 at 70%.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
