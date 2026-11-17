@@ -1189,6 +1189,15 @@ class Homotopy:
             tr = k.trajectory(shoot.t0, np.concatenate([x0, lam0]), tf, shoot.params,
                               n_points=n_points, constraint_events=False, **self.options)
             return [(tr["t"], tr["g"], ())]
+        key = shoot.memo_key(v, n_points, tuple(sorted(self.options.items())))
+        return list(shoot.memoized("free_samples", key,
+                                   lambda: self._sample_segments(shoot, v, n_points)))
+
+    def _sample_segments(self, shoot, v, n_points):
+        """``_free_samples`` for a multi-arc structure, without reuse."""
+        from fast_numerical_integration.integrators import solve_ivp
+
+        k = shoot.kernels
         _, _, segs = shoot._evaluate(np.asarray(v, dtype=float), jac=False)
         span = segs[-1][3] - shoot.t0
         out = []

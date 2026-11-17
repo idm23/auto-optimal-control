@@ -1139,14 +1139,21 @@ class MultiArcShooting(SingleShooting):
     def _control_matrix(self):
         """``df/du``, constant by certificate C1, or None if it is not."""
         if not hasattr(self, "_G"):
-            import sympy as sp
-            prob = self.kernels.system.problem
-            G = sp.Matrix(prob.dynamics).jacobian(list(prob.controls))
-            if any(e.free_symbols & (set(prob.states) | set(prob.controls)) for e in G):
+            # The symbolic work is done once per kernels, not once per structure tried.
+            k = self.kernels
+            if not hasattr(k, "_control_matrix_fn"):
+                import sympy as sp
+                prob = k.system.problem
+                G = sp.Matrix(prob.dynamics).jacobian(list(prob.controls))
+                if any(e.free_symbols & (set(prob.states) | set(prob.controls)) for e in G):
+                    k._control_matrix_fn = None
+                else:
+                    k._control_matrix_fn = (sp.lambdify(list(k.system.params), G, "numpy"), G.shape)
+            if k._control_matrix_fn is None:
                 self._G = None
             else:
-                fn = sp.lambdify(list(self.kernels.system.params), G, "numpy")
-                self._G = np.array(fn(*self.params), dtype=float).reshape(G.shape)
+                fn, shape = k._control_matrix_fn
+                self._G = np.array(fn(*self.params), dtype=float).reshape(shape)
         return self._G
 
     def _regular_junction(self, kind, q, side, t, z):
@@ -1668,7 +1675,40 @@ class MultiArcShooting(SingleShooting):
         _, _, segs = self._evaluate(np.asarray(v, dtype=float), jac=False, record=True)
         return float(sum(r["cost"] for *_, r in segs))
 
+    def memo_key(self, v, *extra):
+        """What an evaluation at ``v`` depends on: ``v``, the parameters, the
+        instance's scalar settings and the class switches (``*_default``)."""
+        own = tuple(sorted((k, val) for k, val in vars(self).items()
+                           if not k.startswith("_memo") and isinstance(val, (bool, int, float, str))))
+        switches = tuple(sorted((k, val) for k, val in vars(type(self)).items()
+                                if k.endswith("_default")))
+        return (np.asarray(v, dtype=float).tobytes(), np.asarray(self.params, dtype=float).tobytes(),
+                own, switches) + extra
+
+    def memoized(self, name, key, compute, size=4):
+        """``compute()``, or its value from a recent call with the same ``key``. Arrays
+        in the value are made read-only, so a caller cannot change it for the next."""
+        store = self.__dict__.setdefault("_memo_" + name, {})
+        if key in store:
+            return store[key]
+        out = compute()
+        for val in (out.values() if isinstance(out, dict) else
+                    [x for item in out for x in (item if isinstance(item, tuple) else (item,))]):
+            if isinstance(val, np.ndarray):
+                val.setflags(write=False)
+        if len(store) >= size:
+            store.pop(next(iter(store)))
+        store[key] = out
+        return out
+
     def trajectory(self, v, n_points=401):
+        """The extremal at ``v``, sampled on every arc (see :meth:`_trajectory`).
+        Recent results are reused for the same ``v``, parameters and settings."""
+        out = self.memoized("trajectory", self.memo_key(v, n_points),
+                            lambda: self._trajectory(v, n_points))
+        return dict(out)
+
+    def _trajectory(self, v, n_points=401):
         """The extremal at ``v``, sampled on every arc.
 
         Returns a dict with ``t``, ``z``, ``u``, ``g`` (every path constraint),
