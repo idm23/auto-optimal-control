@@ -54,10 +54,10 @@ event.
 |---|---|---|---|
 | peak $m^{\rm pk}_{c,k}$ | $-\max(g_c - o_c)$ over the interior of free stretch $k$ | birth | sampled, threshold $10^{-6}$ (R16 on overshoot) |
 | width $m^{\rm w}_i$ | $t_{\rm out} - t_{\rm in}$ of arc $i$ | death | R10, R17 |
-| jump $m^{\pi}_i$ | entry jump $\pi_i$ (touch jump $\nu$) | collapse with a jump | `_retire`, acceptance |
+| jump $m^{\pi}_i$ | entry jump $\pi_i$ (touch jump $\nu$) | collapse with a jump; for an order-1 arc of positive width, death by multiplier (E2″) | `_retire` (touches; order-1 arcs under R31), acceptance |
 | density $m^{\eta}_i$ | $\min$ over arc $i$ of the measure's density $\eta_i$ | split | R25 locates a crossing inside a step; R5 and R18 split where the step lands; R21 at the end |
 | gap $m^{\rm g}_{c,k}$ | gap between consecutive arcs of limit $c$ | merge | R11, on touch or overlap |
-| order $m^{\rm o}_j$ | difference of consecutive junction times of different limits | reorder | acceptance ("out of order") |
+| order $m^{\rm o}_j$ | difference of consecutive junction times of different limits | reorder | acceptance ("out of order"); on the route under R30 |
 | bound $m^{\rm b}_i$ | how far the riding control on arc $i$ stays inside $U$ (Lemma I's margin bounds it) | corner | riding failures, R8, R9, R14 |
 | end $m^{\rm e}_i$ | $t_{\rm in} - t_0$, $t_f - t_{\rm out}$ | arc reaches an end | `_end_structure` |
 | held sign | sign margin of held controls | held set wrong | acceptance |
@@ -159,10 +159,11 @@ the curve through it.
 | E1 | birth: an interior peak reaches the limit with $\ddot g < 0$, jerks interior | peak | a new arc; its width grows as $\sqrt{s - s^*}$, so the width is the step variable there | **proved** (Lemma E; compare Bonnans & Hermant 2008, Thm 2.4: a touch becomes an arc, stays a touch or goes inactive) | R2, R16, R20, R26 |
 | E1′ | birth at the corner (contact on the edge of the holdable set) | peak | one-sided arc | conjecture (E′) | R6, R12 |
 | E2 | death: an arc's width and jump reach zero together | width | the arc is removed: E1 traversed backwards | **proved** (Lemma E read in reverse) | R10, R17 |
+| E2″ | death by multiplier: an order-1 arc's entry multiplier reaches zero, its width positive | jump | the arc is removed; the motion does not move | **proved** (Lemma H′), except whether the freed stretch stays below the limit | R31 |
 | E2′ | collapse with a positive jump | width, with $\pi > 0$ | a touch with a jump is degenerate unless the controls absorb it (Lemma Q), so not a regular event | open | R20 |
 | E3 | split: the density of an arc turns negative inside it | density | a free gap $[a, b]$ with $\mu(a) = \mu(b)$ and $\int_a^b D(\mu - \mu(a)) = 0$; for a smooth dip $h^2 = -6\eta_{\min}/\ddot\eta$ | **leading order derived** (Lemma E3; Bonnans–Hermant's (A5) excludes it), checked at smooth dips and at a held-set window; the implicit-function step is a sketch | R5, R18, R21, R25, R27 |
 | E4 | merge: the gap between two arcs of a limit closes | gap | the free stretch between them dies: E3 backwards | as E3, read backwards | R11 |
-| E5 | reorder: junctions of two limits coincide | order | the swapped order; no choice | sketch: needs Lemma B for both limits ridden at once, and the locality of Lemma J | none |
+| E5 | reorder: junctions of two limits coincide | order | the swapped order; no choice | sketch: needs Lemma B for both limits ridden at once, and the locality of Lemma J. Where the swap crosses back (goal 3 at 80%, goal 5 at 70%), one arc's $\pi$ was negative: E2″ missed, not E5 | R30 |
 | E6 | an arc reaches $t_0$ or $t_f$ | end | the arc is ridden from the start or to the end | open (outside Bonnans–Hermant's (A1), (A4)) | `_end_structure` |
 | E7 | constraint regularity fails: the margin reaches zero, or a ridden limit's own control saturates (the density jumps, Lemma P) | bound, density | not known | **open**, the frontier (Lemmas I′, K, L, M, P; O2). One case settled: where $\eta$ turns negative as the limit's own control saturates, the piece leaves before it (Lemma U) | R6, R8, R9, R12, R14 |
 | E8 | fold: $D_v\Psi_S$ singular with all monitors positive | conditioning | pass it by arclength; $s$ turns back | standard for a simple fold (S9) | none: ds halves until it stalls |

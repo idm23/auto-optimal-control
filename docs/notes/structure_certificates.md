@@ -1484,6 +1484,83 @@ progress only through them. The follower's discipline pays only once the
 events those repairs stand in for have transitions of their own. Here that
 is the `tau6_min` birth beside an exit on goal 4 at 70%.
 
+### The order and jump monitors on the route: Rules R30, R31, tried
+
+*Observed (goal 3 at 80% and 90%, goal 5 at 80% and 70%, on the first
+route):* each of these routes stalls. The goal 3 at 80% stall goes like this:
+- **What the route accepted:** a state with two exits crossed. In the
+  structure's order `tau2_min` leaves before `tau3_min`. In the solution it
+  leaves at 0.29592, after `tau3_min` at 0.29448. So one segment runs
+  backward in time.
+- **How it got in:** `settle` returned the state through its shortcut for a
+  tangential junction (the same violation, not shrinking, at the path
+  tolerance). That shortcut never asks whether the junctions are in order.
+- **What else was wrong:** in the same state `tau2_min`'s multiplier was
+  negative along its whole arc, with $\pi = -1.7 \times 10^{-3}$, and
+  `tau6_min`'s rose by 0.11.
+- **What the route did next:** R25 fired 68 times, chasing a negative
+  density that was already there before the step. The route crawled from
+  offsets 1.76 to 1.66 in a minute.
+
+The answer, found by the portfolio, has `tau2_min` leaving at 0.2306,
+before `tau6_min` enters. In it `tau1_min`, `tau2_min` and `tau3_min` all
+carry multipliers below $3 \times 10^{-4}$, so their signs flip easily.
+
+*Rule R30* (`Homotopy.watch_order`, from V1: acceptance is the monitors,
+and order is one of them). `settle` does not accept a solution whose
+junctions are out of the structure's order:
+- **A crossing of more than `locate_tol` of $T$** in one step: the step is
+  shortened, as R16 and R25 do for births and splits.
+- **A smaller one:** the events are re-sorted (E5's swap).
+- **A swap that crosses back** a third time has not restored the monitor
+  (V4), so the step fails.
+
+With R30, goal 3 at 80% and at 90% solve in 9 s, and goal 5 at 80% in 141 s.
+
+*Goal 5 at 70% still cycled.* The exits of `tau2_min` and `tau3_min`
+swapped back and forth hundreds of times. The cause was one step earlier:
+- At the birth of `tau3_min` beside `tau2_min`'s exit, `tau2_min`'s $\pi$
+  went from $+5.5 \times 10^{-5}$ to $-5.4 \times 10^{-4}$.
+- `_retire` removes arcs whose width reaches zero, not those whose
+  multiplier does, so the arc stayed. Its $\pi$ fell to
+  $-2.4 \times 10^{-2}$.
+
+*Lemma H′* (`lemma_register.md`, proved relative to S1). When an order-1
+arc's $\pi$ reaches zero, $\mu \equiv 0$ on it (H gives $0 \le \mu \le \pi$).
+The riding control is then the free one, so the extremal also solves the
+structure without the arc. Past that point keeping the arc violates H. So
+the event is a death by multiplier (E2″).
+
+*Rule R31* (`Homotopy.retire_negative`, from Lemma H′): `_retire` removes
+an order-1 arc whose $\pi < -10^{-7}$.
+
+*Result: mixed, off by default.*
+
+| | R27 | + R30 | + R30 + R31 |
+|---|---|---|---|
+| first route alone: solved | 38/45 | 38/45 | 40/45 |
+| six routes: under 60 s | 45 | | 44 |
+| six routes: total | 478.0 s | | 528.4 s |
+| six routes: median | 7.1 s | | 6.9 s |
+
+On the first route alone, with R30 and R31:
+- **Gains:** goal 3 at 80% and 90% (9 s each, as traced), goal 5 at 80%
+  (66 s), goal 5 at 70% (192 s) and goal 7 at 70% (516 s).
+- **Losses:**
+  - Goal 3 at 70% (177 s before).
+  - Goal 8 at 70%. Its forward route fails either way, and its reversed
+    route (R4) solved it at 58 s without the rules. R30 fired once on that
+    reversed route and steered it elsewhere.
+  - Goal 4 at 70%. Its reversed route drifts from the baseline's from
+    offsets 1.4 on, then stalls at 0.14 with R25 firing on a split.
+
+With six routes, goal 4 at 70% takes 82.3 s against 41.8 s, and goal 2 at
+70% 46.7 s against 37.1 s.
+
+So the first route alone gains two, and the six-route census loses one
+case's margin to route chaos rather than to a wrong transition. Both
+monitors are V1's; what remains is the transitions those routes now reach.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

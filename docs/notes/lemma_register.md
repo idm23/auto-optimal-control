@@ -166,6 +166,39 @@ margin is zero exactly when the corner is the only control that holds $g$.
   differentiation and sign bookkeeping.
 - **Used by.** Acceptance (the $\dot\mu \le 0$ check), R5.
 
+### H′. An arc whose entry multiplier reaches zero dies without moving the motion — proved, relative to S1
+
+- **Statement.** Let $c$ be an order-1 limit ridden on an arc, and suppose
+  that along the route its entry multiplier $\pi_c(s) \to 0^+$ as
+  $s \to s^*$ with the arc's width staying positive. At $s^*$ the extremal
+  also solves the structure without the arc, with the arc's stretch free and
+  $g_c \equiv 0$ on it. Past $s^*$, keeping the arc gives $\pi_c < 0$, which
+  H forbids. So the only regular continuation is the structure without the
+  arc: a death by multiplier, where E2 is a death by width.
+- **Proof.**
+  1. By H, $0 \le \mu_c \le \pi_c$ on the arc, so $\mu_c \equiv 0$ there at
+     $s^*$, and with it $\eta_c = -\dot\mu_c \equiv 0$.
+  2. The costate's entry jump is $\pi_c \nabla g_c = 0$.
+  3. With $\mu_c = 0$, the minimum condition on the arc is the free one, so
+     the riding control is the free minimizer, and the free minimizer keeps
+     $\dot g_c = 0$.
+  4. So the free flow from the arc's entry state, with the same costate,
+     reproduces the arc. Every equation of the structure without the arc
+     holds. $\square$
+- **Gap.** After $s^*$ the freed stretch may rise above the limit: at
+  $s^*$ its peak monitor is zero on a whole interval, not at an isolated
+  point. If it does rise, the event is not regular (E9), and the route sees
+  a violation that brings back an arc.
+- **Evidence.**
+  - Goal 5 at 70%: `tau2_min` carried $\pi \approx 5.5 \times 10^{-5}$
+    when `tau3_min` was born beside its exit. The birth pushed it to
+    $-5.4 \times 10^{-4}$. The route kept the arc for 100 s, $\pi$ fell to
+    $-2.4 \times 10^{-2}$, and its exit and `tau3_min`'s crossed back and
+    forth.
+  - Goal 3 at 80%: the same arc went from about $2 \times 10^{-5}$ to
+    $-1.7 \times 10^{-3}$ at `tau3_min`'s activation.
+- **Used by.** R31.
+
 ### I. Contacts are holdable — proved
 
 - **Statement.** If $u(t) \in U$ a.e., $g(x(t)) \le 0$ near $t^*$ and
@@ -630,7 +663,8 @@ jump, density, gap, order, bound, end, held sign).
   V4, S8. *Gaps:* the table (V4) and boundedness, which must be detected.
 - **Used by.** R25 (V2: the density at a fixed time is $C^1$ in the route
   parameter). Phase 2's follower (planned). Today, R1 (V3), R2, R10, R16,
-  R17 (E1, E2), R5, R18, R21, R25 (E3) and R11 (E4) are pieces of it.
+  R17 (E1, E2), R5, R18, R21, R25 (E3) and R11 (E4) are pieces of it, and
+  R30 and R31 watch V1's order and jump monitors on the route.
 
 ### Observation O3: what the direct comparison shows for the unsolved cases
 
