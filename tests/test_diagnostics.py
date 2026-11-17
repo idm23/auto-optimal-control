@@ -203,3 +203,23 @@ def test_rejected_exact_solution_is_kept_for_r21():
     h._verdict = lambda shoot, sol: None
     assert h._accept("shoot", sol, 1e-10)
     assert h._last_rejected is None
+
+
+def test_split_gap_is_the_normal_form():
+    """Rule R27: the split's gap is centred on the density's minimum, with half-width
+    h, h^2 = -6 eta_min / eta'' (Lemma E3), sqrt(3) times where eta < 0."""
+    import numpy as np
+
+    t = np.linspace(0.0, 1.0, 2001)
+    eta_min, curv, tm = -0.02, 8.0, 0.4
+    eta = eta_min + 0.5 * curv * (t - tm) ** 2
+    # mu(t) = int_t^1 eta, so that eta = -dmu/dt.
+    mu = np.concatenate([[0.0], np.cumsum(0.5 * (eta[1:] + eta[:-1]) * np.diff(t))])
+    mu = mu[-1] - mu
+    a, b = Homotopy._split_gap(t, mu)
+    h = np.sqrt(-6 * eta_min / curv)
+    assert (a + b) / 2 == pytest.approx(tm, abs=1e-6)
+    assert (b - a) / 2 == pytest.approx(h, rel=1e-4)
+    assert (b - a) / 2 == pytest.approx(np.sqrt(3) * np.sqrt(-2 * eta_min / curv), rel=1e-4)
+    # The density nowhere negative: no split.
+    assert Homotopy._split_gap(t, -np.cumsum(np.full_like(t, 1e-3))) is None

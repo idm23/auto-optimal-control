@@ -160,8 +160,8 @@ the curve through it.
 | E1′ | birth at the corner (contact on the edge of the holdable set) | peak | one-sided arc | conjecture (E′) | R6, R12 |
 | E2 | death: an arc's width and jump reach zero together | width | the arc is removed: E1 traversed backwards | **proved** (Lemma E read in reverse) | R10, R17 |
 | E2′ | collapse with a positive jump | width, with $\pi > 0$ | a touch with a jump is degenerate unless the controls absorb it (Lemma Q), so not a regular event | open | R20 |
-| E3 | split: the density of an arc reaches zero inside it, at a nondegenerate minimum | density | a free stretch is born inside the arc | **open**: Bonnans–Hermant assume strict complementarity on arcs (A5), so they exclude it. Needs a normal form like E, with $g$ and $\eta$ exchanged | R5, R18, R21 (after the fact) |
-| E4 | merge: the gap between two arcs of a limit closes | gap | the free stretch between them dies: E3 backwards | open (follows from E3) | R11 |
+| E3 | split: the density of an arc reaches zero inside it, at a nondegenerate minimum, controls interior | density | a free gap $[t_m - h, t_m + h]$ is born inside the arc, with $h^2 = -6\eta_{\min}/\ddot\eta$ | **leading order derived** (Lemma E3; Bonnans–Hermant's (A5) excludes it); the implicit-function step is a sketch; confirmed on the census's clean splits | R5, R18, R21, R25, R27 |
+| E4 | merge: the gap between two arcs of a limit closes | gap | the free stretch between them dies: E3 backwards | as E3, read backwards | R11 |
 | E5 | reorder: junctions of two limits coincide | order | the swapped order; no choice | sketch: needs Lemma B for both limits ridden at once, and the locality of Lemma J | none |
 | E6 | an arc reaches $t_0$ or $t_f$ | end | the arc is ridden from the start or to the end | open (outside Bonnans–Hermant's (A1), (A4)) | `_end_structure` |
 | E7 | constraint regularity fails: the margin reaches zero, or a ridden limit's own control saturates (the density jumps, Lemma P) | bound, density | not known | **open**, the frontier (Lemmas I′, K, L, M, P; Observation O2) | R6, R8, R9, R12, R14 |
@@ -223,7 +223,7 @@ has a lemma.
 
 1. **The density monitor on the path** (V1). Done: Rule R25 locates a
    crossing inside a step by a secant on the density (V2).
-2. **E3's normal form**: the split, the most valuable open lemma.
+2. **E3's normal form**: done to leading order (Lemma E3). Most of the arm's splits fall outside its hypothesis H0 and are E7.
 3. **E7**: limits ridden while their own controls saturate (rest 12, goal 9
    at 80%).
 4. **E5 and E6**, to complete the table for what the census meets.

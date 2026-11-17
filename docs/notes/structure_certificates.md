@@ -1367,6 +1367,59 @@ against R25 alone): **45/45 solved, all under 60 s**, against 44.
   | goal 2 at 70% | 39.4 s | 293.8 s |
   | goal 0 at 70% | unsolved | 442.9 s |
 
+- **The first route alone on all 45** (R1 R2 R16 R20 R25 R26, six cases at
+  a time, with the trajectory caches of the next PR): 39/45 solved, 33 under
+  60 s, median 14.0 s.
+  - Unsolved: goal 3 at 90%, 80% and 70%, goal 5 at 80% and 70%, and goal 7
+    at 70%.
+  - So the portfolio is still needed. Its other routes are what solve those
+    six.
+
+### Lemma E3 (the split normal form) and Rule R27, tried
+
+*Lemma E3* (in `lemma_register.md`, leading order derived) is Lemma E with
+$g$ and $\eta$ exchanged. Take an order-1 arc whose density $\eta = -\dot\mu$
+has a nondegenerate interior minimum $\eta_{\min} < 0$ at $t_m$, with the
+controls strictly inside their bounds there (H0). The arc splits with a free
+gap $[t_m - h, t_m + h]$, $h^2 = -6\eta_{\min}/\ddot\eta$, and the reason is
+the re-entry:
+- the released control is $u_b + \tilde\mu H_{uu}^{-1} g_u^{(1)T}$, so
+  $\dot g = c\tilde\mu$, with $c > 0$ by (A3);
+- $\tilde\mu$ starts at 0 at the exit and falls at the rate $\tilde\eta$;
+- returning to the limit tangentially needs $\int \tilde\eta = 0$ and
+  $\int (b - \tau)\tilde\eta = 0$ over the gap.
+
+So the gap is $\sqrt 3$ times the stretch where $\eta < 0$, and R5's seed,
+which spans that stretch, is too narrow by that factor.
+
+*Check.* At every split R5 offered on the first route of all 45 cases, the
+unsplit density was fitted with a quadratic about its minimum, and the gap
+the split solved to was recorded.
+- **Clean splits:** on goal 4 at 80% and at 70%, the solved half-width is
+  0.98 and 1.00 of $\sqrt{-6\eta_{\min}/\ddot\eta}$, and the gap is centred
+  on $t_m$ to $3 \times 10^{-4}$. Those two are the clean splits.
+- **Spikes:** on goal 2 at 70% (38 splits), the density's curvature is
+  about $6 \times 10^{5}$, a spike. The split that solves has a gap of zero
+  width, away from the minimum. This is Lemma P's jump where a ridden
+  limit's control saturates, outside H0.
+
+*Rule R27* (`Homotopy.split_normal_form`): when R5 fires and H0 holds (every
+control at least $10^{-3}$ of its range inside its bounds over the gap,
+widened by half), the normal-form gap is offered first, with R5's jumps.
+
+*Result: neutral, off by default.* Six routes, against the speed PR's
+census:
+- **Without the H0 check:** worse. 45/45 solve, but only 43 under 60 s. Goal
+  2 at 70% takes 321 s against 38 s, and R5 fires 2,613 times against 12.
+  The seed fits the spikes, solves to a spurious split, and the route churns
+  on it.
+- **With it:** R27 offers its gap once in the census's 75 R5 firings. The
+  census is unchanged (486 s against 494 s in total, the same answers).
+
+So in the census, R5's splits are E7 events, not E3. A lemma for the split
+at a saturating control (E7, Lemma P) is what would turn R5 from a
+heuristic into a rule.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

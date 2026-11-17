@@ -284,6 +284,58 @@ margin is zero exactly when the corner is the only control that holds $g$.
   law (μ from the last interior control, R14). L1 has to be restated,
   because along a saturated motion $\ddot g$ involves $\dot m$.
 
+### E3. Split normal form (interior controls) — leading order derived; sketch
+
+- **Statement.** Assume:
+  - H0: as in E, with every control strictly inside its bounds near $t_m$;
+  - (A3): $c = g^{(1)}_u H_{uu}^{-1} g^{(1)\,T}_u > 0$ along the arc;
+  - L1′: the arc's density $\eta = -\dot\mu$ has a nondegenerate interior
+    minimum at $t_m$, $\ddot\eta(t_m) > 0$;
+  - L2: $\Phi_v$ is nonsingular;
+  - L3′: the minimum crosses zero transversally,
+    $\partial_s \eta_{\min}(s^*) = -\kappa \ne 0$.
+
+  Then, on the side where $\eta_{\min} < 0$, the split extremal leaves the
+  limit on $[t_m - h, t_m + h] + O(h^2)$, with
+  $h^2 = -6\, \eta_{\min} / \ddot\eta + O(h^3)$, so
+  $s - s^* = \ddot\eta\, h^2 / (6 \kappa) + O(h^3)$.
+  - The gap is $\sqrt 3$ times the stretch where $\eta < 0$.
+  - $g$ is strictly negative on the open gap, with depth
+    $\tfrac32 c\, \eta_{\min}^2 / \ddot\eta$.
+  - The first piece leaves with $\mu = 0$, and the second enters with
+    $\pi_2 = \mu(t_m + h)$.
+- **Derivation (leading order).**
+  1. On the arc, $H_u + \mu\, g^{(1)}_u = 0$, while the free law has
+     $H_u = 0$. Released on the gap, the control is therefore
+     $u_f = u_b + \tilde\mu\, H_{uu}^{-1} g^{(1)\,T}_u + O(\tilde\mu^2)$,
+     and $\dot g = c\,\tilde\mu + O(\tilde\mu^2)$.
+  2. At the exit $a$, the control is continuous, so $\tilde\mu(a) = 0$.
+     On the gap $\dot{\tilde\mu} = -\tilde\eta$, where $\tilde\eta$ is the
+     density continued from before the split, up to higher order.
+  3. At the entry $b$, the motion is back on the limit tangentially:
+     $g(b) = \dot g(b) = 0$. That is,
+     $\int_a^b \tilde\eta = 0$ and $\int_a^b (b - \tau)\,\tilde\eta = 0$.
+  4. With $\tilde\eta = \eta_{\min} + \tfrac12 \ddot\eta\,(t - t_m)^2$, the
+     second condition centres the gap on $t_m$, and the first gives
+     $2 h \eta_{\min} + \ddot\eta h^3/3 = 0$.
+
+  The toy $\dot x = u$, $L = \tfrac12 u^2 + \rho(t) x$, $x \le 0$ (where
+  $\eta = -\rho$) has exactly this gap.
+- **To formalize.** The implicit function theorem in the blown-up variable
+  $h$, as in E's steps 3 and 4. The perturbation of $\tilde\eta$ by the
+  gap is $O(h^4)$, below the $O(h^3)$ of the conditions.
+- **Evidence.** The clean splits on the census cases' first routes (goal 4 at
+  80% and at 70%) solve
+  with $h$ at 0.98 and 1.00 of the prediction. The gap is centred on $t_m$
+  to $3 \times 10^{-4}$, and is 1.71 and 1.73 times the stretch where
+  $\eta < 0$.
+- **Merge (E4).** E3 read backwards: a gap whose width closes as
+  $h^2 \propto (s - s^*)$ dies where the density's minimum returns to zero.
+- **Gap.** H0 fails at most of the splits the arm meets. There the density
+  jumps where a ridden limit's control saturates (Lemma P), and the event is
+  E7, not E3.
+- **Used by.** R27 (tried, neutral).
+
 ### Observation O1 — answers stay off the edge
 
 On every solved census case, and on the toy's direct comparisons, the margin
