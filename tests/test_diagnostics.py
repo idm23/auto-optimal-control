@@ -251,6 +251,81 @@ def test_a_split_is_taken_only_if_it_resolves_the_rise():
     assert not h._split_resolved(shoot, None)       # the gap closed
 
 
+def _two_rising_arcs():
+    """Two order-1 arcs whose multipliers both rise over the window [0.5, 0.52] (another
+    limit held there, Lemma P): limit 0 with mu ~ 3 and a small relative rise, limit 1
+    with mu ~ 1e-4 that dips below zero before the window."""
+    import types
+
+    import numpy as np
+
+    def mu0(t):
+        return 3 * (0.9 - t) / 0.8 + 0.1 * np.clip((t - 0.5) / 0.02, 0, 1) - 0.1
+
+    def mu1(t):
+        return 1e-4 * (0.8 - t) / 0.6 + 2e-4 * np.clip((t - 0.5) / 0.02, 0, 1) - 2e-4
+
+    arcs = [("boundary", 0), ("boundary", 1)]
+    values = [(0.1, 0.9, np.array([mu0(0.1)])), (0.2, 0.8, np.array([mu1(0.2)]))]
+    h, shoot = _stub_structure(arcs, values, [1, 1], T=1.0)
+    h.kr.CONSTRAINT_NAMES = ["a_min", "b_min"]
+    h._detail = lambda *a: None
+    h.trim_rising = h.exit_before_saturation = h.split_normal_form = False
+    t = np.linspace(0.0, 1.0, 801)
+    shoot.params = None
+    shoot.kernels = types.SimpleNamespace(
+        N_CONSTRAINTS=2, arc_constraints=lambda aid: (0, 1),
+        boundary_multiplier=lambda aid, t_, z, p: np.array([mu0(t_), mu1(t_)]))
+    shoot.trajectory = lambda v, n: {
+        "t": t, "z": t, "arc": np.full(len(t), 2),
+        "active": np.stack([(t >= 0.1) & (t <= 0.9), (t >= 0.2) & (t <= 0.8)], axis=1)}
+    return h, shoot, values
+
+
+def test_r5_splits_the_largest_relative_rise_under_r33():
+    """Rule R33: scaling a limit by k scales its multiplier by 1/k, so R5 compares rises
+    relative to each arc's largest multiplier. Without the rule the large multiplier's
+    small rise is split; with it, the arc whose multiplier dips below zero."""
+    h, shoot, _ = _two_rising_arcs()
+    h.relative_rise = False
+    h._split_rising(shoot, None)
+    assert h._split_limit == 0
+    h.relative_rise = True
+    out = h._split_rising(shoot, None)
+    assert h._split_limit == 1
+    assert out[0][0] == [("boundary", 0), ("boundary", 1), ("boundary", 1)]
+    assert h.diagnostics.rules.get("R33") == 1
+
+
+def test_wider_gaps_seeded_by_continuity_under_r34():
+    """Rule R34: after R5's gaps, the split is offered with the first piece keeping the
+    arc's entry jump, and the gap wider by half and twice the rise's stretch."""
+    import numpy as np
+
+    h, shoot, values = _two_rising_arcs()
+    h.relative_rise = True
+    h.wide_gaps = False
+    plain = h._split_rising(shoot, None)
+    h.wide_gaps = True
+    out = h._split_rising(shoot, None)
+    assert len(out) == len(plain) + 2
+    gaps = []
+    for arcs, vals in out[len(plain):]:
+        assert arcs == [("boundary", 0), ("boundary", 1), ("boundary", 1)]
+        (a1, b1, p1), (a2, b2, _) = vals[1], vals[2]
+        assert a1 == values[1][0] and b2 == values[1][1]
+        assert p1.tolist() == values[1][2].tolist()      # continuity: the entry jump kept
+        gaps.append((b1, a2))
+    # Widened by half and by twice the rise's stretch w on each side: 2w and 5w wide,
+    # about the same stretch, which lies in the window.
+    (lo1, hi1), (lo2, hi2) = gaps
+    assert (hi2 - lo2) / (hi1 - lo1) == pytest.approx(2.5, rel=1e-9)
+    assert (lo1 + hi1) / 2 == pytest.approx((lo2 + hi2) / 2)
+    assert lo2 < lo1 < 0.5 < 0.52 < hi1 < hi2
+    assert h.diagnostics.rules.get("R34") == 2
+    assert np.all(np.isfinite([lo1, hi1, lo2, hi2]))
+
+
 def test_an_order1_arc_with_a_negative_entry_multiplier_goes_under_r31():
     """Rule R31: 0 <= mu <= pi on an order-1 arc (Lemma H), so an arc whose entry
     multiplier pi is negative is retired; without the rule it stays."""

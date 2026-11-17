@@ -165,7 +165,8 @@ margin is zero exactly when the corner is the only control that holds $g$.
   $\lambda_{\rm ind} = \lambda_{\rm dir} - \sum_c \mu_c \nabla g_c$.
 - **To formalize.** Given S1's conclusions as hypotheses, it is
   differentiation and sign bookkeeping.
-- **Used by.** Acceptance (the $\dot\mu \le 0$ check), R5.
+- **Used by.** Acceptance (the $\dot\mu \le 0$ check), R5, R33 (which arc R5
+  splits: H holds per limit, and scaling $g_c$ scales $\mu_c$).
 
 ### H′. An arc whose entry multiplier reaches zero dies without moving the motion — proved, relative to S1
 
@@ -372,7 +373,8 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Gap.** The held set must not change at the gap's ends in a way the
   released motion does not share. Rest 12 (O2), where a ridden limit's own
   jerk saturates, still cycles: it splits, the gap closes, it splits again.
-- **Used by.** R27, and R21 through it (the held-set window of goal 8 at 70%).
+- **Used by.** R27, and R21 through it (the held-set window of goal 8 at 70%);
+  R34 (the gap contains the window; wider seeds, goal 3 at 70%).
 
 ### Observation O1 — answers stay off the edge
 
@@ -423,7 +425,8 @@ route stalls.
   $\eta\, a_F^\top R_F^{-1} a_F$.
 - **Gap.** Assumes $u_B$ constant on the stretch, true when it is held at a
   bound, and the direct form of S1.
-- **Used by.** Diagnosis of rest 12 (O2). No rule yet.
+- **Used by.** Diagnosis of rest 12 (O2). R33: a rise one limit's held window
+  induces in another arc's multiplier.
 
 ### U. An arc leaves before its own control saturates — proved relative to P and J
 
