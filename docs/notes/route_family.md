@@ -164,7 +164,7 @@ the curve through it.
 | E4 | merge: the gap between two arcs of a limit closes | gap | the free stretch between them dies: E3 backwards | as E3, read backwards | R11 |
 | E5 | reorder: junctions of two limits coincide | order | the swapped order; no choice | sketch: needs Lemma B for both limits ridden at once, and the locality of Lemma J | none |
 | E6 | an arc reaches $t_0$ or $t_f$ | end | the arc is ridden from the start or to the end | open (outside Bonnans–Hermant's (A1), (A4)) | `_end_structure` |
-| E7 | constraint regularity fails: the margin reaches zero, or a ridden limit's own control saturates (the density jumps, Lemma P) | bound, density | not known | **open**, the frontier (Lemmas I′, K, L, M, P; Observation O2) | R6, R8, R9, R12, R14 |
+| E7 | constraint regularity fails: the margin reaches zero, or a ridden limit's own control saturates (the density jumps, Lemma P) | bound, density | not known | **open**, the frontier (Lemmas I′, K, L, M, P; O2). One case settled: where $\eta$ turns negative as the limit's own control saturates, the piece leaves before it (Lemma U) | R6, R8, R9, R12, R14 |
 | E8 | fold: $D_v\Psi_S$ singular with all monitors positive | conditioning | pass it by arclength; $s$ turns back | standard for a simple fold (S9) | none: ds halves until it stalls |
 | E9 | anything else: two monitors at once, zero slope | | none: stop and report | probability zero under V3 | |
 

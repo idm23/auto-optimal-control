@@ -361,12 +361,11 @@ route stalls.
 - **Goal 9 at 80%.** $\mu$ of `tau2_min` turns negative just before an arc of
   `tau6_min`, the wrist joint. Its $a$ is about $10^{-4}$, its margin 0.012,
   and its entry jump about 1, against about $10^{-5}$ for the other limits.
-- **Open: a lemma for the held set changing on an arc.** It should say what
-  Lemma H's $\dot\mu \le 0$ requires at the moment $B$ gains the joint of a
-  ridden limit.
-  - *Conjecture.* Generically the arc exits before that moment. If so, the
-    split R5 builds, with its gap from the saturation time onward, is the
-    right structure, and its failure to converge is a seeding problem.
+- **A lemma for the held set changing on an arc: Lemma U.** When $\eta$
+  turns negative where the limit's own control joins $B$, the piece leaves
+  before that moment. The conjecture was right for rest 12. R5's split there
+  is the wrong seed: its gap starts at the saturation, and Lemma U says the
+  gap must start before it.
 
 ### P. The arc density jumps when a ridden limit's own control saturates — sketch
 
@@ -391,6 +390,41 @@ route stalls.
 - **Gap.** Assumes $u_B$ constant on the stretch, true when it is held at a
   bound, and the direct form of S1.
 - **Used by.** Diagnosis of rest 12 (O2). No rule yet.
+
+### U. An arc leaves before its own control saturates — proved relative to P and J
+
+- **Statement.** Assume C1 and C2, and a single order-1 limit $c$ ridden on
+  an arc. Let $t_s$ be a time on the arc where a control $k$ with
+  $a_k \ne 0$ joins the held set $B$. Suppose the density just after it is
+  negative, $\eta(t_s^+) < 0$, as Lemma P's jump allows. Then no extremal
+  rides $c$ through $t_s$. An extremal that rides $c$ up to $t_s$ exits
+  there only if $\mu(t_s) = 0$. So, generically ($\mu(t_s) > 0$), the arc's
+  piece leaves strictly before $t_s$. What follows is a free stretch: either
+  a gap closed by a later piece (Lemma E3's moment conditions with
+  $a = t_e$), or the rest of the motion.
+- **Proof.**
+  1. Riding past $t_s$ gives $\eta < 0$ on an interval, which Lemma H
+     forbids.
+  2. An exit at $t_s$ has no jump in the costate, by J: a jump $\nu a$ would
+     move the controls still free, unless $a_F = 0$. With control
+     continuity, that needs $\mu(t_s) = 0$ (P's consequence).
+  3. Riding up to $t_s$ with $\mu(t_s) > 0$ and leaving there is therefore
+     not an extremal. The piece must end earlier, where $\mu$, shifted by the
+     entry jump, can vanish.
+- **Gap.** Where the piece leaves is not given by the lemma; the exit row
+  of the shooting system decides it. Neither is the existence of the
+  continuation: that is E3's moment conditions, or the free motion staying
+  below the limit.
+- **Evidence (rest 12, O2).**
+  - In the solved answer, `tau1_max` leaves at 0.41610, and joint 1's jerk
+    saturates at 0.42511.
+  - On the first route, every rise of $\mu$ starts at joint 1's saturation
+    (0.34123 vs 0.34123, and 0.34579 vs 0.34579).
+  - The piece trimmed to leave just before it (2% and 5% earlier) solves to
+    an exit at 0.34525, with no rise and no violation.
+  - Trimmed to leave exactly at the saturation, it converges back to the
+    solution that rises.
+- **Used by.** R29. Settles O2's conjecture for this case.
 
 ### Q. An order-1 touch carries no jump unless the controls absorb it — proved, relative to S1
 
