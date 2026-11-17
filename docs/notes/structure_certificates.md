@@ -1375,50 +1375,58 @@ against R25 alone): **45/45 solved, all under 60 s**, against 44.
   - So the portfolio is still needed. Its other routes are what solve those
     six.
 
-### Lemma E3 (the split normal form) and Rule R27, tried
+### Lemma E3 (the split's gap) and Rule R27
 
 *Lemma E3* (in `lemma_register.md`, leading order derived) is Lemma E with
-$g$ and $\eta$ exchanged. Take an order-1 arc whose density $\eta = -\dot\mu$
-has a nondegenerate interior minimum $\eta_{\min} < 0$ at $t_m$, with the
-controls strictly inside their bounds there (H0). The arc splits with a free
-gap $[t_m - h, t_m + h]$, $h^2 = -6\eta_{\min}/\ddot\eta$, and the reason is
-the re-entry:
-- the released control is $u_b + \tilde\mu H_{uu}^{-1} g_u^{(1)T}$, so
-  $\dot g = c\tilde\mu$, with $c > 0$ by (A3);
-- $\tilde\mu$ starts at 0 at the exit and falls at the rate $\tilde\eta$;
-- returning to the limit tangentially needs $\int \tilde\eta = 0$ and
-  $\int (b - \tau)\tilde\eta = 0$ over the gap.
+$g$ and $\eta$ exchanged. Released on a gap $[a, b]$, the limit moves at
+$\dot g = D(\mu - \mu(a))$, where $D$ is Lemma P's
+$a_F^\top R_F^{-1} a_F$, generalized to several limits ridden at once. It
+must return to its level tangentially. So:
+- $\mu(a) = \mu(b)$;
+- $\int_a^b D(\mu - \mu(a)) = 0$.
 
-So the gap is $\sqrt 3$ times the stretch where $\eta < 0$, and R5's seed,
-which spans that stretch, is too narrow by that factor.
+For a smooth dip of $\eta$, this centres the gap on the minimum with
+$h^2 = -6\eta_{\min}/\ddot\eta$. That is $\sqrt 3$ times the stretch where
+$\eta < 0$, so R5's seed, which spans that stretch, is too narrow. Where
+$\eta$ is negative on one window of a held set (Lemma P), the gap is that
+window, slightly widened.
 
-*Check.* At every split R5 offered on the first route of all 45 cases, the
-unsplit density was fitted with a quadratic about its minimum, and the gap
-the split solved to was recorded.
-- **Clean splits:** on goal 4 at 80% and at 70%, the solved half-width is
-  0.98 and 1.00 of $\sqrt{-6\eta_{\min}/\ddot\eta}$, and the gap is centred
-  on $t_m$ to $3 \times 10^{-4}$. Those two are the clean splits.
-- **Spikes:** on goal 2 at 70% (38 splits), the density's curvature is
-  about $6 \times 10^{5}$, a spike. The split that solves has a gap of zero
-  width, away from the minimum. This is Lemma P's jump where a ridden
-  limit's control saturates, outside H0.
+*Check* (every split R5 offered on the first route of all 45 cases):
+- **Smooth dips** (goal 4 at 80% and at 70%): solved to 0.98 and 1.00 of
+  $h$, centred on the minimum.
+- **Held-set windows** (goal 2 at 70%, 38 splits, curvature about
+  $6\times 10^5$ in a quadratic fit): R5's splits solve to a gap of zero
+  width, away from the window. The moment seed solves to the gap
+  $[0.37734, 0.38009]$ (seed $[0.37732, 0.38005]$). There $g < 0$, and the
+  rise of $\mu$ falls from $1.8\times 10^{-4}$ to $10^{-12}$.
 
-*Rule R27* (`Homotopy.split_normal_form`): when R5 fires and H0 holds (every
-control at least $10^{-3}$ of its range inside its bounds over the gap,
-widened by half), the normal-form gap is offered first, with R5's jumps.
+*Rule R27* (`Homotopy.split_normal_form`): when R5 fires, offer first the
+gap of the moment conditions, with $D$ from the rate coefficients
+(`Homotopy._split_weights`). Then come R5's own seeds.
 
-*Result: neutral, off by default.* Six routes, against the speed PR's
-census:
-- **Without the H0 check:** worse. 45/45 solve, but only 43 under 60 s. Goal
-  2 at 70% takes 321 s against 38 s, and R5 fires 2,613 times against 12.
-  The seed fits the spikes, solves to a spurious split, and the route churns
-  on it.
-- **With it:** R27 offers its gap once in the census's 75 R5 firings. The
-  census is unchanged (486 s against 494 s in total, the same answers).
+*First version, tried:* a quadratic fit about the density's minimum. It
+fits a held-set window as a spike and sends the split astray. Goal 2 at 70%
+took 321 s (against 38 s), and R5 fired 2,613 times. Restricting it to
+interior controls made it fire once in the census.
 
-So in the census, R5's splits are E7 events, not E3. A lemma for the split
-at a saturating control (E7, Lemma P) is what would turn R5 from a
-heuristic into a rule.
+*Result of the moment version* (six routes, against the speed PR's census):
+45/45 under 60 s.
+- **Totals:** 478.0 s against 493.9 s. The median is 7.1 s against 6.9 s.
+- **Answers:** they agree to $2\times 10^{-13}$.
+- **Gains:** goal 9 at 70% takes 18.8 s against 35.4 s, and goal 0 at 80%
+  14.2 s against 19.1 s.
+- **Firings:** R27 fires 16 times. R11's merges fall from 111 to 64, and
+  R20's collapses from 5 to 1.
+
+*On the first route alone:* 38/45 against 39/45, a different mix.
+- Goal 3 at 70% is now solved (176.7 s), and goal 2 at 70% takes 231.4 s
+  against 422.1 s.
+- Goal 0 at 70% and rest 12 are lost. On rest 12, `tau1_max` splits, its gap
+  closes, and it splits again (R27 fires 161 times). This is O2's case, where
+  the arc's own jerk saturates on it. O2's open lemma is what decides it:
+  whether such an arc must exit before the saturation.
+
+R27 is on in the census.
 
 ## Rules these license
 

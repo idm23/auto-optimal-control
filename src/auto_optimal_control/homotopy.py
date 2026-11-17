@@ -316,8 +316,8 @@ class Homotopy:
         #: limit is strictly below its level somewhere between them (event E1, Lemma E),
         #: rather than widening the arc over it.
         self.separate_births = False
-        #: Rule R27: R5's split is offered first with the gap of the split normal form
-        #: (E3): half-width h, h^2 = -6 eta_min / eta'', about the density's minimum.
+        #: Rule R27: R5's split is offered first with the gap of Lemma E3's moment
+        #: conditions: mu equal at its ends, and D (mu - mu(a)) integrating to zero.
         self.split_normal_form = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
@@ -2222,10 +2222,10 @@ class Homotopy:
             if t_hi - t_lo < 1e-6 * T or (best is not None and rise[j_hi] <= best[0]):
                 continue
             best = (rise[j_hi], i, t_lo, t_hi, mu[j_lo], mu[j_hi], j_lo == 0, j_hi == len(on) - 1,
-                    tr["t"][on], mu)
+                    tr["t"][on], mu, on)
         if best is None:
             return None
-        _, i, t_lo, t_hi, mu_lo, mu_hi, at_entry, at_exit, t_on, mu_on = best
+        _, i, t_lo, t_hi, mu_lo, mu_hi, at_entry, at_exit, t_on, mu_on, on_idx = best
         a, b, pi = values[i]
         self.diagnostics.fired("R5")
         self._detail(f"    {self.kr.CONSTRAINT_NAMES[arcs[i][1]]}: multiplier rises on "
@@ -2252,16 +2252,15 @@ class Homotopy:
             if hi_t - lo_t > 1e-6 * T:
                 out.append((arcs, values[:i] + [(lo_t, hi_t, pi_t)] + values[i + 1:]))
         if self.split_normal_form:
-            gap = self._split_gap(t_on, mu_on)
-            if gap is not None and not self._controls_interior(shoot, tr, *gap):
-                gap = None                 # outside E3's hypothesis H0: a corner (E7)
+            c_split = arcs[i][1]
+            gap = self._split_gap(t_on, mu_on, self._split_weights(shoot, tr, on_idx, c_split))
             if gap is not None and a < gap[0] < gap[1] < b:
-                # Rule R27: the gap of the split's normal form (E3), offered first.
+                # Rule R27: the gap of Lemma E3's moment conditions, offered first.
                 self.diagnostics.fired("R27")
-                lo, hi = gap
+                lo, hi, level = gap
                 p1 = np.atleast_1d(np.asarray(pi, float)).copy()
-                p1[0] -= float(np.interp(lo, t_on, mu_on))
-                p2 = np.atleast_1d(float(np.interp(hi, t_on, mu_on)))
+                p1[0] -= level
+                p2 = np.atleast_1d(level)
                 out.append((out_a, values[:i] + [(a, lo, p1), (hi, b, p2)] + values[i + 1:]))
         for lo, hi in ((t_lo - d, t_hi + d), (t_lo + d, t_hi - d)):
             if not (lo > a and hi < b):
@@ -2269,57 +2268,104 @@ class Homotopy:
             out.append((out_a, values[:i] + [(a, lo, pi1), (hi, b, pi2)] + values[i + 1:]))
         return out or None
 
-    @staticmethod
-    def _controls_interior(shoot, tr, lo, hi, rel=1e-3):
-        """Hypothesis H0 of Lemmas E and E3 on ``[lo, hi]`` (widened by half its
-        length): every control strictly inside its bounds, by ``rel`` of their range."""
+    def _split_weights(self, shoot, tr, idx, c):
+        """``D = 1 / [(A_F R_F^{-1} A_F^T)^{-1}]_{cc}`` at the samples ``idx`` of
+        ``tr``: how fast limit ``c`` moves per unit of its released multiplier, with
+        the other limits ridden there still held and the controls at their bounds
+        fixed (Lemma P's ``a_F^T R_F^{-1} a_F`` for one limit). Ones when the
+        problem lacks the certificates (C1, C2) that make it computable."""
+        from .lemmas import LimitObjects
+        try:
+            obj = LimitObjects(shoot.kernels, shoot.params)
+        except ValueError:
+            return np.ones(len(idx))
         k, p = shoot.kernels, shoot.params
-        w = 0.5 * (hi - lo)
-        for i in np.flatnonzero((tr["t"] >= lo - w) & (tr["t"] <= hi + w)):
-            blo, bhi = k.control_bounds(tr["t"][i], tr["z"][i], p)
-            u = tr["u"][i]
-            if np.any(np.minimum(u - blo, bhi - u) <= rel * (np.asarray(bhi) - np.asarray(blo))):
-                return False
-        return True
+        out = np.ones(len(idx))
+        for n, j in enumerate(idx):
+            t, z, u = tr["t"][j], tr["z"][j], np.asarray(tr["u"][j], float)
+            lo, hi = (np.asarray(b, float) for b in k.control_bounds(t, z, p))
+            F = np.flatnonzero(np.minimum(u - lo, hi - u) > 1e-6 * (hi - lo))
+            rows = [c] + [cc for cc in np.flatnonzero(tr["active"][j]) if cc != c]
+            try:
+                A = np.array([obj.rate_parts(cc, t, z)[0] for cc in rows])[:, F]
+                M = A @ np.linalg.solve(obj.R[np.ix_(F, F)], A.T)
+                out[n] = 1.0 / np.linalg.inv(M)[0, 0]
+            except (np.linalg.LinAlgError, ValueError, IndexError):
+                out[n] = np.nan
+        if not np.all(np.isfinite(out) & (out > 0)):
+            return np.ones(len(idx))
+        return out
 
     @staticmethod
-    def _split_gap(t, mu):
-        """Rule R27: the free gap of the split normal form (event E3), ``(a, b)`` or None.
+    def _split_gap(t, mu, D=None):
+        """Rule R27: the free gap of a split (Lemma E3), ``(a, b, level)`` or None.
 
-        ``mu`` is the arc's multiplier sampled at times ``t``, and ``eta = -dmu/dt``.
-        Where ``eta`` has a nondegenerate interior minimum ``eta_min < 0`` with
-        curvature ``eta''`` at ``t_m``, the split extremal leaves the limit on
-        ``[t_m - h, t_m + h]`` with ``h^2 = -6 eta_min / eta''`` to leading order: the
-        released motion must return to the limit tangentially, so ``eta`` integrates
-        to zero over the gap, as does its first moment. The gap is sqrt(3) times the
-        stretch where ``eta < 0``. The quadratic is fitted over that stretch and its
-        neighbours."""
+        ``mu`` is the arc's multiplier at the times ``t``. Released on ``[a, b]``,
+        the limit moves at ``dg/dt = D (mu - mu(a))`` to leading order, and it must
+        return to its level tangentially. So the gap's ends satisfy:
+        - ``mu(a) = mu(b)``, the level;
+        - ``int_a^b D (mu - mu(a)) = 0``.
+        The gap straddles the stretch where ``mu`` rises (``eta < 0``). The level is
+        found by bisection between ``mu``'s values at the stretch's ends.
+        - For a quadratic dip of ``eta`` and constant ``D``, the gap is centred on
+          the minimum, with ``h^2 = -6 eta_min / eta''``.
+        - Where ``eta`` is negative on one window of a held set (Lemma P), the gap
+          is that window, slightly widened."""
         t, mu = np.asarray(t, float), np.asarray(mu, float)
-        dt = np.diff(t)
-        keep = dt > 0
-        tm_, eta = (0.5 * (t[1:] + t[:-1]))[keep], -np.diff(mu)[keep] / dt[keep]
-        if len(eta) < 7:
+        keep = np.concatenate([[True], np.diff(t) > 0])
+        t, mu = t[keep], mu[keep]
+        D = np.ones_like(t) if D is None else np.asarray(D, float)[keep]
+        if len(t) < 5:
             return None
+        eta = -np.gradient(mu, t)
         j = int(np.argmin(eta))
-        if eta[j] >= 0 or j < 3 or j > len(eta) - 4:
+        if not eta[j] < 0:
             return None
-        lo, hi = j, j
-        while lo > 0 and eta[lo - 1] < -2 * eta[j]:
-            lo -= 1
-        while hi < len(eta) - 1 and eta[hi + 1] < -2 * eta[j]:
-            hi += 1
-        lo, hi = max(lo - 2, 0), min(hi + 2, len(eta) - 1)
-        if hi - lo < 4:
+        r1, r2 = j, j
+        while r1 > 0 and eta[r1 - 1] < 0:
+            r1 -= 1
+        while r2 < len(t) - 1 and eta[r2 + 1] < 0:
+            r2 += 1
+
+        def ends(level):
+            a = r1
+            while a > 0 and mu[a] < level:
+                a -= 1
+            b = r2
+            while b < len(t) - 1 and mu[b] > level:
+                b += 1
+            if mu[a] < level or mu[b] > level or a == 0 or b == len(t) - 1:
+                return None        # the gap would reach the arc's end: R18's trim
+            ta = float(np.interp(level, [mu[a + 1], mu[a]], [t[a + 1], t[a]]))
+            tb = float(np.interp(level, [mu[b], mu[b - 1]], [t[b], t[b - 1]]))
+            return a, b, ta, tb
+
+        def moment(level):
+            e = ends(level)
+            if e is None:
+                return None
+            a, b, ta, tb = e
+            tt = np.concatenate([[ta], t[a + 1:b], [tb]])
+            ff = np.concatenate([[0.0], D[a + 1:b] * (mu[a + 1:b] - level), [0.0]])
+            return float(np.sum(0.5 * (ff[1:] + ff[:-1]) * np.diff(tt)))
+
+        lo, hi = mu[r1], mu[r2]
+        span = hi - lo
+        if not span > 0:
             return None
-        c2, c1, c0 = np.polyfit(tm_[lo:hi + 1] - tm_[j], eta[lo:hi + 1], 2)
-        if not c2 > 0:
+        lo, hi = lo + 1e-9 * span, hi - 1e-9 * span
+        f_lo, f_hi = moment(lo), moment(hi)
+        if f_lo is None or f_hi is None or not f_lo > 0 > f_hi:
             return None
-        centre = tm_[j] - c1 / (2 * c2)
-        eta_min = c0 - c1 ** 2 / (4 * c2)
-        if not eta_min < 0:
-            return None
-        h = float(np.sqrt(-6 * eta_min / (2 * c2)))
-        return float(centre - h), float(centre + h)
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            f = moment(mid)
+            if f is None:
+                return None
+            lo, hi = (mid, hi) if f > 0 else (lo, mid)
+        level = 0.5 * (lo + hi)
+        _, _, ta, tb = ends(level)
+        return ta, tb, float(level)
 
     def _exact_jump(self, arcs, v, tol):
         """The exact problem's solve of structure ``arcs`` from ``v``: ``(J, shoot, sol)`` or None."""

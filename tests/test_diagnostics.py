@@ -216,10 +216,18 @@ def test_split_gap_is_the_normal_form():
     # mu(t) = int_t^1 eta, so that eta = -dmu/dt.
     mu = np.concatenate([[0.0], np.cumsum(0.5 * (eta[1:] + eta[:-1]) * np.diff(t))])
     mu = mu[-1] - mu
-    a, b = Homotopy._split_gap(t, mu)
+    a, b, level = Homotopy._split_gap(t, mu)
+    assert np.interp(a, t, mu) == pytest.approx(level) and np.interp(b, t, mu) == pytest.approx(level)
     h = np.sqrt(-6 * eta_min / curv)
     assert (a + b) / 2 == pytest.approx(tm, abs=1e-6)
     assert (b - a) / 2 == pytest.approx(h, rel=1e-4)
     assert (b - a) / 2 == pytest.approx(np.sqrt(3) * np.sqrt(-2 * eta_min / curv), rel=1e-4)
+    # A negative window between two jumps of eta (a held set, Lemma P): the gap is the
+    # window, a little widened on each side.
+    eta = np.where((t > 0.5) & (t < 0.52), -0.5, 4.0)
+    mu = np.concatenate([[0.0], np.cumsum(0.5 * (eta[1:] + eta[:-1]) * np.diff(t))])
+    mu = mu[-1] - mu
+    a, b, _ = Homotopy._split_gap(t, mu)
+    assert 0.497 < a < 0.5 and 0.52 < b < 0.523
     # The density nowhere negative: no split.
     assert Homotopy._split_gap(t, -np.cumsum(np.full_like(t, 1e-3))) is None
