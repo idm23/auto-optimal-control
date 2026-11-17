@@ -1289,6 +1289,84 @@ the failure is a birth just beside an exit:
 - **Still over 60 s:** only goal 9 at 80%. On it, 291 steps fail with
   "structure changes did not settle".
 
+### Locating every event, tried
+
+*Idea:* `settle` locates an event inside a step only when it is large: a peak
+excess above $10^{-3}$ of the limit's scale (R16), or a rise of $\mu$ above
+$10^{-3}$ (R25). A smaller one is repaired where the step landed. The event
+follower of `route_family.md` locates every event. The threshold is now a
+parameter, `Homotopy.locate_tol`, with R16's target at a fifth of it.
+
+*Result* (six routes, slow cases): no threshold is better on every case.
+
+| Case | $10^{-3}$ | $10^{-4}$ | $10^{-5}$ |
+|---|---|---|---|
+| goal 9 at 80% | 185.7 s | 26.7 s | 20.8 s |
+| goal 4 at 70% | 45.4 s | unsolved | unsolved |
+| goal 2 at 70% | 39.9 s | 249.5 s | 90.0 s |
+| goal 0 at 70% | 38.3 s | 46.7 s | 77.8 s |
+| goal 9 at 70% | 39.0 s | 42.6 s | 49.6 s |
+
+Mixing thresholds across the portfolio's routes did no better: one case
+always went over 60 s. The default stays $10^{-3}$.
+
+*What the routes are sensitive to:* the 10w route alone solves goal 9 at
+80% in 31 s when the case's torque limits come from a free solve also run
+at 10w. In the portfolio, where those limits come from the free solve at
+w, it fails. The two sets of limits differ only by rounding: the final
+times differ by $6 \times 10^{-15}$. A route whose outcome changes with
+rounding is deciding something by a threshold. The trace shows what that
+was (Rule R26).
+
+### Rule R26 (a violation beside an arc is a birth)
+
+*Observed:* on goal 9 at 80% and goal 4 at 70%, the first route fails the
+same way:
+- a step brings in a small violation of a limit just past the exit of that
+  limit's arc (0.004 of $T$ away on goal 4);
+- `_activate` treats any violation within $0.05\,T$ of an arc of its limit
+  as part of that arc, and widens the arc over it;
+- the widened arc covers a stretch where the limit was strictly below its
+  level, and its density is negative there: $\mu$ falls below 0 and rises
+  ($-1.9 \times 10^{-5}$ and $3.3 \times 10^{-5}$ on goal 9's `tau2_min`);
+- R5's split of it does not solve (residuals 35 and 27), and the route
+  carries the bad arc to the end, where the exact solve rejects it.
+
+*Rule:* a violation near an arc of its limit is born as a new arc
+(Lemma E, event E1) when the limit is strictly below its level somewhere in
+the free time between them: below $-10^{-6}$ of the limit's reach on the
+free stretches (`Homotopy.separate_births`). Only when the limit stays at
+its level between them does the arc widen over the violation, or do two
+arcs merge across it.
+
+*Why it is sound:* it changes only which structure is offered. Every
+structure is solved, settled and judged as before. Effectiveness is
+Lemma E: a peak separated from the arc by a stretch where $g < 0$ is an
+interior contact, and its arc is born there with small width. Widening the
+old arc over it instead holds the limit at its level across a stretch where
+the nearby extremal is strictly inside it. So the widened structure is not
+that extremal's, and on the traced cases its density is negative there.
+
+*Result* (six routes, R1 R2 R16 R20 R25, 300 s, one case at a time,
+against R25 alone): **45/45 solved, all under 60 s**, against 44.
+- **Totals:** 579 s against 739 s on all 45. The median is 8.4 s against
+  8.5 s, and the slowest is 46.9 s against 185.7 s.
+- **Answers:** they agree to $2 \times 10^{-16}$.
+- **Goal 9 at 80%:** 20.2 s, against 185.7 s.
+- **Firings:** R26 fires rarely (goal 4 at 70%: 9 times; goal 9 at 80%:
+  2; goal 2 and goal 0 at 70%: once each). Two repeat runs of the five
+  slowest cases give the same answers, within 1 s.
+- **On the first route alone** (traced, with the lemma oracles on), R26 turns
+  three of four slow cases from failures into solves. Goal 4 at 70%, goal 9
+  at 80% and goal 0 at 70% failed before; goal 2 at 70% took 39 s before.
+
+  | Case | first route, R26 off | first route, R26 on |
+  |---|---|---|
+  | goal 4 at 70% | unsolved | 35.5 s |
+  | goal 9 at 80% | unsolved | 15.3 s |
+  | goal 2 at 70% | 39.4 s | 293.8 s |
+  | goal 0 at 70% | unsolved | 442.9 s |
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

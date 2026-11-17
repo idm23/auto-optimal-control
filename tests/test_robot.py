@@ -376,6 +376,39 @@ def test_merging_a_limits_arcs_keeps_another_limits_arc_between_them():
     assert spans[1][:2] == (0.31, 0.6)
 
 
+def test_a_violation_beside_an_arc_is_a_birth_when_the_limit_dips_between():
+    """Rule R26: near an arc of its limit, a violation is its own arc (a birth, Lemma E)
+    when the limit is strictly below its level between them; else the arc widens."""
+    h = Homotopy.__new__(Homotopy)
+    h.kr = type("K", (), {"CONSTRAINT_ORDERS": (1,)})()
+    h.diagnostics = homotopy.Diagnostics()
+    h.holdable_births = h.corner_touches = h.collapsed_touches = False
+    arcs, values = [("boundary", 0)], [(0.2, 0.3, np.zeros(1))]
+    h._arcs_of = lambda shoot, v: (arcs, values)
+    t = np.linspace(0.3, 1.0, 71)
+    dip = {"g": np.minimum(-0.1 + 40 * (t - 0.31) ** 2, 0.01)[:, None]}
+
+    class Shoot:
+        @staticmethod
+        def unpack(v):
+            return None, None, None, 1.0
+        t0 = 0.0
+
+    h._free_samples = lambda shoot, v: [(np.linspace(0.0, 0.2, 21), np.full((21, 1), -1.0), ()),
+                                        (t, dip["g"], ())]
+    violation = [(0, 0.35, 0.37, 0.01)]
+    (widened, spans), = h._activate(Shoot, None, violation)
+    assert widened == arcs and spans[0][:2] == (0.2, 0.37)
+    h.separate_births = True
+    (born, spans), = h._activate(Shoot, None, violation)
+    assert born == [("boundary", 0), ("boundary", 0)]
+    assert spans[0][:2] == (0.2, 0.3) and spans[1][0] > 0.3
+    # The limit stays at its level between them: the arc widens over the violation.
+    dip["g"] = np.zeros((71, 1))
+    (widened, spans), = h._activate(Shoot, None, violation)
+    assert widened == arcs and spans[0][:2] == (0.2, 0.37)
+
+
 def test_newton_for_a_guess_accepts_a_stall_near_the_root():
     # A residual that stops falling at 3e-6, the noise of a loose integration: the seed
     # depended on which BLAS kernels rounding happened to favour.

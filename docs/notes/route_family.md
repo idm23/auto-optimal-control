@@ -55,7 +55,7 @@ event.
 | peak $m^{\rm pk}_{c,k}$ | $-\max(g_c - o_c)$ over the interior of free stretch $k$ | birth | sampled, threshold $10^{-6}$ (R16 on overshoot) |
 | width $m^{\rm w}_i$ | $t_{\rm out} - t_{\rm in}$ of arc $i$ | death | R10, R17 |
 | jump $m^{\pi}_i$ | entry jump $\pi_i$ (touch jump $\nu$) | collapse with a jump | `_retire`, acceptance |
-| density $m^{\eta}_i$ | $\min$ over arc $i$ of the measure's density $\eta_i$ | split | **only at the end** (acceptance, R5, R18, R21) |
+| density $m^{\eta}_i$ | $\min$ over arc $i$ of the measure's density $\eta_i$ | split | R25 locates a crossing inside a step; R5 and R18 split where the step lands; R21 at the end |
 | gap $m^{\rm g}_{c,k}$ | gap between consecutive arcs of limit $c$ | merge | R11, on touch or overlap |
 | order $m^{\rm o}_j$ | difference of consecutive junction times of different limits | reorder | acceptance ("out of order") |
 | bound $m^{\rm b}_i$ | how far the riding control on arc $i$ stays inside $U$ (Lemma I's margin bounds it) | corner | riding failures, R8, R9, R14 |
@@ -87,8 +87,14 @@ exactly when every monitor is $\ge 0$ (to its tolerance).
   jerks ($w > 0$). A monitor for singular arcs. $\square$
 
 *So what.* The acceptance test can be run continuously along the path, not
-only at the end. Goal 4 at 70% is the case it catches: the density of an arc
-crossed zero somewhere on the route, and only the final check saw it.
+only at the end. Before R25, R5 already looked at the density on every
+consistent point, but only to offer a split wherever the step landed.
+
+*Correction.* An earlier version of this note said goal 4 at 70% was a
+density crossing that only the final check saw. The trace says otherwise. On
+its first route, the density is positive all the way, and the failure is a
+birth just beside an exit, brought in on the spot because it is under
+`settle`'s threshold (Rule R25 in `structure_certificates.md`).
 
 ### V2. Continuation with a fixed structure — proved
 
@@ -150,7 +156,7 @@ the curve through it.
 
 | | Event | Monitor | Continuation | Status | Rules today |
 |---|---|---|---|---|---|
-| E1 | birth: an interior peak reaches the limit with $\ddot g < 0$, jerks interior | peak | a new arc; its width grows as $\sqrt{s - s^*}$, so the width is the step variable there | **proved** (Lemma E; compare Bonnans & Hermant 2008, Thm 2.4: a touch becomes an arc, stays a touch or goes inactive) | R2, R16, R20 |
+| E1 | birth: an interior peak reaches the limit with $\ddot g < 0$, jerks interior | peak | a new arc; its width grows as $\sqrt{s - s^*}$, so the width is the step variable there | **proved** (Lemma E; compare Bonnans & Hermant 2008, Thm 2.4: a touch becomes an arc, stays a touch or goes inactive) | R2, R16, R20, R26 |
 | E1′ | birth at the corner (contact on the edge of the holdable set) | peak | one-sided arc | conjecture (E′) | R6, R12 |
 | E2 | death: an arc's width and jump reach zero together | width | the arc is removed: E1 traversed backwards | **proved** (Lemma E read in reverse) | R10, R17 |
 | E2′ | collapse with a positive jump | width, with $\pi > 0$ | a touch with a jump is degenerate unless the controls absorb it (Lemma Q), so not a regular event | open | R20 |
@@ -215,10 +221,8 @@ has a lemma.
 
 ## What phase 2 needs, in order of value
 
-1. **The density monitor on the path** (V1). It is computable now:
-   `MultiArcShooting.diagnostics` already gives $\mu$ along each arc, and its
-   rise is the density's sign. It would have stopped goal 4 at 70% at the
-   event instead of at the end.
+1. **The density monitor on the path** (V1). Done: Rule R25 locates a
+   crossing inside a step by a secant on the density (V2).
 2. **E3's normal form**: the split, the most valuable open lemma.
 3. **E7**: limits ridden while their own controls saturate (rest 12, goal 9
    at 80%).
