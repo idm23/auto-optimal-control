@@ -1606,6 +1606,11 @@ newborn arc again. Goal 4 at 70% then solves on the forward route in 11 s.
 | under 60 s | | 33 | 36 |
 | total | | 3264.9 s | 2516.5 s |
 
+With six routes and the same rules, all 45 solve under 60 s: total 494.1 s
+against 478.0 s, median 7.3 s, slowest 52.9 s (goal 2 at 70%). Goal 4 at 70%
+takes 15.9 s, against 82.3 s with R30 and R31 alone. The rules stay off by
+default until the first route alone solves all 45 under 60 s.
+
 The cases left on the first route:
 - **Failing:** goal 0 at 70%, goal 3 at 70% and rest 12.
 - **Over 60 s:** goal 5 at 70%, goal 2 at 70%, rest 4, rest 9, rest 2
