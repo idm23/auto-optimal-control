@@ -284,6 +284,62 @@ margin is zero exactly when the corner is the only control that holds $g$.
   law (μ from the last interior control, R14). L1 has to be restated,
   because along a saturated motion $\ddot g$ involves $\dot m$.
 
+### E3. The split's gap (moment conditions) — leading order derived; sketch
+
+- **Statement.** Take an order-1 arc of limit $c$ whose multiplier $\mu$
+  rises somewhere inside it ($\eta = -\dot\mu < 0$). Assume (A3) and L2 as in
+  E, and that the released motion keeps the arc's held set to leading order.
+  Then the split extremal leaves the limit on a gap $[a, b]$ that straddles
+  the rise, with:
+  - (i) $\mu(a) = \mu(b)$, the level $\ell$;
+  - (ii) $\int_a^b D\,(\mu - \ell)\,dt = 0$, where
+    $D = 1/[(A_F R_F^{-1} A_F^\top)^{-1}]_{cc}$. Here $A$ has the rate
+    coefficients $a$ of the limits ridden there (other limits stay held),
+    and $F$ is the set of controls not at a bound. For one limit, $D$ is
+    Lemma P's $a_F^\top R_F^{-1} a_F$.
+
+  The first piece leaves with $\mu = 0$, so its entry jump falls by $\ell$.
+  The second enters with $\pi_2 = \ell$.
+- **Special cases.**
+  - *Smooth dip* (H0, $D$ constant,
+    $\eta = \eta_{\min} + \tfrac12\ddot\eta (t - t_m)^2$): the gap is centred
+    on $t_m$ with $h^2 = -6\eta_{\min}/\ddot\eta$. That is $\sqrt 3$ times the
+    stretch where $\eta < 0$, and $s - s^* = \ddot\eta h^2/(6\kappa)$ under
+    L3′.
+  - *Held-set window* (Lemma P: $\eta$ negative, $-W$, on one window of
+    length $\omega$ between two jumps, with $L, R > 0$ beside it): the gap is
+    the window widened by about $W\omega/(2L)$ and $W\omega/(2R)$.
+- **Derivation (leading order).**
+  1. Released on the gap, the control is
+     $u_b + \tilde\mu\,R_F^{-1}P\,a_F$, with $P$ projecting out the limits
+     still ridden. So $\dot g = D\,\tilde\mu$.
+  2. At the exit the control is continuous, so $\tilde\mu = \mu - \mu(a)$
+     on the gap ($\dot{\tilde\mu} = -\tilde\eta$, the density continued from
+     before the split).
+  3. The limit returns to its level tangentially at $b$:
+     - $\dot g(b) = 0$ gives (i);
+     - $g(b) = \int_a^b \dot g = 0$ gives (ii).
+
+  The toy $\dot x = u$, $L = \tfrac12 u^2 + \rho(t)x$, $x \le 0$ (where
+  $\eta = -\rho$, $D = 1$) has exactly this gap.
+- **To formalize.** The implicit function theorem in the gap's width, as in
+  E's steps 3 and 4, with the held set's switching times on the gap as
+  extra unknowns (Lemma R).
+- **Evidence.** At splits on the census cases' first routes:
+  - *Smooth dips* (goal 4 at 80% and at 70%): the splits solve to 0.98 and
+    1.00 of $h$, centred on $t_m$ to $3 \times 10^{-4}$.
+  - *A held-set window* (goal 2 at 70%, `tau5_max` ridden with `tau1_min`,
+    where the jerks of joints 1–4 change bounds): the moment seed
+    $[0.37732, 0.38005]$ solves to $[0.37734, 0.38009]$. On that gap,
+    $-1.6\times 10^{-6} \le g \le -1.2\times 10^{-7}$, and the rise of $\mu$
+    falls from $1.8\times 10^{-4}$ to $10^{-12}$. R5's own seed there
+    solves to a gap of zero width.
+- **Merge (E4).** E3 read backwards.
+- **Gap.** The held set must not change at the gap's ends in a way the
+  released motion does not share. Rest 12 (O2), where a ridden limit's own
+  jerk saturates, still cycles: it splits, the gap closes, it splits again.
+- **Used by.** R27.
+
 ### Observation O1 — answers stay off the edge
 
 On every solved census case, and on the toy's direct comparisons, the margin

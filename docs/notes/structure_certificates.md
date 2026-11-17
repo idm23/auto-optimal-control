@@ -1367,6 +1367,67 @@ against R25 alone): **45/45 solved, all under 60 s**, against 44.
   | goal 2 at 70% | 39.4 s | 293.8 s |
   | goal 0 at 70% | unsolved | 442.9 s |
 
+- **The first route alone on all 45** (R1 R2 R16 R20 R25 R26, six cases at
+  a time, with the trajectory caches of the next PR): 39/45 solved, 33 under
+  60 s, median 14.0 s.
+  - Unsolved: goal 3 at 90%, 80% and 70%, goal 5 at 80% and 70%, and goal 7
+    at 70%.
+  - So the portfolio is still needed. Its other routes are what solve those
+    six.
+
+### Lemma E3 (the split's gap) and Rule R27
+
+*Lemma E3* (in `lemma_register.md`, leading order derived) is Lemma E with
+$g$ and $\eta$ exchanged. Released on a gap $[a, b]$, the limit moves at
+$\dot g = D(\mu - \mu(a))$, where $D$ is Lemma P's
+$a_F^\top R_F^{-1} a_F$, generalized to several limits ridden at once. It
+must return to its level tangentially. So:
+- $\mu(a) = \mu(b)$;
+- $\int_a^b D(\mu - \mu(a)) = 0$.
+
+For a smooth dip of $\eta$, this centres the gap on the minimum with
+$h^2 = -6\eta_{\min}/\ddot\eta$. That is $\sqrt 3$ times the stretch where
+$\eta < 0$, so R5's seed, which spans that stretch, is too narrow. Where
+$\eta$ is negative on one window of a held set (Lemma P), the gap is that
+window, slightly widened.
+
+*Check* (every split R5 offered on the first route of all 45 cases):
+- **Smooth dips** (goal 4 at 80% and at 70%): solved to 0.98 and 1.00 of
+  $h$, centred on the minimum.
+- **Held-set windows** (goal 2 at 70%, 38 splits, curvature about
+  $6\times 10^5$ in a quadratic fit): R5's splits solve to a gap of zero
+  width, away from the window. The moment seed solves to the gap
+  $[0.37734, 0.38009]$ (seed $[0.37732, 0.38005]$). There $g < 0$, and the
+  rise of $\mu$ falls from $1.8\times 10^{-4}$ to $10^{-12}$.
+
+*Rule R27* (`Homotopy.split_normal_form`): when R5 fires, offer first the
+gap of the moment conditions, with $D$ from the rate coefficients
+(`Homotopy._split_weights`). Then come R5's own seeds.
+
+*First version, tried:* a quadratic fit about the density's minimum. It
+fits a held-set window as a spike and sends the split astray. Goal 2 at 70%
+took 321 s (against 38 s), and R5 fired 2,613 times. Restricting it to
+interior controls made it fire once in the census.
+
+*Result of the moment version* (six routes, against the speed PR's census):
+45/45 under 60 s.
+- **Totals:** 478.0 s against 493.9 s. The median is 7.1 s against 6.9 s.
+- **Answers:** they agree to $2\times 10^{-13}$.
+- **Gains:** goal 9 at 70% takes 18.8 s against 35.4 s, and goal 0 at 80%
+  14.2 s against 19.1 s.
+- **Firings:** R27 fires 16 times. R11's merges fall from 111 to 64, and
+  R20's collapses from 5 to 1.
+
+*On the first route alone:* 38/45 against 39/45, a different mix.
+- Goal 3 at 70% is now solved (176.7 s), and goal 2 at 70% takes 231.4 s
+  against 422.1 s.
+- Goal 0 at 70% and rest 12 are lost. On rest 12, `tau1_max` splits, its gap
+  closes, and it splits again (R27 fires 161 times). This is O2's case, where
+  the arc's own jerk saturates on it. O2's open lemma is what decides it:
+  whether such an arc must exit before the saturation.
+
+R27 is on in the census.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
