@@ -350,6 +350,12 @@ class Homotopy:
         #: stretch on each side: Lemma E3's gap contains the held-set window, and the
         #: arc held there widens once the split relieves it (a seed, not a structure).
         self.wide_gaps = False
+        #: Rule R35 (Bonnans & Hermant's touch that becomes an arc): at a touch point of
+        #: an order-2 limit the limit has a local maximum, so ``g'' <= 0`` there (the
+        #: control is continuous). A touch with ``g'' > 0`` is a local minimum, with the
+        #: limit violated on both sides: it has become an arc, which takes its place,
+        #: short and centred on it, the touch's jump as its entry jump.
+        self.touch_curvature = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -1643,7 +1649,16 @@ class Homotopy:
             alternative = build(True)
             if alternative[0] != options[0][0]:
                 options.append(alternative)
-            options.append(build(False, narrow=True))
+            narrow = build(False, narrow=True)
+            convex = (self._touch_curvatures(shoot, v)
+                      if getattr(self, "touch_curvature", False) else {})
+            if any(len(g[0]) == 1 and next(iter(g[0])) in convex for g in groups):
+                # Rule R35: the violated touch is convex, so it has become an arc: the
+                # short arc about it first, before the split into two touches.
+                self.diagnostics.fired("R35")
+                options.insert(0, narrow)
+            else:
+                options.append(narrow)
         if touch_born:
             # Rule R20: the order-1 births as touch points, offered after the arcs.
             options.append(build(False, [touch_born.get(i, b) for i, b in enumerate(born)]))
@@ -1673,6 +1688,45 @@ class Homotopy:
             new_a = [("boundary", c) if kind == "touch" and self.kr.CONSTRAINT_ORDERS[c] == 1
                      else (kind, c) for kind, c in arcs]
             out.append((new_a, new_v))
+        return out
+
+    def _touch_curvatures(self, shoot, v, rel=1e-3):
+        """Rule R35: the order-2 touch points of ``v`` whose limit is convex there,
+        ``{arc index: g''}``. ``g'`` is exact at each sample (``LimitObjects``: at order
+        2 the control does not enter it), and ``g''`` is the slope of a straight line
+        through ``g'`` within ``0.002 T`` of the touch. A curvature counts when it
+        exceeds ``rel`` times the largest ``|g'|`` over ``T`` (``g''``'s own scale)."""
+        if not isinstance(shoot, MultiArcShooting):
+            return {}
+        arcs, values = self._arcs_of(shoot, v)
+        touches = [i for i, (kind, c) in enumerate(arcs)
+                   if kind == "touch" and self.kr.CONSTRAINT_ORDERS[c] == 2]
+        if not touches:
+            return {}
+        from auto_optimal_control.lemmas import LimitObjects
+        try:
+            obj = LimitObjects(shoot.kernels, shoot.params)
+            tr = shoot.trajectory(v, n_points=4001)
+        except Exception:
+            return {}
+        T = shoot.unpack(v)[3] - shoot.t0
+        ts, zs = np.asarray(tr["t"]), tr["z"]
+        out = {}
+        for i in touches:
+            c, tc = arcs[i][1], float(values[i][0])
+
+            def rate(k):
+                a_, d_ = obj.rate_parts(c, ts[k], zs[k])
+                return float(d_ + np.asarray(a_) @ np.asarray(tr["u"][k], dtype=float))
+
+            near = np.flatnonzero(np.abs(ts - tc) <= 0.002 * T)
+            if len(near) < 4:
+                continue
+            g1 = np.array([rate(k) for k in near])
+            slope = float(np.polyfit(ts[near] - tc, g1, 1)[0])
+            reach = max(abs(rate(k)) for k in range(0, len(ts), max(1, len(ts) // 200)))
+            if slope > rel * max(reach, 1e-300) / T:
+                out[i] = slope
         return out
 
     def _peak_time(self, shoot, v, c, a, b, n_points=2001):
@@ -1931,7 +1985,21 @@ class Homotopy:
         # with their events sorted again, is a structure change.
         crossed = isinstance(shoot, MultiArcShooting) and not shoot.in_order(v)
         out_a, out_v, changed = [], [], crossed
-        for (kind, c), val in zip(arcs, values):
+        convex = self._touch_curvatures(shoot, v) if getattr(self, "touch_curvature", False) else {}
+        for i, ((kind, c), val) in enumerate(zip(arcs, values)):
+            if i in convex:
+                # Rule R35: the touch has become an arc. Short, and inside its
+                # neighbours' events, so that no two junctions coincide (Lemma D).
+                self.diagnostics.fired("R35")
+                changed = True
+                others = [t_ for j, (k_, v_) in enumerate(zip(arcs, values)) if j != i
+                          for t_ in ((v_[0],) if k_[0] == "touch" else (v_[0], v_[1]))
+                          if np.isfinite(t_)]
+                gap = min((abs(t_ - val[0]) for t_ in others), default=T)
+                w = min(1e-3 * T, 0.25 * gap)
+                out_a.append(("boundary", c))
+                out_v.append((val[0] - w, val[0] + w, np.array([float(val[1]), 0.0])))
+                continue
             if kind == "boundary" and val[1] - val[0] < 1e-6 * T:
                 changed = True
                 if self.kr.CONSTRAINT_ORDERS[c] >= 2 or (

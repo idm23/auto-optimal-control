@@ -421,3 +421,45 @@ def test_the_solve_budget_covers_the_reversal():
     h.solve([1.0], None)
     assert seen[0] == 5.0 and seen[1][0] == "reversal" and 4.0 < seen[1][1] <= 5.0
     assert h.active_set_seconds == 300.0
+
+
+def test_a_convex_order2_touch_becomes_an_arc_under_r35(monkeypatch):
+    """Rule R35: a touch is a local maximum of its limit, so g'' <= 0 there. A touch
+    where g' rises through zero (g'' > 0) becomes a short arc about it, clear of its
+    neighbours' events, the touch's jump as the arc's entry jump; a concave one stays."""
+    import types
+
+    import numpy as np
+
+    from auto_optimal_control import lemmas
+
+    t = np.linspace(0.0, 1.0, 4001)
+
+    def setup(curv):
+        arcs = [("touch", 0), ("touch", 1)]
+        values = [(0.5, 0.2), (0.5004, 0.1)]
+        h, shoot = _stub_structure(arcs, values, [2, 2], T=1.0)
+        h.touch_curvature = True
+        shoot.kernels, shoot.params = None, None
+        shoot.trajectory = lambda v, n_points=4001: {
+            "t": t, "z": t[:, None], "u": np.zeros((len(t), 1))}
+
+        class Objects:                     # g_c' = curv_c (t - t_touch)
+            def __init__(self, k, p): pass
+
+            def rate_parts(self, c, t_, z):
+                return np.zeros(1), curv[c] * (t_ - values[c][0])
+
+        monkeypatch.setattr(lemmas, "LimitObjects", Objects)
+        return h, shoot, values
+
+    h, shoot, values = setup([2.0, -2.0])
+    assert set(h._touch_curvatures(shoot, None)) == {0}
+    out_a, out_v = h._retire(shoot, None)
+    assert out_a == [("boundary", 0), ("touch", 1)]
+    lo, hi, pi = out_v[0]
+    assert (lo + hi) / 2 == pytest.approx(0.5) and hi - lo == pytest.approx(2 * 0.25 * 0.0004)
+    assert pi.tolist() == [0.2, 0.0]
+    assert h.diagnostics.rules.get("R35") == 1
+    h, shoot, _ = setup([-2.0, -2.0])
+    assert h._touch_curvatures(shoot, None) == {} and h._retire(shoot, None) is None

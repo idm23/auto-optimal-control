@@ -1705,6 +1705,45 @@ With six routes and the same rules, all 45 solve under 60 s: total 464.5 s
 against 494.1 s, median 6.9 s, slowest 47.0 s (goal 2 at 70%). The rules
 stay off by default until the first route alone solves all 45 under 60 s.
 
+### Order-2 touches that have become arcs: Rule R35, tried
+
+The census's rate-limited cases (`vgoal`, `vrest`) add order-2 limits: with jerk
+control a rate limit $w_i \le w_{\max,i}$ has $\ddot g = \pm j_i$. On the first route
+alone, 9 of the 45 solve within 60 s. In goal 0 at 80% a converged structure carries a
+touch of `w4_min` at 0.58008 where the limit's curvature is $\ddot g = +9.1$ (joint 4's
+jerk; its bound is 30), with the limit violated on both sides. A touch is a local
+maximum of $g$: $g(t^*) = 0$, $\dot g(t^*) = 0$, and with the continuous control of the
+jerk-cost policy $\ddot g(t^*) \le 0$. A touch with $\ddot g > 0$ has become an arc, as
+in Bryson–Denham at $\ell = 1/6$ (Bonnans & Hermant 2008: a touch becomes an arc).
+
+`_activate` offered the violation three structures, in order:
+
+| structure | result |
+|---|---|
+| one arc over the violated span | does not propagate ($7 \times 10^6$) |
+| the touch split into two touches | solves; touches at 0.57797 and 0.58218, the jump halved, $\ddot g = +0.05$ at both, the limit up to $2.8 \times 10^{-8}$ above its level between them |
+| a short arc about the touch, the touch's jump as its entry jump | solves: [0.57798, 0.58219], multiplier $2.3 \times 10^{-4}$ falling to 0 |
+
+The route took the second: an arc in disguise, its violation below the route's
+threshold. The short arc solves from every width tried ($2 \times 10^{-4}$ to
+$2 \times 10^{-2}$ of $T$) with the jump on its entry; seeds without the jump do not.
+
+*Rule R35* (`Homotopy.touch_curvature`). The curvature at each order-2 touch is the
+slope of $\dot g$ (exact at each state: at order 2 the control does not enter it)
+within $0.002\,T$ of the touch. A touch whose curvature is positive (above $10^{-3}$
+of $\max|\dot g|/T$) becomes a short arc about it, inside its neighbours' events
+(half-width at most a quarter of the distance to the nearest junction, Lemma D), with
+the touch's jump as its entry jump. A violation beside such a touch is offered the
+short arc first.
+
+*Result.* Rate cases on the first route alone, 60 s cap (R1, R2, R16, R20, R21, R25,
+R26, R27, R30–R34 on): 9 of 45 with and without R35, the same cases. R35 fires in
+44 of the 45, and arcs of negative width fall from 10.8 to 5.6 thousand evaluations.
+Goal 0 at 80% then gets close to the end of its offsets (to $|o| = 0.036$ in 172 s)
+before it stalls on another event: the exit of `w3_min` (order 2) and the entry of
+`tau5_max` (order 1) swap at every step (R30 fires 452 times), and R2's width steps,
+made for order-1 births, predict route parameters of $-0.36$ and $0.32$.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

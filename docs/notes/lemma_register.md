@@ -319,6 +319,23 @@ margin is zero exactly when the corner is the only control that holds $g$.
   law (μ from the last interior control, R14). L1 has to be restated,
   because along a saturated motion $\ddot g$ involves $\dot m$.
 
+### E″. A touch of an order-2 limit is concave — proved (the sign); the event's regularity a sketch
+
+- **Statement.** At a touch point $t^*$ of an order-2 limit $g$ on a feasible motion
+  whose control is continuous, $g(t^*) = 0$ and $\dot g(t^*) = 0$, and
+  $\ddot g(t^*) \le 0$. A converged structure with $\ddot g(t^*) > 0$ at a touch has
+  the limit violated on both sides of it, so it is not an extremal of that structure's
+  kind: the touch has become an arc (event E1″).
+- **Proof.** $t^*$ is an interior maximum of $g \le 0$, and $g$ is $C^2$ there
+  (the control, which enters $\ddot g$, is continuous under the jerk-cost policy).
+- **Gap.** The event's normal form: that the arc born at $\ddot g(t^*) = 0$ grows
+  linearly in the route parameter (Bryson–Denham: width $1 - 6\ell$), and that the
+  touch's jump goes to the arc's entry, are seen, not proved.
+- **Evidence.** Goal 0 at 80% with rate limits: a touch with $\ddot g = +9.1$ becomes
+  the arc [0.57798, 0.58219] from any width tried; the alternative, two touches at
+  its ends, has $\ddot g = +0.05$ at both.
+- **Used by.** R35.
+
 ### E3. The split's gap (moment conditions) — leading order derived; sketch
 
 - **Statement.** Take an order-1 arc of limit $c$ whose multiplier $\mu$
