@@ -839,6 +839,13 @@ class MultiArcShooting(SingleShooting):
         self._filling = None             # a list while with_nodes reads a forward sweep
         self.options = dict(method=method, rtol=rtol, atol=atol)
         self.max_nfev = int(max_nfev)
+        #: A cap of its own on a boundary arc's right-hand-side evaluations (None: as
+        #: ``max_nfev``). A riding that cannot hold its limits runs away with ever shorter
+        #: steps, and only the cap ends it.
+        self.boundary_max_nfev = None
+        #: The same with the STM (None: as ``boundary_max_nfev``). Integrating the STM is
+        #: the dear part, and its steps are those of the motion.
+        self.boundary_stm_max_nfev = None
 
     def _switching_index(self, c):
         k = self.kernels
@@ -985,8 +992,10 @@ class MultiArcShooting(SingleShooting):
                                 **tolerance, **self.options)
                 Fa = k.rhs_arc(ta, z, p, r["arc0"] if k.N_MODES else None)
             elif kind == "boundary":
-                r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost,
-                                         max_nfev=self.max_nfev, held_events=self.held_events,
+                cap = ((self.boundary_stm_max_nfev if jac else None) or self.boundary_max_nfev
+                       or self.max_nfev)
+                r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost, max_nfev=cap,
+                                         held_events=self.held_events,
                                          **tolerance, **self.options)
                 Fa = k.boundary_rhs(c, ta, z, p)
             else:
@@ -1052,7 +1061,8 @@ class MultiArcShooting(SingleShooting):
         for _ in range(rounds):
             mid = 0.5 * (lo + hi)
             try:
-                k.propagate_boundary(c, ta, z, mid, p, max_nfev=self.max_nfev, **self.options)
+                k.propagate_boundary(c, ta, z, mid, p, max_nfev=self.boundary_max_nfev or self.max_nfev,
+                                     **self.options)
                 lo = mid
             except RuntimeError:
                 hi = mid

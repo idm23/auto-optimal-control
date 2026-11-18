@@ -506,3 +506,26 @@ def test_an_order2_arc_whose_multiplier_rises_is_split_only_under_r36():
     ends = sorted(round(v[0][1], 3) for v in alone if v[0][0] == 0.2)
     starts = sorted(round(v[0][0], 3) for v in alone if v[0][1] == 0.9)
     assert ends and max(ends) < 0.5 and starts and min(starts) > 0.55
+
+
+def test_boundary_arcs_ridden_at_run_time_get_their_own_evaluation_caps(monkeypatch):
+    """A riding that cannot hold its limits runs away until a cap stops it, so arcs solved
+    at run time get ``riding_nfev`` (``riding_stm_nfev`` with the STM) instead of the
+    attempt's cap; symbolic arcs keep the attempt's."""
+    import types
+
+    from auto_optimal_control import homotopy as hm
+
+    class Stub:
+        def __init__(self, kernels, params, arcs, **options):
+            self.boundary_max_nfev = self.boundary_stm_max_nfev = None
+
+    monkeypatch.setattr(hm, "MultiArcShooting", Stub)
+    h = Homotopy.__new__(Homotopy)
+    h.riding_nfev, h.riding_stm_nfev = 10000, 2000
+    ridden = types.SimpleNamespace(system=types.SimpleNamespace(riding=object()))
+    symbolic = types.SimpleNamespace(system=types.SimpleNamespace(riding=None))
+    s = h._multi_arc(ridden, (), (), max_nfev=50000)
+    assert (s.boundary_max_nfev, s.boundary_stm_max_nfev) == (10000, 2000)
+    s = h._multi_arc(symbolic, (), (), max_nfev=50000)
+    assert (s.boundary_max_nfev, s.boundary_stm_max_nfev) == (None, None)
