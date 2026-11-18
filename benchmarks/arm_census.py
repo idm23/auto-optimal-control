@@ -1,4 +1,4 @@
-"""The six-joint arm census: 45 minimum-time solves, with what each ran into.
+"""The six-joint arm census: 90 minimum-time solves, with what each ran into.
 
     python benchmarks/arm_census.py OUT.jsonl [--workers 14] [--cases goal4@90 rest11 ...]
         [--seconds 300] [--solves N] [--snapshots DIR] [--set name=value ...]
@@ -6,7 +6,10 @@
 
 Cases: 10 goals from rest at the origin, each with torque limits at 90%, 80% and
 70% of the way from the ends' torques to the free motion's peak (``goal<i>@<pct>``),
-and 15 rest-to-rest motions with fixed limits (``rest<i>``). Each row records the
+and 15 rest-to-rest motions with fixed limits (``rest<i>``). Then each of these again
+with joint rate limits (order 2) at 90%, 80% or 70% of the jerk-limited motion's peak
+rates (``vgoal<i>@<pct>``, ``vrest<i>``), frozen in ``rate_cases.json``
+(``rate_cases.py``); their rows say which limits the answer holds, and which at once. Each row records the
 outcome, the time, and ``HomotopyResult.diagnostics``: failed evaluations by class,
 route steps by outcome, converged answers rejected by check, and rules fired.
 
@@ -49,25 +52,22 @@ TAU = np.array([5.0, 87.3, 28.5, 2.5, 0.7, 0.2])
 J = np.full(6, 30.0)
 BOX, TS = ([-.5] * 18, [.5] * 18), (.3, 5.)
 H = None
+HV = None            # the arm with rate limits, for the cases of rate_cases.json
+ARGS = None
 TQ = None
 EXPORT = None
+RATE_CASES = json.loads((Path(__file__).resolve().parent / "rate_cases.json").read_text()) \
+    if (Path(__file__).resolve().parent / "rate_cases.json").exists() else {}
 
 
-def setup(args):
-    global H, TQ, EXPORT
-    EXPORT = getattr(args, "export", None)
-    warnings.simplefilter("ignore")
-    q, w, a = (sp.symbols(f"{s}1:7", real=True) for s in "qwa")
-    f = sp.lambdify((q, w, a), joint_torques(SIX_JOINT_LINKS, q, w, a, GRAVITY), "numpy")
-    TQ = lambda Q, Wd, A: np.array([np.broadcast_to(np.asarray(v, dtype=float), Q.shape[:1])
-                                    for v in f(Q.T, Wd.T, A.T)]).T
-    H = Homotopy(examples.six_joint_arm_min_time(), cache_dir=args.cache)
-    H.active_set_seconds = args.seconds
+def _configure(h, args):
+    """Apply the run's budget, ``--set`` and ``--rule`` to a Homotopy."""
+    h.active_set_seconds = args.seconds
     if args.solves:
-        H.max_path_solves = args.solves
-        H.active_set_seconds = float("inf")
-    H.snapshot_dir = args.snapshots
-    H.parallel_routes = args.parallel_routes
+        h.max_path_solves = args.solves
+        h.active_set_seconds = float("inf")
+    h.snapshot_dir = args.snapshots
+    h.parallel_routes = args.parallel_routes
     for item in args.set or []:
         name, value = item.split("=", 1)
         try:
@@ -77,14 +77,38 @@ def setup(args):
         if name.startswith("MultiArcShooting."):
             setattr(shooting.MultiArcShooting, name.split(".", 1)[1], value)
         else:
-            setattr(H, name, value)
+            setattr(h, name, value)
     for item in args.rule or []:
         name, state = item.split("=", 1)
-        rules.set_rule(H, name, state.lower() in ("on", "1", "true"))
+        rules.set_rule(h, name, state.lower() in ("on", "1", "true"))
+
+
+def rates_homotopy():
+    """The arm with joint rate limits (built on first use, configured as ``H``)."""
+    global HV
+    if HV is None:
+        HV = Homotopy(examples.six_joint_arm_min_time(rate_limits=True), cache_dir=ARGS.cache)
+        _configure(HV, ARGS)
+    return HV
+
+
+def setup(args):
+    global H, TQ, EXPORT, ARGS
+    ARGS = args
+    EXPORT = getattr(args, "export", None)
+    warnings.simplefilter("ignore")
+    q, w, a = (sp.symbols(f"{s}1:7", real=True) for s in "qwa")
+    f = sp.lambdify((q, w, a), joint_torques(SIX_JOINT_LINKS, q, w, a, GRAVITY), "numpy")
+    TQ = lambda Q, Wd, A: np.array([np.broadcast_to(np.asarray(v, dtype=float), Q.shape[:1])
+                                    for v in f(Q.T, Wd.T, A.T)]).T
+    H = Homotopy(examples.six_joint_arm_min_time(), cache_dir=args.cache)
+    _configure(H, args)
     print("rules on:", ", ".join(n for n, on in rules.enabled(H).items() if on), flush=True)
 
 
 def params(name, free_cache={}):
+    if name in RATE_CASES:
+        return list(RATE_CASES[name]["params"])
     rng = np.random.default_rng(0)
     goals = [rng.uniform(-1.5, 1.5, 6) for _ in range(10)]
     if name.startswith("rest"):
@@ -107,12 +131,18 @@ def run(name):
     p, r = None, None
     try:
         p = params(name)
-        H.snapshot_tag = name
+        h = rates_homotopy() if name in RATE_CASES else H
+        h.snapshot_tag = name
         t0 = time.time()
-        r = H.solve(p, BOX, TS)
+        r = h.solve(p, BOX, TS)
         row = {"name": name, "exact": bool(r.exact), "sec": round(time.time() - t0, 1),
                "tf": float(r.solution.tf) if r.exact else None, "msg": r.message[:80],
                "diagnostics": r.diagnostics}
+        if r.exact and name in RATE_CASES:
+            # Which orders the answer holds, and whether at once (the case's group is
+            # only its intent).
+            from rate_cases import classify
+            row["orders"] = classify(r.shooting, r.solution.v)
     except Exception as exc:          # a case that raises is a result too
         row = {"name": name, "exact": False, "sec": 0.0, "tf": None, "msg": repr(exc)[:80],
                "diagnostics": {}}
@@ -129,6 +159,12 @@ def summary(rows):
     secs = sorted(r["sec"] for r in ok)
     print(f"solved {len(ok)} of {len(rows)}; under 60 s: {sum(s < 60 for s in secs)}; "
           f"median {secs[len(secs) // 2] if secs else None} s")
+    for tag in ("goal", "rest", "vgoal", "vrest"):
+        part = [r for r in rows if r["name"].startswith(tag) and r["name"][len(tag):][:1].isdigit()]
+        if part:
+            ok_ = [r for r in part if r["exact"]]
+            print(f"  {tag}: solved {len(ok_)} of {len(part)}; "
+                  f"under 60 s: {sum(r['sec'] < 60 for r in ok_)}")
     for part in ("evaluations", "steps", "rejected", "rules", "oracles"):
         total = {}
         for r in rows:
@@ -158,7 +194,9 @@ def main(argv=None):
     args = ap.parse_args(argv)
     setup(args)
     names = args.cases or ([f"goal{i}@{p}" for i in range(10) for p in (90, 80, 70)]
-                           + [f"rest{i}" for i in range(15)])
+                           + [f"rest{i}" for i in range(15)] + list(RATE_CASES))
+    if any(n in RATE_CASES for n in names):
+        rates_homotopy()                  # built before the workers fork
     rows = []
     # Workers that may start processes of their own (Homotopy.parallel_routes): a
     # ProcessPoolExecutor's are not daemonic, unlike a Pool's.
