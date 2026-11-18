@@ -279,6 +279,15 @@ class Homotopy:
         self.verbose = verbose
         self.attempt_evaluations = 60      # MINPACK evaluations per exact attempt
         self.attempt_nfev = 50000          # right-hand-side evaluations per arc
+        #: Right-hand-side evaluations per boundary arc solved at run time. A riding that
+        #: can be held needs a few dozen to a few thousand (the census's arm, measured on
+        #: five hard cases: medians 14 to 42, at most 610 with the STM and 3914 without);
+        #: one that cannot runs away with ever shorter steps until a cap stops it, which
+        #: at ``attempt_nfev`` cost 4 to 5 s per failed seed with the STM.
+        self.riding_nfev = 10000
+        #: The same with the STM, where each evaluation is dearer: holdable ridings needed
+        #: at most 610 there, and a runaway costs about 0.1 ms per evaluation.
+        self.riding_stm_nfev = 2000
         self.active_set_seconds = 60.0     # time budget of the active-set route (see below)
         #: Wall-clock budget of a whole solve, the reversed problem (rule R4) and the
         #: parallel routes' grace included; None leaves each route its own budget.
@@ -1189,7 +1198,7 @@ class Homotopy:
                     arcs, values = made
                     try:
                         if arcs:
-                            shoot = MultiArcShooting(kx, px, arcs, max_nfev=self.attempt_nfev,
+                            shoot = self._multi_arc(kx, px, arcs, max_nfev=self.attempt_nfev,
                                                      **self.options)
                             vals = self._fit_jumps(shoot, values, read)
                             guess = shoot.pack_arcs(base, vals)
@@ -1218,10 +1227,21 @@ class Homotopy:
 
     # -- the active-set route ---------------------------------------------------
 
+    def _multi_arc(self, kernels, params, arcs, **options):
+        """A :class:`MultiArcShooting`, with :attr:`riding_nfev` on its boundary arcs when
+        they are solved at run time."""
+        shoot = MultiArcShooting(kernels, params, arcs, **options)
+        system = getattr(kernels, "system", None)
+        if getattr(system, "riding", None) is not None and self.riding_nfev:
+            shoot.boundary_max_nfev = int(self.riding_nfev)
+            if self.riding_stm_nfev:
+                shoot.boundary_stm_max_nfev = int(self.riding_stm_nfev)
+        return shoot
+
     def _smoothed(self, arcs, eps, off):
         """Shooting on the regularized kernels with exact arcs ``arcs`` and penalties off."""
         p = self.regularized_params(eps, np.zeros(self.nc), off)
-        shoot = (MultiArcShooting(self.kr, p, arcs, max_nfev=self.attempt_nfev, open_end=True,
+        shoot = (self._multi_arc(self.kr, p, arcs, max_nfev=self.attempt_nfev, open_end=True,
                                   order1_touches=True if self.collapsed_touches else None,
                                   **self.path_options)
                  if arcs else SingleShooting(self.kr, p, **self.path_options))
@@ -2657,7 +2677,7 @@ class Homotopy:
         for tangent in ((True, False) if kx.system.riding is not None else (False,)):
             try:
                 if arcs:
-                    shoot = MultiArcShooting(kx, px, arcs, max_nfev=self.attempt_nfev, open_end=True,
+                    shoot = self._multi_arc(kx, px, arcs, max_nfev=self.attempt_nfev, open_end=True,
                                              **self.options)
                     method = "lm" if kx.N_SWITCHING else "hybr"
                 else:
@@ -3362,7 +3382,7 @@ class Homotopy:
         kx, px = self.exact_kernels, self.exact_params()
         entries, f_vals = self._mas_entries(f_arcs, f_vals)
         if entries:
-            shoot = MultiArcShooting(kx, px, entries, max_nfev=self.attempt_nfev, open_end=True,
+            shoot = self._multi_arc(kx, px, entries, max_nfev=self.attempt_nfev, open_end=True,
                                      **self.options)
             base = shoot.pack(lam0, None, T if kx.FREE_FINAL_TIME else None)
             guess = shoot.pack_arcs(base, f_vals)
