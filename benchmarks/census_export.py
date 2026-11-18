@@ -42,15 +42,21 @@ def _describe(name):
 def export_case(out_dir, name, params, row, result=None, torques=None):
     """Write ``<out_dir>/<name>.json``.
 
-    ``params`` is the case's parameter vector ([q0, qf, jerk limits, torque limits]),
-    ``row`` the census row (``exact``, ``sec``, ``tf``, ``msg``), ``result`` the solve
-    result when exact, and ``torques(Q, W, A)`` the joint torques at sampled states."""
+    ``params`` is the case's parameter vector ([q0, qf, jerk limits, torque limits],
+    then rate limits for a rate case), ``row`` the census row (``exact``, ``sec``,
+    ``tf``, ``msg``, and for a rate case ``orders``: which limits the answer holds),
+    ``result`` the solve result when exact, and ``torques(Q, W, A)`` the joint torques
+    at sampled states."""
     p = np.asarray(params, dtype=float)
     q0, qf, jerk, tau = p[:6], p[6:12], p[12:18], p[18:24]
+    rates = p[24:30] if len(p) >= 30 else None
     data = {"name": name, **_describe(name), "solved": bool(row.get("exact")),
             "seconds": row.get("sec"), "tf": row.get("tf"), "message": row.get("msg"),
             "jerk_limits": _round(jerk), "torque_limits": _round(tau),
             "start": _round(_points(q0)), "goal": _round(_points(qf))}
+    if rates is not None:
+        data["rate_limits"] = _round(rates)
+        data["orders"] = row.get("orders")
     if result is not None and row.get("exact"):
         tr = result.shooting.trajectory(result.solution.v, n_points=N_SAMPLES)
         z = np.asarray(tr["z"], dtype=float)
@@ -60,6 +66,8 @@ def export_case(out_dir, name, params, row, result=None, torques=None):
         data["points"] = [_round(_points(q)) for q in Q]
         if torques is not None:
             data["tau"] = _round(torques(Q, W, A))
+        if rates is not None:
+            data["w"] = _round(W)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     tmp = out / f".{name}.json.tmp"
@@ -77,6 +85,6 @@ def write_manifest(out_dir):
         d = json.loads(f.read_text())
         cases.append({"file": f.name, "name": d["name"], "family": d["family"],
                       "index": d["index"], "setting": d["setting"], "solved": d["solved"],
-                      "seconds": d["seconds"], "tf": d["tf"]})
+                      "seconds": d["seconds"], "tf": d["tf"], "rates": "rate_limits" in d})
     (out / "manifest.json").write_text(json.dumps({"cases": cases}, indent=1))
     return len(cases)

@@ -18,7 +18,9 @@ Keep ``workers * 3`` within the machine's *physical* cores: on hyperthreads two
 processes share a core, every case runs at about half speed, and cases near their
 wall-clock budget fail (homebox-node-1 has 8 cores: use ``--workers 2``).
 
-``--solves`` caps the route's path solves (``Homotopy.max_path_solves``), a budget
+``--cap`` is the wall-clock budget of a whole case (``Homotopy.solve_seconds``: the
+reversed problem and the parallel routes included), and a case over it counts as a
+failure; the census page uses ``--cap 60``. ``--solves`` caps the route's path solves (``Homotopy.max_path_solves``), a budget
 that does not depend on the machine or its load. ``--set`` sets a Homotopy attribute
 (``--set offset_start=staggered --set width_steps=True``); ``--set
 MultiArcShooting.rate_junctions_default=False`` sets a class default; ``--rule
@@ -63,6 +65,7 @@ RATE_CASES = json.loads((Path(__file__).resolve().parent / "rate_cases.json").re
 def _configure(h, args):
     """Apply the run's budget, ``--set`` and ``--rule`` to a Homotopy."""
     h.active_set_seconds = args.seconds
+    h.solve_seconds = getattr(args, "cap", None)
     if args.solves:
         h.max_path_solves = args.solves
         h.active_set_seconds = float("inf")
@@ -138,7 +141,11 @@ def run(name):
         row = {"name": name, "exact": bool(r.exact), "sec": round(time.time() - t0, 1),
                "tf": float(r.solution.tf) if r.exact else None, "msg": r.message[:80],
                "diagnostics": r.diagnostics}
-        if r.exact and name in RATE_CASES:
+        cap = getattr(ARGS, "cap", None)
+        if cap is not None and row["exact"] and row["sec"] > cap:
+            # Over the cap is a failure, even if it solved in the end.
+            row.update(exact=False, tf=None, msg=f"over the {cap:g} s cap (solved in {row['sec']} s)")
+        if row["exact"] and name in RATE_CASES:
             # Which orders the answer holds, and whether at once (the case's group is
             # only its intent).
             from rate_cases import classify
@@ -181,6 +188,9 @@ def main(argv=None):
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--cases", nargs="*")
     ap.add_argument("--seconds", type=float, default=300.0)
+    ap.add_argument("--cap", type=float, default=None,
+                    help="wall-clock seconds per case, everything included; a case over "
+                         "it is a failure (Homotopy.solve_seconds)")
     ap.add_argument("--solves", type=int, default=0)
     ap.add_argument("--snapshots", default=None)
     ap.add_argument("--cache", default=None)
