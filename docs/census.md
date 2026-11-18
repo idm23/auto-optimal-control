@@ -18,21 +18,29 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-16 (release 0.4.0). Rules R1, R2, R15,
-R16, R20, R25 and R26 are turned on, with held-set events (R22) and closed-form free arcs
-(R23) on by default. R15's portfolio has six routes: two draws of the offsets and
-sequential births, each also at ten times the secondary weight (R24). The routes run in
-parallel, one case at a time, with 300 s per case, on 8 physical cores. All 45 cases
-solve, all in under 60 s: the median is 8.2 s and the slowest 45.2 s.
+The data shown is from the census of 2026-11-17, on `main` after the rate-limited
+cases were added. Rules R1, R2, R15, R16, R20, R25 and R26 are turned on (the release's
+configuration), with held-set events (R22) and closed-form free arcs (R23) on by default.
+R15's portfolio has six routes: two draws of the offsets and sequential births, each
+also at ten times the secondary weight (R24). The routes run in parallel, one case at a
+time, on 8 physical cores. Each case has 60 s in all (`--cap 60`, the reversed problem
+included); a case that takes longer counts as unsolved.
 
-The rate-limited cases came later (2026-11-17) and are not in the data shown. On the
-first route alone, 10 of them solve, nine in under 60 s: nine goals and one rest case,
-all at 90%. Two of the goals (goal 3 and goal 4) hold a torque limit and rate limits
-on other joints at the same instant. No case at 80% or 70% solves yet.
+57 of the 90 cases solve, all under 60 s: the median is 8.9 s and the slowest 49.4 s.
 
-Pick a case to watch it. Its torque traces turn red where the joint rides its
-limit. The page is drawn from the data in `_static/census/data`. Exporting a
-census adds every case it runs, new ones included:
+- **`goal` and `rest`:** all 45 solve.
+- **`vgoal`:** 9 of 30, all of them at 90%.
+- **`vrest`:** 3 of 15: rest 0 and rest 9 (rates at 90%) and rest 2 (at 70%).
+
+Four of the rate-limited answers hold a torque limit and a rate limit on another joint
+at the same instant: goal 3 and goal 4 at 90%, rest 2 and rest 9. Goal 3 at 90% also
+holds `tau4_min` and `w4_min` together. No rate-limited goal at 80% or 70% solves yet.
+
+Pick a case to watch it. Its traces turn red where the joint rides its limit: torques
+for every case, and rates too for a rate-limited one. The page is drawn from the data in
+`_static/census/data`. Every pull request that changes the solver or the census
+refreshes it before merging; the README's "Merging a pull request" has the command.
+Exporting a census adds every case it runs, new ones included:
 
 ```bash
 python benchmarks/arm_census.py census.jsonl --export docs/_static/census/data [census options]

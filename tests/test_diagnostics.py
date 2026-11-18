@@ -389,3 +389,35 @@ def test_touches_become_arcs_from_a_structure():
     assert v1[1][0] == pytest.approx(0.49) and v1[1][1] == pytest.approx(0.51)
     assert v1[1][2].tolist() == [1e-5] and v1[2] == (0.7, 0.1)
     assert h._touches_as_arcs(arcs[:1] + arcs[2:], values[:1] + values[2:], 2.0) == []
+
+
+def test_the_solve_budget_covers_the_reversal():
+    """``Homotopy.solve_seconds`` bounds a whole solve: the route gets at most the
+    budget, the reversed problem (R4) only what is left of it, and none once it is
+    spent; the route's own budget is restored afterwards."""
+    import time
+    import types
+
+    h = Homotopy.__new__(Homotopy)
+    h.stated = types.SimpleNamespace(params=[None])
+    h._stages, h.reversal, h.policy_text = None, True, ""
+    h.active_set_seconds, h.solve_seconds, h._solve_end = 300.0, 0.2, None
+    seen = []
+
+    def slow(*a, **k):
+        seen.append(h.active_set_seconds)
+        time.sleep(0.25)
+        return types.SimpleNamespace(exact=False)
+
+    h._solve = slow
+    h._through_reversal = lambda *a, **k: seen.append(("reversal", h.active_set_seconds))
+    h.solve([1.0], None)
+    assert seen == [0.2]
+    assert h.active_set_seconds == 300.0 and h._solve_end is None
+
+    seen.clear()
+    h.solve_seconds = 5.0
+    h._solve = lambda *a, **k: (seen.append(h.active_set_seconds), types.SimpleNamespace(exact=False))[1]
+    h.solve([1.0], None)
+    assert seen[0] == 5.0 and seen[1][0] == "reversal" and 4.0 < seen[1][1] <= 5.0
+    assert h.active_set_seconds == 300.0

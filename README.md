@@ -964,6 +964,30 @@ to a local FNI checkout (here a sibling directory):
   change. Release the FNI change to PyPI, bump the requirement here and run
   `uv lock --upgrade-package fast-numerical-integration` instead.
 
+## Merging a pull request
+
+Every pull request that changes the solver, the benchmarks or the census
+refreshes the [arm census page](docs/census.md) before it merges, so the page
+always shows what `main` does:
+
+1. The full suite passes locally with `--runslow`, and CI passes.
+2. Run the census with the page's configuration (the release's defaults, six
+   routes, and a cap of 60 s per case, beyond which a case counts as unsolved)
+   and export it to a fresh directory. Then replace `docs/_static/census/data`
+   with it, so cases that are gone do not linger:
+
+   ```bash
+   python benchmarks/arm_census.py census.jsonl --workers 1 --parallel-routes \
+       --cap 60 --rule R1=on --rule R2=on --rule R15=on --rule R16=on \
+       --rule R20=on --rule R25=on --rule R26=on --export /tmp/census_data
+   rm -r docs/_static/census/data && mv /tmp/census_data docs/_static/census/data
+   ```
+
+3. Update the date and the numbers in `docs/census.md`, commit the data to the
+   pull request, and merge once CI passes again.
+
+Pull requests that change only documentation skip step 2.
+
 ## Releasing
 
 Releases are published from GitHub Actions (`.github/workflows/release.yml`)

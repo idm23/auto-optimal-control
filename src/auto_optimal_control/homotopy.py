@@ -280,6 +280,10 @@ class Homotopy:
         self.attempt_evaluations = 60      # MINPACK evaluations per exact attempt
         self.attempt_nfev = 50000          # right-hand-side evaluations per arc
         self.active_set_seconds = 60.0     # time budget of the active-set route (see below)
+        #: Wall-clock budget of a whole solve, the reversed problem (rule R4) and the
+        #: parallel routes' grace included; None leaves each route its own budget.
+        self.solve_seconds = None
+        self._solve_end = None
         self.active_set_backtracks = 8     # structures the active-set route may back out of
         # Where the limit offsets start: "together" (just above every peak) or "staggered"
         # (rule R1: a random head start per limit, drawn with offset_seed).
@@ -1797,6 +1801,8 @@ class Homotopy:
             kid.close()
             running.append((n_, p, parent))
         deadline = time.perf_counter() + self.active_set_seconds + 30.0
+        if self._solve_end is not None:
+            deadline = min(deadline, self._solve_end)
         found = None
         while running and found is None and time.perf_counter() < deadline:
             time.sleep(0.05)
@@ -3112,10 +3118,17 @@ class Homotopy:
                              f"{[str(p) for p in self.stated.params]}, got {len(params)}")
         self.diagnostics = Diagnostics()
         sink, SingleShooting.sink = SingleShooting.sink, self.diagnostics.evaluations
+        budget = self.active_set_seconds
+        if self.solve_seconds is not None:
+            self._solve_end = time.perf_counter() + self.solve_seconds
+            self.active_set_seconds = min(budget, self.solve_seconds)
         try:
             if self._stages is None:
                 r = self._solve(params, costates, final_time, **options)
-                if not r.exact and self.reversal:
+                left = None if self._solve_end is None else self._solve_end - time.perf_counter()
+                if not r.exact and self.reversal and (left is None or left > 0):
+                    if left is not None:
+                        self.active_set_seconds = min(budget, left)
                     back = self._through_reversal(params, costates, final_time, **options)
                     if back is not None:
                         self.diagnostics.fired("R4")
@@ -3124,6 +3137,8 @@ class Homotopy:
                 r = self._lexicographic(params, costates, final_time, **options)
         finally:
             SingleShooting.sink = sink
+            self.active_set_seconds = budget
+            self._solve_end = None
         r.policy = self.policy_text
         r.diagnostics = self.diagnostics.as_dict()
         return r

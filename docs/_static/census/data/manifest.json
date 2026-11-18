@@ -7,8 +7,9 @@
    "index": 0,
    "setting": "70%",
    "solved": true,
-   "seconds": 36.4,
-   "tf": 1.1877365373547628
+   "seconds": 34.1,
+   "tf": 1.1877365373547628,
+   "rates": false
   },
   {
    "file": "goal0@80.json",
@@ -17,8 +18,9 @@
    "index": 0,
    "setting": "80%",
    "solved": true,
-   "seconds": 20.1,
-   "tf": 1.1566341840970944
+   "seconds": 19.1,
+   "tf": 1.1566341840970944,
+   "rates": false
   },
   {
    "file": "goal0@90.json",
@@ -27,8 +29,9 @@
    "index": 0,
    "setting": "90%",
    "solved": true,
-   "seconds": 4.1,
-   "tf": 1.1566160866444886
+   "seconds": 3.5,
+   "tf": 1.1566160866444886,
+   "rates": false
   },
   {
    "file": "goal1@70.json",
@@ -37,8 +40,9 @@
    "index": 1,
    "setting": "70%",
    "solved": true,
-   "seconds": 17.7,
-   "tf": 1.1675058733367545
+   "seconds": 15.2,
+   "tf": 1.1675058733367545,
+   "rates": false
   },
   {
    "file": "goal1@80.json",
@@ -47,8 +51,9 @@
    "index": 1,
    "setting": "80%",
    "solved": true,
-   "seconds": 8.6,
-   "tf": 1.1674990130038592
+   "seconds": 7.5,
+   "tf": 1.1674990130038592,
+   "rates": false
   },
   {
    "file": "goal1@90.json",
@@ -57,8 +62,9 @@
    "index": 1,
    "setting": "90%",
    "solved": true,
-   "seconds": 2.3,
-   "tf": 1.1674987370971328
+   "seconds": 2.0,
+   "tf": 1.1674987370971328,
+   "rates": false
   },
   {
    "file": "goal2@70.json",
@@ -67,8 +73,9 @@
    "index": 2,
    "setting": "70%",
    "solved": true,
-   "seconds": 41.0,
-   "tf": 1.1556941769632578
+   "seconds": 36.9,
+   "tf": 1.1556941769632578,
+   "rates": false
   },
   {
    "file": "goal2@80.json",
@@ -77,8 +84,9 @@
    "index": 2,
    "setting": "80%",
    "solved": true,
-   "seconds": 5.3,
-   "tf": 1.143420447146663
+   "seconds": 3.9,
+   "tf": 1.143420447146663,
+   "rates": false
   },
   {
    "file": "goal2@90.json",
@@ -87,8 +95,9 @@
    "index": 2,
    "setting": "90%",
    "solved": true,
-   "seconds": 2.6,
-   "tf": 1.142991517873383
+   "seconds": 1.9,
+   "tf": 1.142991517873383,
+   "rates": false
   },
   {
    "file": "goal3@70.json",
@@ -97,8 +106,9 @@
    "index": 3,
    "setting": "70%",
    "solved": true,
-   "seconds": 16.2,
-   "tf": 1.1471710285054728
+   "seconds": 13.9,
+   "tf": 1.1471710285054728,
+   "rates": false
   },
   {
    "file": "goal3@80.json",
@@ -107,8 +117,9 @@
    "index": 3,
    "setting": "80%",
    "solved": true,
-   "seconds": 6.9,
-   "tf": 1.147149818619054
+   "seconds": 5.3,
+   "tf": 1.147149818619054,
+   "rates": false
   },
   {
    "file": "goal3@90.json",
@@ -117,8 +128,9 @@
    "index": 3,
    "setting": "90%",
    "solved": true,
-   "seconds": 3.4,
-   "tf": 1.1471418817915449
+   "seconds": 2.5,
+   "tf": 1.1471418817915449,
+   "rates": false
   },
   {
    "file": "goal4@70.json",
@@ -127,8 +139,9 @@
    "index": 4,
    "setting": "70%",
    "solved": true,
-   "seconds": 45.2,
-   "tf": 1.1675062299299421
+   "seconds": 41.1,
+   "tf": 1.1675062299299421,
+   "rates": false
   },
   {
    "file": "goal4@80.json",
@@ -137,8 +150,9 @@
    "index": 4,
    "setting": "80%",
    "solved": true,
-   "seconds": 5.1,
-   "tf": 1.1674907030117667
+   "seconds": 3.6,
+   "tf": 1.1674907030117667,
+   "rates": false
   },
   {
    "file": "goal4@90.json",
@@ -147,8 +161,9 @@
    "index": 4,
    "setting": "90%",
    "solved": true,
-   "seconds": 3.3,
-   "tf": 1.1674720736261184
+   "seconds": 2.5,
+   "tf": 1.1674720736261184,
+   "rates": false
   },
   {
    "file": "goal5@70.json",
@@ -157,8 +172,9 @@
    "index": 5,
    "setting": "70%",
    "solved": true,
-   "seconds": 12.4,
-   "tf": 1.0530968715628826
+   "seconds": 11.0,
+   "tf": 1.0530968715628826,
+   "rates": false
   },
   {
    "file": "goal5@80.json",
@@ -167,8 +183,9 @@
    "index": 5,
    "setting": "80%",
    "solved": true,
-   "seconds": 4.1,
-   "tf": 1.0530801619940795
+   "seconds": 3.0,
+   "tf": 1.0530801619940795,
+   "rates": false
   },
   {
    "file": "goal5@90.json",
@@ -177,8 +194,9 @@
    "index": 5,
    "setting": "90%",
    "solved": true,
-   "seconds": 2.8,
-   "tf": 1.0530721437457982
+   "seconds": 2.0,
+   "tf": 1.0530721437457982,
+   "rates": false
   },
   {
    "file": "goal6@70.json",
@@ -187,8 +205,9 @@
    "index": 6,
    "setting": "70%",
    "solved": true,
-   "seconds": 16.6,
-   "tf": 1.1260930731809402
+   "seconds": 13.1,
+   "tf": 1.1260930731809402,
+   "rates": false
   },
   {
    "file": "goal6@80.json",
@@ -197,8 +216,9 @@
    "index": 6,
    "setting": "80%",
    "solved": true,
-   "seconds": 6.4,
-   "tf": 1.1158180621363698
+   "seconds": 5.1,
+   "tf": 1.1158180621363698,
+   "rates": false
   },
   {
    "file": "goal6@90.json",
@@ -207,8 +227,9 @@
    "index": 6,
    "setting": "90%",
    "solved": true,
-   "seconds": 2.9,
-   "tf": 1.1157852276826636
+   "seconds": 2.6,
+   "tf": 1.1157852276826639,
+   "rates": false
   },
   {
    "file": "goal7@70.json",
@@ -217,8 +238,9 @@
    "index": 7,
    "setting": "70%",
    "solved": true,
-   "seconds": 19.8,
-   "tf": 1.076965217932861
+   "seconds": 17.0,
+   "tf": 1.076965217932861,
+   "rates": false
   },
   {
    "file": "goal7@80.json",
@@ -227,8 +249,9 @@
    "index": 7,
    "setting": "80%",
    "solved": true,
-   "seconds": 10.1,
-   "tf": 1.0769516340674723
+   "seconds": 8.9,
+   "tf": 1.0769516340674723,
+   "rates": false
   },
   {
    "file": "goal7@90.json",
@@ -237,8 +260,9 @@
    "index": 7,
    "setting": "90%",
    "solved": true,
-   "seconds": 4.5,
-   "tf": 1.0769341916303072
+   "seconds": 3.8,
+   "tf": 1.0769341916303072,
+   "rates": false
   },
   {
    "file": "goal8@70.json",
@@ -247,8 +271,9 @@
    "index": 8,
    "setting": "70%",
    "solved": true,
-   "seconds": 11.8,
-   "tf": 1.1327314812983895
+   "seconds": 10.2,
+   "tf": 1.1327314812983895,
+   "rates": false
   },
   {
    "file": "goal8@80.json",
@@ -257,8 +282,9 @@
    "index": 8,
    "setting": "80%",
    "solved": true,
-   "seconds": 5.7,
-   "tf": 1.1220754875539616
+   "seconds": 4.7,
+   "tf": 1.1220754875539616,
+   "rates": false
   },
   {
    "file": "goal8@90.json",
@@ -267,8 +293,9 @@
    "index": 8,
    "setting": "90%",
    "solved": true,
-   "seconds": 2.3,
-   "tf": 1.1220647168173623
+   "seconds": 2.0,
+   "tf": 1.1220647168173623,
+   "rates": false
   },
   {
    "file": "goal9@70.json",
@@ -277,8 +304,9 @@
    "index": 9,
    "setting": "70%",
    "solved": true,
-   "seconds": 37.9,
-   "tf": 1.1276667473256132
+   "seconds": 34.9,
+   "tf": 1.1276667473256132,
+   "rates": false
   },
   {
    "file": "goal9@80.json",
@@ -287,8 +315,9 @@
    "index": 9,
    "setting": "80%",
    "solved": true,
-   "seconds": 19.3,
-   "tf": 1.127612143713624
+   "seconds": 17.2,
+   "tf": 1.127612143713624,
+   "rates": false
   },
   {
    "file": "goal9@90.json",
@@ -297,8 +326,9 @@
    "index": 9,
    "setting": "90%",
    "solved": true,
-   "seconds": 9.7,
-   "tf": 1.1275921826860145
+   "seconds": 8.5,
+   "tf": 1.1275921826860145,
+   "rates": false
   },
   {
    "file": "rest0.json",
@@ -307,8 +337,9 @@
    "index": 0,
    "setting": null,
    "solved": true,
-   "seconds": 3.7,
-   "tf": 1.0056486481030245
+   "seconds": 3.2,
+   "tf": 1.0056486481030245,
+   "rates": false
   },
   {
    "file": "rest1.json",
@@ -317,8 +348,9 @@
    "index": 1,
    "setting": null,
    "solved": true,
-   "seconds": 19.0,
-   "tf": 1.6837318834392179
+   "seconds": 15.0,
+   "tf": 1.6837318834392179,
+   "rates": false
   },
   {
    "file": "rest10.json",
@@ -327,8 +359,9 @@
    "index": 10,
    "setting": null,
    "solved": true,
-   "seconds": 3.4,
-   "tf": 1.4461524092860218
+   "seconds": 2.7,
+   "tf": 1.4461524092860218,
+   "rates": false
   },
   {
    "file": "rest11.json",
@@ -337,8 +370,9 @@
    "index": 11,
    "setting": null,
    "solved": true,
-   "seconds": 15.8,
-   "tf": 1.5232762937357867
+   "seconds": 13.4,
+   "tf": 1.5232762937357867,
+   "rates": false
   },
   {
    "file": "rest12.json",
@@ -347,8 +381,9 @@
    "index": 12,
    "setting": null,
    "solved": true,
-   "seconds": 14.3,
-   "tf": 1.5647290108476053
+   "seconds": 12.5,
+   "tf": 1.5647290108476053,
+   "rates": false
   },
   {
    "file": "rest13.json",
@@ -357,8 +392,9 @@
    "index": 13,
    "setting": null,
    "solved": true,
-   "seconds": 8.2,
-   "tf": 1.2853086939572733
+   "seconds": 6.9,
+   "tf": 1.2853086939572733,
+   "rates": false
   },
   {
    "file": "rest14.json",
@@ -367,8 +403,9 @@
    "index": 14,
    "setting": null,
    "solved": true,
-   "seconds": 0.8,
-   "tf": 1.273843672358958
+   "seconds": 0.9,
+   "tf": 1.273843672358958,
+   "rates": false
   },
   {
    "file": "rest2.json",
@@ -377,8 +414,9 @@
    "index": 2,
    "setting": null,
    "solved": true,
-   "seconds": 7.7,
-   "tf": 1.4513909275231194
+   "seconds": 6.7,
+   "tf": 1.4513909275231194,
+   "rates": false
   },
   {
    "file": "rest3.json",
@@ -387,8 +425,9 @@
    "index": 3,
    "setting": null,
    "solved": true,
-   "seconds": 7.5,
-   "tf": 1.4026544484693209
+   "seconds": 6.5,
+   "tf": 1.4026544484693209,
+   "rates": false
   },
   {
    "file": "rest4.json",
@@ -397,8 +436,9 @@
    "index": 4,
    "setting": null,
    "solved": true,
-   "seconds": 33.6,
-   "tf": 1.7943320555412912
+   "seconds": 28.8,
+   "tf": 1.7943320555412912,
+   "rates": false
   },
   {
    "file": "rest5.json",
@@ -407,8 +447,9 @@
    "index": 5,
    "setting": null,
    "solved": true,
-   "seconds": 25.6,
-   "tf": 1.7499272895751832
+   "seconds": 21.7,
+   "tf": 1.7499272895751832,
+   "rates": false
   },
   {
    "file": "rest6.json",
@@ -417,8 +458,9 @@
    "index": 6,
    "setting": null,
    "solved": true,
-   "seconds": 17.9,
-   "tf": 1.5387226989893859
+   "seconds": 14.8,
+   "tf": 1.5387226989893859,
+   "rates": false
   },
   {
    "file": "rest7.json",
@@ -427,8 +469,9 @@
    "index": 7,
    "setting": null,
    "solved": true,
-   "seconds": 3.0,
-   "tf": 1.3850275266539072
+   "seconds": 2.3,
+   "tf": 1.3850275266539076,
+   "rates": false
   },
   {
    "file": "rest8.json",
@@ -438,7 +481,8 @@
    "setting": null,
    "solved": true,
    "seconds": 0.7,
-   "tf": 1.1867642584190146
+   "tf": 1.1867642584190146,
+   "rates": false
   },
   {
    "file": "rest9.json",
@@ -447,8 +491,504 @@
    "index": 9,
    "setting": null,
    "solved": true,
-   "seconds": 20.0,
-   "tf": 1.3685146027721424
+   "seconds": 16.3,
+   "tf": 1.3685146027721424,
+   "rates": false
+  },
+  {
+   "file": "vgoal0@70.json",
+   "name": "vgoal0@70",
+   "family": "vgoal",
+   "index": 0,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal0@80.json",
+   "name": "vgoal0@80",
+   "family": "vgoal",
+   "index": 0,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.0,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal0@90.json",
+   "name": "vgoal0@90",
+   "family": "vgoal",
+   "index": 0,
+   "setting": "90%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal1@70.json",
+   "name": "vgoal1@70",
+   "family": "vgoal",
+   "index": 1,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal1@80.json",
+   "name": "vgoal1@80",
+   "family": "vgoal",
+   "index": 1,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal1@90.json",
+   "name": "vgoal1@90",
+   "family": "vgoal",
+   "index": 1,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 8.6,
+   "tf": 1.2024267919961475,
+   "rates": true
+  },
+  {
+   "file": "vgoal2@70.json",
+   "name": "vgoal2@70",
+   "family": "vgoal",
+   "index": 2,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal2@80.json",
+   "name": "vgoal2@80",
+   "family": "vgoal",
+   "index": 2,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal2@90.json",
+   "name": "vgoal2@90",
+   "family": "vgoal",
+   "index": 2,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 19.5,
+   "tf": 1.1771012863088772,
+   "rates": true
+  },
+  {
+   "file": "vgoal3@70.json",
+   "name": "vgoal3@70",
+   "family": "vgoal",
+   "index": 3,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal3@80.json",
+   "name": "vgoal3@80",
+   "family": "vgoal",
+   "index": 3,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal3@90.json",
+   "name": "vgoal3@90",
+   "family": "vgoal",
+   "index": 3,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 15.5,
+   "tf": 1.181448106690481,
+   "rates": true
+  },
+  {
+   "file": "vgoal4@70.json",
+   "name": "vgoal4@70",
+   "family": "vgoal",
+   "index": 4,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal4@80.json",
+   "name": "vgoal4@80",
+   "family": "vgoal",
+   "index": 4,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.0,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal4@90.json",
+   "name": "vgoal4@90",
+   "family": "vgoal",
+   "index": 4,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 18.8,
+   "tf": 1.2023979057082728,
+   "rates": true
+  },
+  {
+   "file": "vgoal5@70.json",
+   "name": "vgoal5@70",
+   "family": "vgoal",
+   "index": 5,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal5@80.json",
+   "name": "vgoal5@80",
+   "family": "vgoal",
+   "index": 5,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal5@90.json",
+   "name": "vgoal5@90",
+   "family": "vgoal",
+   "index": 5,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 7.0,
+   "tf": 1.0845691614303667,
+   "rates": true
+  },
+  {
+   "file": "vgoal6@70.json",
+   "name": "vgoal6@70",
+   "family": "vgoal",
+   "index": 6,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal6@80.json",
+   "name": "vgoal6@80",
+   "family": "vgoal",
+   "index": 6,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.0,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal6@90.json",
+   "name": "vgoal6@90",
+   "family": "vgoal",
+   "index": 6,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 15.0,
+   "tf": 1.149158436022989,
+   "rates": true
+  },
+  {
+   "file": "vgoal7@70.json",
+   "name": "vgoal7@70",
+   "family": "vgoal",
+   "index": 7,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal7@80.json",
+   "name": "vgoal7@80",
+   "family": "vgoal",
+   "index": 7,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal7@90.json",
+   "name": "vgoal7@90",
+   "family": "vgoal",
+   "index": 7,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 11.9,
+   "tf": 1.1091447197920614,
+   "rates": true
+  },
+  {
+   "file": "vgoal8@70.json",
+   "name": "vgoal8@70",
+   "family": "vgoal",
+   "index": 8,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal8@80.json",
+   "name": "vgoal8@80",
+   "family": "vgoal",
+   "index": 8,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal8@90.json",
+   "name": "vgoal8@90",
+   "family": "vgoal",
+   "index": 8,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 8.5,
+   "tf": 1.1556384137309093,
+   "rates": true
+  },
+  {
+   "file": "vgoal9@70.json",
+   "name": "vgoal9@70",
+   "family": "vgoal",
+   "index": 9,
+   "setting": "70%",
+   "solved": false,
+   "seconds": 60.0,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal9@80.json",
+   "name": "vgoal9@80",
+   "family": "vgoal",
+   "index": 9,
+   "setting": "80%",
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vgoal9@90.json",
+   "name": "vgoal9@90",
+   "family": "vgoal",
+   "index": 9,
+   "setting": "90%",
+   "solved": true,
+   "seconds": 17.4,
+   "tf": 1.1613182851263695,
+   "rates": true
+  },
+  {
+   "file": "vrest0.json",
+   "name": "vrest0",
+   "family": "vrest",
+   "index": 0,
+   "setting": null,
+   "solved": true,
+   "seconds": 15.2,
+   "tf": 1.0226946220414903,
+   "rates": true
+  },
+  {
+   "file": "vrest1.json",
+   "name": "vrest1",
+   "family": "vrest",
+   "index": 1,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest10.json",
+   "name": "vrest10",
+   "family": "vrest",
+   "index": 10,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest11.json",
+   "name": "vrest11",
+   "family": "vrest",
+   "index": 11,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.0,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest12.json",
+   "name": "vrest12",
+   "family": "vrest",
+   "index": 12,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.0,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest13.json",
+   "name": "vrest13",
+   "family": "vrest",
+   "index": 13,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest14.json",
+   "name": "vrest14",
+   "family": "vrest",
+   "index": 14,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest2.json",
+   "name": "vrest2",
+   "family": "vrest",
+   "index": 2,
+   "setting": null,
+   "solved": true,
+   "seconds": 49.4,
+   "tf": 1.6087861499706437,
+   "rates": true
+  },
+  {
+   "file": "vrest3.json",
+   "name": "vrest3",
+   "family": "vrest",
+   "index": 3,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest4.json",
+   "name": "vrest4",
+   "family": "vrest",
+   "index": 4,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest5.json",
+   "name": "vrest5",
+   "family": "vrest",
+   "index": 5,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest6.json",
+   "name": "vrest6",
+   "family": "vrest",
+   "index": 6,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest7.json",
+   "name": "vrest7",
+   "family": "vrest",
+   "index": 7,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.1,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest8.json",
+   "name": "vrest8",
+   "family": "vrest",
+   "index": 8,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.0,
+   "tf": null,
+   "rates": true
+  },
+  {
+   "file": "vrest9.json",
+   "name": "vrest9",
+   "family": "vrest",
+   "index": 9,
+   "setting": null,
+   "solved": true,
+   "seconds": 41.2,
+   "tf": 1.388021817361569,
+   "rates": true
   }
  ]
 }

@@ -9,21 +9,21 @@
   --bg: #fbfbfa; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e4e2;
   --arm: #2f5d8a; --joint: #1d1d1f; --shadow: rgba(0,0,0,0.10); --trail: #c9a227;
   --start: rgba(47,93,138,0.25); --goal: #8a8a8f; --limit: #c0392b; --ok: #2e7d4f; --bad: #b3261e;
-  --tau: #2f5d8a; --grid: #ececea; --accent: #2f5d8a;
+  --tau: #2f5d8a; --rate: #1f7a6d; --grid: #ececea; --accent: #2f5d8a;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #141416; --panel: #1c1c1f; --ink: #ececef; --muted: #9a9aa2; --line: #2c2c31;
     --arm: #7fb0e0; --joint: #ececef; --shadow: rgba(255,255,255,0.08); --trail: #e0c060;
     --start: rgba(127,176,224,0.25); --goal: #77777e; --limit: #ff6b5e; --ok: #5cc28a; --bad: #ff7a70;
-    --tau: #7fb0e0; --grid: #26262a; --accent: #7fb0e0;
+    --tau: #7fb0e0; --rate: #5cc7b5; --grid: #26262a; --accent: #7fb0e0;
   }
 }
 :root[data-theme="dark"] {
   --bg: #141416; --panel: #1c1c1f; --ink: #ececef; --muted: #9a9aa2; --line: #2c2c31;
   --arm: #7fb0e0; --joint: #ececef; --shadow: rgba(255,255,255,0.08); --trail: #e0c060;
   --start: rgba(127,176,224,0.25); --goal: #77777e; --limit: #ff6b5e; --ok: #5cc28a; --bad: #ff7a70;
-  --tau: #7fb0e0; --grid: #26262a; --accent: #7fb0e0;
+  --tau: #7fb0e0; --rate: #5cc7b5; --grid: #26262a; --accent: #7fb0e0;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink);
@@ -40,7 +40,10 @@ h1 { font-size: 24px; margin: 0 0 4px; }
 .viewer h2 { font-size: 18px; margin: 0; }
 .viewer .meta { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
 #arm { width: 100%; aspect-ratio: 5 / 4; display: block; touch-action: none; cursor: grab; border-radius: 6px; }
-#tau { width: 100%; height: 330px; display: block; }
+#tau, #rate { width: 100%; height: 330px; display: block; }
+#rate { margin-top: 10px; }
+[hidden] { display: none !important; }
+.families { color: var(--muted); font-size: 13px; margin: -10px 0 18px; }
 .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 button, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--bg);
   border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
@@ -67,9 +70,11 @@ input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); }
 <main>
 <h1>Arm census</h1>
 <p class="lede">Every minimum-time motion of the six-joint arm benchmark, as the solver finds it.
-Each case is a jerk-limited move with a torque limit on every joint. A torque trace turns red where its
+Each case is a jerk-limited move with a torque limit on every joint; the <code>vgoal</code> and
+<code>vrest</code> cases repeat the others with a limit on every joint's rate as well. A trace turns red where its
 joint rides its limit. Unsolved cases show the start pose (faint) and the goal pose (grey).</p>
 <div class="summary" id="summary"></div>
+<div class="families" id="families"></div>
 
 <section class="viewer" id="viewer" hidden>
   <div>
@@ -87,8 +92,10 @@ joint rides its limit. Unsolved cases show the start pose (faint) and the goal p
   </div>
   <div>
     <canvas id="tau" aria-label="Joint torques against their limits"></canvas>
+    <canvas id="rate" aria-label="Joint rates against their limits" hidden></canvas>
     <div class="legend">
       <span><i class="sw" style="background:var(--tau)"></i>torque ÷ limit</span>
+      <span id="rate-key" hidden><i class="sw" style="background:var(--rate)"></i>rate ÷ limit</span>
       <span><i class="sw" style="background:var(--limit)"></i>on the limit</span>
       <span><i class="sw" style="background:var(--trail)"></i>tool path</span>
     </div>
@@ -105,7 +112,7 @@ const DATA = "data/";
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 let colors = {};
 function readColors() {
-  for (const k of ["arm", "joint", "shadow", "trail", "start", "goal", "limit", "tau", "grid", "muted", "line", "ink"])
+  for (const k of ["arm", "joint", "shadow", "trail", "start", "goal", "limit", "tau", "rate", "grid", "muted", "line", "ink"])
     colors[k] = css("--" + k);
 }
 readColors();
@@ -192,27 +199,27 @@ function drawArm(cv, d, tau, big) {
   drawPose(ctx, pts, w, h, sc, colors.arm, lw, big);
 }
 
-function drawTau(cv, d, tau) {
+function drawTraces(cv, d, tau, series, limits, color) {
+  // series[k][j] against limits[j], one row per joint; red where the joint rides its limit
   const [w, h, dpr] = sizeCanvas(cv), ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, w, h);
   ctx.font = `${12 * dpr}px system-ui, sans-serif`; ctx.textBaseline = "middle";
   const rows = 6, gap = 8 * dpr, left = 64 * dpr, right = 8 * dpr, rh = (h - gap * (rows - 1)) / rows;
-  if (!d.tau) {
+  if (!series) {
     ctx.fillStyle = colors.muted; ctx.fillText("Not solved: " + (d.message || ""), 0, h / 2); return;
   }
   const T = d.t[d.t.length - 1], n = d.t.length;
   for (let j = 0; j < rows; j++) {
-    const top = j * (rh + gap), lim = d.torque_limits[j] || 1;
+    const top = j * (rh + gap), lim = limits[j] || 1;
     const X = t => left + (w - left - right) * t / T, Y = r => top + rh / 2 - r * (rh / 2) * 0.9;
     ctx.fillStyle = colors.muted; ctx.fillText(`joint ${j + 1}`, 0, top + rh / 2 - 7 * dpr);
     ctx.fillText(`±${lim.toPrecision(3)}`, 0, top + rh / 2 + 8 * dpr);
     ctx.strokeStyle = colors.grid; ctx.lineWidth = dpr;
     for (const r of [1, 0, -1]) { ctx.beginPath(); ctx.moveTo(left, Y(r)); ctx.lineTo(w - right, Y(r)); ctx.stroke(); }
-    // trace, red where the joint rides its limit
     for (let k = 1; k < n; k++) {
-      const r0 = d.tau[k - 1][j] / lim, r1 = d.tau[k][j] / lim;
+      const r0 = series[k - 1][j] / lim, r1 = series[k][j] / lim;
       const on = Math.abs(r0) > 0.999 && Math.abs(r1) > 0.999;
-      ctx.strokeStyle = on ? colors.limit : colors.tau; ctx.lineWidth = (on ? 3 : 1.6) * dpr;
+      ctx.strokeStyle = on ? colors.limit : color; ctx.lineWidth = (on ? 3 : 1.6) * dpr;
       ctx.beginPath(); ctx.moveTo(X(d.t[k - 1]), Y(r0)); ctx.lineTo(X(d.t[k]), Y(r1)); ctx.stroke();
     }
   }
@@ -220,6 +227,8 @@ function drawTau(cv, d, tau) {
   ctx.strokeStyle = colors.ink; ctx.lineWidth = dpr; ctx.globalAlpha = 0.5;
   ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); ctx.globalAlpha = 1;
 }
+function drawTau(cv, d, tau) { drawTraces(cv, d, tau, d.tau, d.torque_limits, colors.tau); }
+function drawRate(cv, d, tau) { if (d.rate_limits) drawTraces(cv, d, tau, d.w, d.rate_limits, colors.rate); }
 
 // ---- state -------------------------------------------------------------------
 let manifest = [], current = null, playing = true, speed = 1, clock = 0, last = performance.now();
@@ -237,6 +246,11 @@ function summary() {
     [`${solved.length} / ${n}`, "solved"], [solved.filter(c => c.seconds < 60).length, "under 60 s"],
     [isNaN(med) ? "–" : `${med.toFixed(0)} s`, "median solve time"]]
     .map(([b, s]) => `<div class="stat"><b>${b}</b><span>${s}</span></div>`).join("");
+  const fams = [...new Set(manifest.map(c => c.family))];
+  document.getElementById("families").textContent = fams.map(f => {
+    const part = manifest.filter(c => c.family === f);
+    return `${f}: ${part.filter(c => c.solved).length} of ${part.length} solved`;
+  }).join(" · ");
 }
 function buildFilters() {
   const fams = [...new Set(manifest.map(c => c.family))];
@@ -304,15 +318,31 @@ async function select(name, scroll) {
   document.getElementById("v-meta").innerHTML = (current.solved
     ? `<span class="ok">Solved</span> in ${current.seconds} s · motion time ${current.tf.toFixed(4)} s`
     : `<span class="bad">Not solved</span> · ${current.message ?? ""}`)
-    + `<br>${current.setting ? `limits at ${current.setting} · ` : ""}torque limits [${lim}]`;
+    + `<br>${current.setting ? `limits at ${current.setting} · ` : ""}torque limits [${lim}]`
+    + (current.rate_limits ? `<br>rate limits [${current.rate_limits.map(v => v.toPrecision(3)).join(", ")}]` : "")
+    + holds(current);
+  const rates = !!current.rate_limits;
+  document.getElementById("rate").hidden = !rates; document.getElementById("rate-key").hidden = !rates;
   document.querySelectorAll(".card").forEach(e => e.classList.toggle("sel", e.dataset.name === name));
   if (location.hash.slice(1) !== name) history.replaceState(null, "", "#" + encodeURIComponent(name));
   if (scroll) document.getElementById("viewer").scrollIntoView({ behavior: "smooth", block: "start" });
   drawViewer();
 }
+function holds(d) {   // which limits a rate case's answer holds, and which at one instant
+  const o = d.orders;
+  if (!o) return "";
+  const both = o.together.length
+    ? `; at one instant ${o["other joints"] && o["same joint"] ? "on the same joint and on others"
+        : o["other joints"] ? "on different joints" : "on the same joint"}: `
+      + o.together.map(([a, b]) => `${a} with ${b}`).join(", ")
+    : (o["1"].length && o["2"].length ? "; never at one instant" : "");
+  return `<br>holds ${o["1"].length ? "torque limits " + o["1"].join(", ") : "no torque limit"} · `
+    + `${o["2"].length ? "rate limits " + o["2"].join(", ") : "no rate limit"}${both}`;
+}
 function drawViewer() {
   drawArm(document.getElementById("arm"), current, vt, true);
   drawTau(document.getElementById("tau"), current, vt);
+  drawRate(document.getElementById("rate"), current, vt);
   document.getElementById("scrub").value = Math.round(vt * 1000);
 }
 document.getElementById("play").onclick = e => { playing = !playing; e.target.textContent = playing ? "Pause" : "Play"; };
@@ -340,6 +370,7 @@ function tick(now) {
     const shown = vt; vt = Math.min(vt, 1.25);
     drawArm(document.getElementById("arm"), current, Math.min(1, shown), true);
     drawTau(document.getElementById("tau"), current, Math.min(1, shown));
+    drawRate(document.getElementById("rate"), current, Math.min(1, shown));
     document.getElementById("scrub").value = Math.round(Math.min(1, shown) * 1000);
   }
   for (const n of visible) drawCard(cards.get(n));
