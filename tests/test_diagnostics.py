@@ -433,7 +433,7 @@ def test_a_convex_order2_touch_becomes_an_arc_under_r35(monkeypatch):
 
     from auto_optimal_control import lemmas
 
-    t = np.linspace(0.0, 1.0, 4001)
+    t = np.linspace(0.0, 1.0, 801)
 
     def setup(curv):
         arcs = [("touch", 0), ("touch", 1)]
@@ -441,7 +441,7 @@ def test_a_convex_order2_touch_becomes_an_arc_under_r35(monkeypatch):
         h, shoot = _stub_structure(arcs, values, [2, 2], T=1.0)
         h.touch_curvature = True
         shoot.kernels, shoot.params = None, None
-        shoot.trajectory = lambda v, n_points=4001: {
+        shoot.trajectory = lambda v, n_points=801: {
             "t": t, "z": t[:, None], "u": np.zeros((len(t), 1))}
 
         class Objects:                     # g_c' = curv_c (t - t_touch)
@@ -449,6 +449,9 @@ def test_a_convex_order2_touch_becomes_an_arc_under_r35(monkeypatch):
 
             def rate_parts(self, c, t_, z):
                 return np.zeros(1), curv[c] * (t_ - values[c][0])
+
+            def curvature(self, c, t_, z, u):
+                return curv[c]
 
         monkeypatch.setattr(lemmas, "LimitObjects", Objects)
         return h, shoot, values
