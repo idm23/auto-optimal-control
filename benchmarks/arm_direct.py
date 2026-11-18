@@ -2,7 +2,7 @@
 
     python benchmarks/arm_direct.py goal9@80 rest12 [--intervals 120] [--census census.jsonl]
 
-For each case: the direct answer's final time, the arcs of each torque limit, the
+For each case: the direct answer's final time, the arcs of each limit (torques, and rates for a rate-limited case), the
 jerks held at their bounds, and the limits' multipliers (the density of each
 limit's measure, eta, in docs/notes/structure_certificates.md). With
 ``--census``, the indirect final time from a census file is printed alongside.
@@ -37,11 +37,14 @@ def main(argv=None):
     census = {}
     if args.census:
         census = {r["name"]: r for r in map(json.loads, open(args.census))}
-    problem = examples.six_joint_arm_min_time()
     results = {}
     for name in args.cases:
         p = np.asarray(arm_census.params(name), float)
         tau = p[18:24]
+        rates = name in arm_census.RATE_CASES
+        problem = examples.six_joint_arm_min_time(rate_limits=rates)
+        # One scale per limit, in the problem's order (max then min, joint by joint).
+        scales = np.repeat(tau, 2) if not rates else np.r_[np.repeat(tau, 2), np.repeat(p[24:30], 2)]
         # A first guess for the time: the motion with jerk limits alone, stretched.
         free = arm_census.H.solve([*p[:18], *np.full(6, 1e4)], arm_census.BOX, arm_census.TS)
         tr = free.shooting.trajectory(free.solution.v, n_points=400)
@@ -51,7 +54,7 @@ def main(argv=None):
             guess = (np.asarray(tr["t"]) * stretch, z,
                      np.zeros((len(tr["t"]), 6)))
             sol = direct.solve(problem, p, intervals=args.intervals, guess=guess,
-                               regularize=args.regularize, scale_limits=np.r_[tau, tau],
+                               regularize=args.regularize, scale_limits=scales,
                                tf_bounds=arm_census.TS)
             print(f"{name}: stretch {stretch}: tf {sol.tf:.5f} {sol.status} "
                   f"({sol.iterations} iterations, {sol.seconds:.1f} s)", flush=True)

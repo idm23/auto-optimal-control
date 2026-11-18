@@ -356,6 +356,11 @@ class Homotopy:
         #: limit violated on both sides: it has become an arc, which takes its place,
         #: short and centred on it, the touch's jump as its entry jump.
         self.touch_curvature = False
+        #: Rule R36 (Lemma H2): on an order-2 arc the multiplier of ``g''`` is convex and
+        #: falls to zero at the exit, so it must not rise either. Acceptance checks it at
+        #: order 2 too, and R5 splits an order-2 arc where it rises, the second piece
+        #: entering with the jump that continues the arc's costate there.
+        self.order2_rise = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -1143,7 +1148,9 @@ class Homotopy:
             return "mu negative (Lemma H)"
         # Order 1: mu = int_t^{t_out} eta with eta >= 0, so mu must not rise along an arc
         # (docs/notes/structure_certificates.md, Lemma H).
-        order1 = [q == 1 for kind, _, q in shoot.arcs if kind == "boundary"]
+        # Order 2 (R36): mu is convex and ends at 0 with slope <= 0 (Lemma H2): the same.
+        rising = (1, 2) if getattr(self, "order2_rise", False) else (1,)
+        order1 = [q in rising for kind, _, q in shoot.arcs if kind == "boundary"]
         if any(o and rise > 1e-6 * max(1.0, abs(hi))
                for o, rise, (_, hi) in zip(order1, d["boundary_mu_rise"], d["boundary_mu"])):
             return "mu rises (Lemma H)"
@@ -2301,6 +2308,64 @@ class Homotopy:
             self.diagnostics.fired("R2 birth")
             yield grown[0], grown[1], None
 
+    def _split_rising_order2(self, arcs, values, i, t_lo, t_hi, mu_lo, mu_hi, at_entry,
+                             at_exit, t_on, mu_on, T):
+        """Rule R36: R5's split of an order-2 arc where its multiplier rises (Lemma H2).
+
+        The entry jump of an order-2 arc is ``(pi_1, pi_2)`` with ``pi_2 = mu(t_in+)`` and
+        ``pi_1 = nu_in - mu'(t_in+)``. The first piece keeps the arc's jump; the second
+        enters with ``(-mu'(t), mu(t))`` at its entry ``t``, the jump that continues the
+        arc's costate there (no atom), which Newton then corrects. A rise from the entry
+        (to the exit) trims the arc instead, as R18; the gaps are the plain ones, a little
+        wider and narrower than the rise, and R34's, wider by half and twice."""
+        a, b, pi = values[i]
+        self.diagnostics.fired("R36")
+        self._detail(f"    {self.kr.CONSTRAINT_NAMES[arcs[i][1]]}: multiplier rises on "
+                     f"[{t_lo:.5f}, {t_hi:.5f}] (Lemma H2): split the order-2 arc")
+        dmu = np.gradient(mu_on, t_on)
+        pi_first = np.atleast_1d(np.asarray(pi, float)).copy()
+
+        def entering(t):
+            return np.array([-float(np.interp(t, t_on, dmu)), float(np.interp(t, t_on, mu_on))])
+
+        out_a = arcs[:i] + [arcs[i], arcs[i]] + arcs[i + 1:]
+        out = []
+        w = t_hi - t_lo
+        # A rise that starts (ends) within a tenth of its stretch of the entry (exit) is
+        # at it: the piece it would leave is no arc. The rise is often bounded by another
+        # limit's junction, so the new junction is offered a little past it, then half
+        # and twice the stretch past (as R34), never on it (Lemma D).
+        piece = 1e-4 * T
+        at_entry = at_entry or t_lo - a < max(0.1 * w, piece)
+        at_exit = at_exit or b - t_hi < max(0.1 * w, piece)
+        for f in (0.02, 0.5, 2.0):
+            if at_entry and t_hi + f * w < b - piece:
+                t_e = t_hi + f * w
+                out.append((arcs, values[:i] + [(t_e, b, entering(t_e))] + values[i + 1:]))
+            if at_exit and t_lo - f * w > a + piece:
+                out.append((arcs, values[:i] + [(a, t_lo - f * w, pi_first.copy())]
+                            + values[i + 1:]))
+        if not (at_entry or at_exit):
+            for f in (0.02, -0.02, 0.5, 2.0):
+                lo, hi = t_lo - f * w, t_hi + f * w
+                if lo > a + piece and hi < b - piece and hi - lo > 1e-6 * T:
+                    mu_hi_ = float(np.interp(hi, t_on, mu_on))
+                    for p2 in (entering(hi), np.array([0.0, mu_hi_]),
+                               np.array([float(pi_first[0]), mu_hi_])):
+                        out.append((out_a, values[:i] + [(a, lo, pi_first.copy()), (hi, b, p2)]
+                                    + values[i + 1:]))
+            # The arc may not come back after the rise (or not have been there before
+            # it): the piece before the rise alone, then the piece after it alone.
+            for f in (0.02, 0.5, 2.0):
+                if t_lo - f * w > a + piece:
+                    out.append((arcs, values[:i] + [(a, t_lo - f * w, pi_first.copy())]
+                                + values[i + 1:]))
+            for f in (0.02, 0.5, 2.0):
+                if t_hi + f * w < b - piece:
+                    t_e = t_hi + f * w
+                    out.append((arcs, values[:i] + [(t_e, b, entering(t_e))] + values[i + 1:]))
+        return out or None
+
     def _split_rising(self, shoot, v, n_points=801):
         """Structures with an order-1 boundary arc split where its multiplier rises.
 
@@ -2318,8 +2383,9 @@ class Homotopy:
         T = shoot.unpack(v)[3] - shoot.t0
         best = None
         best_abs = None
+        orders = (1, 2) if getattr(self, "order2_rise", False) else (1,)
         for i, ((kind, c), val) in enumerate(zip(arcs, values)):
-            if kind != "boundary" or self.kr.CONSTRAINT_ORDERS[c] != 1:
+            if kind != "boundary" or self.kr.CONSTRAINT_ORDERS[c] not in orders:
                 continue
             on = np.flatnonzero(tr["active"][:, c] & (tr["t"] >= val[0]) & (tr["t"] <= val[1]))
             if len(on) < 3:
@@ -2357,6 +2423,9 @@ class Homotopy:
             self.diagnostics.fired("R33")
         self._split_limit = arcs[i][1]
         a, b, pi = values[i]
+        if self.kr.CONSTRAINT_ORDERS[arcs[i][1]] == 2:
+            return self._split_rising_order2(arcs, values, i, t_lo, t_hi, mu_lo, mu_hi,
+                                             at_entry, at_exit, t_on, mu_on, T)
         self.diagnostics.fired("R5")
         self._detail(f"    {self.kr.CONSTRAINT_NAMES[arcs[i][1]]}: multiplier rises on "
                      f"[{t_lo:.5f}, {t_hi:.5f}] (eta < 0): split the arc")
