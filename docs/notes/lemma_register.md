@@ -168,6 +168,50 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Used by.** Acceptance (the $\dot\mu \le 0$ check), R5, R33 (which arc R5
   splits: H holds per limit, and scaling $g_c$ scales $\mu_c$).
 
+### H2. On an order-2 arc the multiplier is convex, falls and ends at zero — proved, relative to S1
+
+- **Statement.** Let $c$ be a limit of order 2 ($g$ and $\dot g$ free of the
+  controls, $\ddot g$ affine in them), ridden on $[t_{\rm in}, t_{\rm out}]$, with
+  $\mu$ the multiplier of $\ddot g$ in the indirect form $H + \mu \ddot g$ and
+  $\lambda$ continuous at the exit. Then on the arc
+  $$\mu \ge 0, \qquad \dot\mu \le 0, \qquad \ddot\mu \ge 0, \qquad \mu(t_{\rm out}) = 0,$$
+  and the entry jump $\pi = (\pi_1, \pi_2)$, with
+  $\lambda(t_{\rm in}^+) - \lambda(t_{\rm in}^-) = -\pi_1 \nabla g - \pi_2 \nabla \dot g$
+  (the sign convention of order 1's $\pi \nabla g$), has $\pi_2 = \mu(t_{\rm in}^+) \ge 0$ and
+  $\pi_1 \ge 0$. So $\pi_2$ is the largest value of $\mu$ on the arc, and the arc
+  carries no multiplier past its entry when $\pi_2 = 0$. As H, this holds for each
+  limit separately, also while other limits are active.
+- **Proof.** In the direct form the limit is adjoined with a measure
+  $d\eta \ge 0$ on $[t_{\rm in}, t_{\rm out}]$: a density $\eta$ inside and atoms
+  $\nu_{\rm in}, \nu_{\rm out}$ at the junctions (S1). Try
+  $\lambda_{\rm ind} = \lambda_{\rm dir} + a \nabla g - \mu \nabla \dot g$ on the arc, with
+  $\dot\lambda_{\rm dir} = -\partial_x(L + \lambda_{\rm dir} f) - \eta \nabla g$.
+  With $\dot g = \nabla g\, f$, $\ddot g = \nabla \dot g\, f$ and the identity
+  $\tfrac{d}{dt}\nabla h + \nabla h\, f_x = \nabla \dot h$ along the motion (for $h$
+  free of $t$), differentiating and comparing with
+  $-\partial_x (L + \lambda_{\rm ind} f + \mu \ddot g)$ leaves
+  $$(\dot a - \eta)\,\nabla g + (a - \dot\mu)\,\nabla \dot g = 0 .$$
+  So, where the two gradients are independent (Lemma B's rank), $a = \dot\mu$ and
+  $\ddot\mu = \eta \ge 0$; the $u$-terms agree because $\dot g$ is free of $u$. Past
+  the exit the two costates are equal and $\lambda_{\rm ind}$ is continuous, while
+  $\lambda_{\rm dir}$ jumps by $-\nu_{\rm out} \nabla g$: so $\mu(t_{\rm out}) = 0$ and
+  $\dot\mu(t_{\rm out}) = -\nu_{\rm out} \le 0$. A convex function that ends at zero
+  with a slope $\le 0$ has $\dot\mu \le 0$ and $\mu \ge 0$ before:
+  $\mu(t) = \nu_{\rm out}(t_{\rm out} - t) + \int_t^{t_{\rm out}} (s - t)\, \eta(s)\, ds$.
+  At the entry, $\lambda_{\rm dir}$ jumps by $-\nu_{\rm in} \nabla g$ and
+  $\lambda_{\rm ind}$ by $-(\nu_{\rm in} - \dot\mu(t_{\rm in}^+))\nabla g - \mu(t_{\rm in}^+)\nabla \dot g$,
+  so $\pi_2 = \mu(t_{\rm in}^+)$ and
+  $\pi_1 = \nu_{\rm in} + \nu_{\rm out} + \int \eta \ge 0$. $\square$
+- **Seen.** On the rejected answer of `vgoal0@80` (2026-11-18), the order-2 arcs
+  that the theorem allows (`w4_min`, `w6_max`) have $\mu$ convex and falling to 0,
+  with $\pi_2 = \mu(t_{\rm in}^+)$ to six digits. `w5_max` and `w2_min` have
+  $\pi_2 < 0$. Along the route, $\mu$ on `w5_max` first rises inside the arc
+  (about $|o| = 1.25$), dips below zero there, and only then does $\pi_2$ turn
+  negative.
+- **Depends on.** S1, B (independent gradients on the arc).
+- **Used by.** Acceptance ("mu negative" applies at every order; R36 adds the rise
+  check at order 2), and R36's split of an order-2 arc where $\mu$ rises.
+
 ### H′. An arc whose entry multiplier reaches zero dies without moving the motion — proved, relative to S1
 
 - **Statement.** Let $c$ be an order-1 limit ridden on an arc, and suppose

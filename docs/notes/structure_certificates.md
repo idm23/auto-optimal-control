@@ -1744,6 +1744,38 @@ before it stalls on another event: the exit of `w3_min` (order 2) and the entry 
 `tau5_max` (order 1) swap at every step (R30 fires 452 times), and R2's width steps,
 made for order-1 births, predict route parameters of $-0.36$ and $0.32$.
 
+### Order-2 multipliers that rise: Rule R36, tried
+
+With every set of limits ridden at run time (PR #73), goal 0 at 80% reaches the end of
+its offsets on the first route. Its exact solve converges (residual $6 \times 10^{-11}$,
+violation $10^{-12}$) and is rejected: `mu negative`, on `w5_max` and `w2_min`. Lemma H2
+says why that is right: on an order-2 arc $\mu$ is convex and ends at zero with
+$\dot\mu \le 0$, so $\pi_2 = \mu(t_{\rm in}^+) \ge 0$ and $\mu$ never rises. Along the
+route, $\mu$ on `w5_max` first rises inside the arc (at about $|o| = 1.25$), then dips
+below zero there, and only then does $\pi_2$ turn negative. The rise of `w2_min` is
+exactly the stretch where `tau5_max` is ridden with it. The direct transcription (120
+intervals, for comparison only) has `w2_min` and `w5_max` held only briefly, before
+`tau5_max` enters, and `w3_min` in three pieces.
+
+*Rule R36* (`Homotopy.order2_rise`). Acceptance checks the rise at order 2 as at order
+1, and R5 splits an order-2 arc where its multiplier rises (R33 picks the arc). The
+second piece enters with $(-\dot\mu, \mu)$ at its entry, the jump that continues the
+arc's costate there, and also with $(0, \mu)$ and $(\pi_1, \mu)$. Each piece is also
+offered alone: the arc cut before the rise, or started after it. A rise within a tenth
+of its stretch of an end trims the arc there. No new junction is put on the rise's own
+ends, which are often another limit's junctions (Lemma D): it goes 2%, half or twice
+the stretch past them.
+
+*Result.* The plain splits do not propagate. Riding fails just after the second piece
+re-enters, whatever its jump, which suggests the edge of the holdable set (R8 treats it
+at order 1 only). The one-piece offers do work. On the first route alone, goal 0 at 80%
+solves exactly with `w2_min` and `w5_max` as touches before `tau5_max`, as the direct
+answer has them, but in 136 s. Rate cases on the first route, 60 s cap (R1, R2, R16, R20,
+R21, R25, R26, R27, R30–R35 on): 14 of 45 with and without R36, the same cases. R36 fires
+in three cases (goal 0 at 80% and 70%, rest 2), each of which reaches the rise only
+near its cap. The two rejections for `mu negative` are gone. What these cases need now
+is a faster route to the rise.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
