@@ -157,6 +157,7 @@ the curve through it.
 | | Event | Monitor | Continuation | Status | Rules today |
 |---|---|---|---|---|---|
 | E1 | birth: an interior peak reaches the limit with $\ddot g < 0$, jerks interior | peak | a new arc; its width grows as $\sqrt{s - s^*}$, so the width is the step variable there | **proved** (Lemma E; compare Bonnans & Hermant 2008, Thm 2.4: a touch becomes an arc, stays a touch or goes inactive) | R2, R16, R20, R26 |
+| E1″ | an order-2 touch becomes an arc: the limit's curvature at the touch, $\ddot g(t^*)$, reaches zero from below | touch curvature | an arc about $t^*$, its width growing linearly in $s$ (Bryson–Denham: $1 - 6\ell$), the touch's jump its entry jump | **proved** for the sign condition (a touch is a local maximum of $g$, so $\ddot g \le 0$ with a continuous control; Bonnans & Hermant 2008: a touch becomes an arc); the event's regularity is a sketch | R35 |
 | E1′ | birth at the corner (contact on the edge of the holdable set) | peak | one-sided arc | conjecture (E′) | R6, R12 |
 | E2 | death: an arc's width and jump reach zero together | width | the arc is removed: E1 traversed backwards | **proved** (Lemma E read in reverse) | R10, R17 |
 | E2″ | death by multiplier: an order-1 arc's entry multiplier reaches zero, its width positive | jump | the arc is removed; the motion does not move | **proved** (Lemma H′), except whether the freed stretch stays below the limit | R31 |
