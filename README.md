@@ -530,7 +530,11 @@ shared steps and automatic differentiation, instead of being differentiated as a
 SymPy tree: the first torque is 97084 operations written out, and all six are 923
 steps. And its boundary arcs are **solved at run time** (`riding.py`): one kernel solves
 the linear conditions for whichever limits are ridden, instead of one symbolic
-kernel per set. There are 728 sets.
+kernel per set. There are 728 sets. With joint rate limits as well
+(`six_joint_arm_min_time(rate_limits=True)`) there are 94,424: every set of up to six
+limits, at most one per torque and one per rate. An optimal motion can ride as many
+limits at once as there are controls, so none are left out. The set table is a few
+bytes per set, and the riding's warm starts are a small cache whatever the count.
 
 On random motions (`T` in 0.8 to 1.5, goals within 1.5 rad), 40 of 48 solved exactly with
 joints 1 to 3 limited, with a median of 2.5 s. With the wrist limited as well, 32 of 48 did,

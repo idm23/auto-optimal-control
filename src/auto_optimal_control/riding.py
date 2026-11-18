@@ -29,6 +29,9 @@ gradient in one reverse pass, and the second derivatives of
 
 import sympy as sp
 
+# Slots in the riding's warm-start cache (per thread): see ``r_warm`` in the C.
+WARM_SLOTS = 64
+
 
 def _names(pmp, mapping, extra=()):
     names = {s.name: str(c) for s, c in mapping.items()}
@@ -279,8 +282,12 @@ static int {P}r_check(int id, const double* v, const double* lo, const double* h
 /* The controls u and the multipliers: per limit of the set (ms) and summed per root (mr).
    With bounds this is a small strictly convex quadratic program, whose solution is
    unique: an active set from nothing held, and every combination if that cycles. */
-static _Thread_local int {P}r_warm[{max(len(sets), 1)}][{max(m, 1)}];
-static _Thread_local int {P}r_warm_ok[{max(len(sets), 1)}];
+/* The last held set found per set of limits, as a warm start: a small direct-mapped
+   cache (per thread), so its size does not grow with the number of sets. A slot holds
+   one set's (id + 1, held set); another set mapping to it only costs a cold start. */
+#define {P}R_WARM_SLOTS {WARM_SLOTS}
+static _Thread_local int {P}r_warm[{P}R_WARM_SLOTS][{max(m, 1)}];
+static _Thread_local int {P}r_warm_id[{P}R_WARM_SLOTS];
 /* A held set fixed by the integrator between held-set events (boundary_held_fix): the
    riding law is then one linear system, smooth in z, with no search. */
 static _Thread_local int {P}r_fixed_on = 0;
@@ -306,8 +313,8 @@ static int {P}r_solve(int id, double t, const double* z, const double* p, double
         solved = 1;
     }}
     for (int start = 0; start < 2 && !solved; ++start) {{
-        if (start == 0 && !{P}r_warm_ok[id]) continue;
-        for (int i = 0; i < {m}; ++i) held[i] = start == 0 ? {P}r_warm[id][i] : 0;
+        if (start == 0 && {P}r_warm_id[id % {P}R_WARM_SLOTS] != id + 1) continue;
+        for (int i = 0; i < {m}; ++i) held[i] = start == 0 ? {P}r_warm[id % {P}R_WARM_SLOTS][i] : 0;
         rc = 0;
         for (int iter = 0; iter < {4 * m + 8} && !solved; ++iter) {{
             int which, to;
@@ -354,8 +361,8 @@ static int {P}r_solve(int id, double t, const double* z, const double* p, double
         }}
         if (!solved) return 4;     /* these limits cannot be ridden within the bounds */
     }}
-    for (int i = 0; i < {m}; ++i) {{ u[i] = v[i]; {P}r_warm[id][i] = held[i]; }}
-    {P}r_warm_ok[id] = 1;
+    for (int i = 0; i < {m}; ++i) {{ u[i] = v[i]; {P}r_warm[id % {P}R_WARM_SLOTS][i] = held[i]; }}
+    {P}r_warm_id[id % {P}R_WARM_SLOTS] = id + 1;
     for (int k = 0; k < {nr}; ++k) mr[k] = 0.0;
     for (int i = 0; i < s; ++i) {{
         const int c = {P}r_set[id][i];
@@ -381,7 +388,7 @@ int {P}boundary_held_start(int c, double t, const double* z, const double* p, in
     int rc = {P}r_solve(c, t, z, p, u, ms, mr, K, piv, c0, &d);
     {P}r_fixed_on = saved;
     if (rc) return rc;
-    for (int i = 0; i < {m}; ++i) held[i] = {P}r_warm[c][i];
+    for (int i = 0; i < {m}; ++i) held[i] = {P}r_warm[c % {P}R_WARM_SLOTS][i];
     return 0;
 }}
 
@@ -436,14 +443,14 @@ int {P}boundary_held_flip(int c, double t, const double* z, const double* p, int
         if (rc) return rc;
         start[k] = (hi[k] - v[k] < v[k] - lo[k]) ? 1 : -1;
     }}
-    for (int i = 0; i < {m}; ++i) {P}r_warm[c][i] = start[i];
-    {P}r_warm_ok[c] = 1;
+    for (int i = 0; i < {m}; ++i) {P}r_warm[c % {P}R_WARM_SLOTS][i] = start[i];
+    {P}r_warm_id[c % {P}R_WARM_SLOTS] = c + 1;
     {P}r_fixed_on = 0;
     int rc = {P}r_solve(c, t, z, p, u, ms, mr, K, piv, c0, &d);
     if (rc) return rc;
     int same = 1;
     for (int i = 0; i < {m}; ++i) {{
-        held[i] = {P}r_warm[c][i];
+        held[i] = {P}r_warm[c % {P}R_WARM_SLOTS][i];
         if (held[i] != old[i]) same = 0;
     }}
     if (same) return 5;              /* no change: the caller integrates without events */

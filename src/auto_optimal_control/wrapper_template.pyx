@@ -108,7 +108,9 @@ EXACT_ARCS = {{exact_arcs}}     # per constraint: boundary-arc kernels generated
 SINGULAR_ARCS = {{singular_arcs}}   # per switching function: singular-arc kernels generated
 # Sets of limits ridden at once, as constraint indices: the boundary-arc
 # kernels of set k have id N_CONSTRAINTS + k (ids below that are single limits).
-BOUNDARY_SETS = {{boundary_sets}}
+_SETS_RAW = {{boundary_sets}}
+BOUNDARY_SETS = tuple(tuple(s) for s in _SETS_RAW.split(b"\xff")) if _SETS_RAW else ()
+_SET_IDS = {tuple(s): k for k, s in enumerate(BOUNDARY_SETS)}
 N_CONTROLS = NU
 N_MULTIPLIERS = NNU
 N_RESIDUALS = NR
@@ -1327,9 +1329,9 @@ def boundary_set(constraints):
                        for c in constraints))
     if len(idx) == 1:
         return _exact(idx[0])
-    for k, s in enumerate(BOUNDARY_SETS):
-        if tuple(s) == idx:
-            return NC + k
+    k = _SET_IDS.get(idx)
+    if k is not None:
+        return NC + k
     raise ValueError(f"no exact arc rides {[CONSTRAINT_NAMES[i] for i in idx]} at once "
                      "(derive(problem, simultaneous=...) lists the sets in boundary_sets)")
 

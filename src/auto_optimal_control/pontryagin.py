@@ -764,8 +764,11 @@ def _rides_at_run_time(problem, derivatives_of):
 
 
 # Sets of limits ridden at once, solved at run time, beyond which a larger set size is
-# not derived by default (the table of sets goes into the compiled module).
-MAX_RUN_TIME_SETS = 4096
+# not derived by default (the table of sets goes into the compiled module, a few bytes
+# per set). Rate and torque limits on six joints have 94,424 sets of two to six: an
+# optimal motion can ride as many limits as there are controls, and a route that meets
+# a set it cannot ride stalls against it.
+MAX_RUN_TIME_SETS = 1 << 17
 
 
 def _sets_at_run_time(root_of, n_controls, simultaneous, orders=()):
@@ -774,7 +777,7 @@ def _sets_at_run_time(root_of, n_controls, simultaneous, orders=()):
     Limits of order 3 or more are left out: they are only touched, never ridden.
     ``simultaneous=None`` takes sets as large as the controls allow, but stops
     before the size whose sets would take the count past :data:`MAX_RUN_TIME_SETS`
-    (with rate and torque limits on six joints, sets of three)."""
+    (with rate and torque limits on six joints, every size up to six)."""
     by_root = {}
     for c, k in enumerate(root_of):
         if orders and orders[k] >= 3:

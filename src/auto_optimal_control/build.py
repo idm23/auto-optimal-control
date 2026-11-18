@@ -98,6 +98,16 @@ def _fni_include():
     return os.path.dirname(os.path.dirname(fast_numerical_integration.__file__))
 
 
+def _encode_sets(pmp):
+    """The sets of limits ridden at once as one bytes literal: each set's constraint
+    indices, the sets separated by 255. A tuple of tuples written out in the module's
+    source costs the C compiler memory in proportion to its length (a six-joint arm
+    with rate limits has about 94,000 sets); a bytes constant costs nearly nothing."""
+    if len(pmp.path_constraints) >= 255:
+        raise ValueError("at most 254 path constraints: sets of limits are encoded in bytes")
+    return b"\xff".join(bytes(idx) for idx, _ in pmp.boundary_sets)
+
+
 def _render_wrapper(pmp, prefix, header_name, macros):
     params = tuple(s.name for s in pmp.params)
     values = {
@@ -109,7 +119,7 @@ def _render_wrapper(pmp, prefix, header_name, macros):
         "constraint_orders": repr(tuple(c.order for c in pmp.path_constraints)),
         "exact_arcs": repr(tuple(c.boundary is not None for c in pmp.path_constraints)),
         "singular_arcs": repr(tuple(a is not None for a in pmp.singular_arcs)),
-        "boundary_sets": repr(tuple(idx for idx, _ in pmp.boundary_sets)),
+        "boundary_sets": repr(_encode_sets(pmp)),
         "NC1": str(max(macros["NC"], 1)),
         "NM1": str(max(macros["NM"], 1)),
         "NK1": str(max(macros["NK"], 1)),
