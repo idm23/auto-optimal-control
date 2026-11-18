@@ -33,6 +33,20 @@ def test_sets_pair_the_joints_and_skip_exclusive_bounds():
     assert derive(examples.two_link_arm(), simultaneous=1).boundary_sets == ()
 
 
+def test_run_time_sets_reach_as_many_limits_as_controls():
+    # Rate and torque limits on six joints: twelve roots of two limits each. An optimal
+    # motion can ride a limit per control at once (vgoal0@80 rides a torque and three
+    # rates), so every size up to six is derived.
+    from math import comb
+
+    from auto_optimal_control.pontryagin import _sets_at_run_time
+    root_of = tuple(k for k in range(12) for _ in range(2))
+    sets = _sets_at_run_time(root_of, 6, None)
+    assert len(sets) == sum(comb(12, k) * 2 ** k for k in range(2, 7)) == 94424
+    assert max(len(s) for s, _ in sets) == 6
+    assert all(len({root_of[c] for c in s}) == len(s) for s, _ in sets)
+
+
 def test_set_control_rides_both_limits(arm):
     """At the set's control both torques are stationary: g1' = g2' = 0."""
     k = arm.kr
