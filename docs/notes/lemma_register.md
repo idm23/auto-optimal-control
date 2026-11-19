@@ -329,9 +329,11 @@ margin is zero exactly when the corner is the only control that holds $g$.
   isolated values of $s$ (a hypersurface $\Sigma$ in the space of route parameters).
 - **(ii) Both orders meet there.** The joint point solves $R_{\mathcal A}$ and
   $R_{\mathcal B}$ at $\delta = 0$. In $\mathcal A$ at zero width, the arc $\{A\}$
-  starts from $\lambda' = \lambda^- - \pi_A \nabla g_A$. The free control
-  $u = -R^{-1} G^\top \lambda^-$ satisfies the riding law there:
-  - its stationarity, since $R u + G^\top \lambda' + \mu_A a_A = (\mu_A - \pi_A) a_A = 0$;
+  starts from $\lambda' = \lambda^- - \pi_A \nabla g_A$. The free control $u$
+  (interior, so stationary for $\lambda^-$) satisfies the riding law there:
+  - its stationarity, since
+    $R u + r_0 + G^\top \lambda' + \mu_A a_A = (\mu_A - \pi_A) a_A = 0$, where $r_0$ is the
+    cost's linear term in $u$;
   - and $\dot g_A = 0$, which holds at the joint point.
 
   So $\mathcal A$'s entry row for $A$ holds, and $B$'s entry rows are the joint ones.
@@ -340,7 +342,8 @@ margin is zero exactly when the corner is the only control that holds $g$.
   the joint point. By the implicit function theorem each order has a unique smooth
   branch through it, and the gaps along them are
   $\delta_{\mathcal A}(s) = \alpha (s - s^*) + O(|s - s^*|^2)$ and
-  $\delta_{\mathcal B}(s) = \beta (s - s^*) + O(|s - s^*|^2)$.
+  $\delta_{\mathcal B}(s) = \beta (s - s^*) + O(|s - s^*|^2)$. Take the crossing
+  transversal: $\alpha, \beta \ne 0$.
   - If $\alpha\beta > 0$, exactly one order is valid on each side of $s^*$, and it
     continues the other: E5.
   - If $\alpha\beta < 0$, both orders are valid on one side, and neither has a
