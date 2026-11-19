@@ -18,21 +18,20 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-19, on the branch that handles junctions at
-one instant to rounding (sampling, ordering and zero-width segments). Rules R1, R2, R15, R16, R20, R25 and R26 are turned on (the release's
+The data shown is from the census of 2026-11-19, on the branch that adds Rule R37
+(off by default, so the release's answers are those of `main`). Rules R1, R2, R15, R16, R20, R25 and R26 are turned on (the release's
 configuration), with held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has six routes: two draws of the offsets and sequential births, each
 also at ten times the secondary weight (R24). The routes run in parallel, one case at a
 time, on 8 physical cores. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-69 of the 90 cases solve, all under 60 s: the median is 12.7 s and the slowest 56.8 s.
-Goal 2 at 70% finishes near the cap, and which side of it it lands on varies from run to
-run: it took 60.1 s, 58.6 s, 60.1 s, 58.9 s, 59.5 s, 60.2 s, 59.7 s, 59.4 s and 60.0 s on
-the last nine. Rest 14 is new (17.8 s): its rate arcs enter and leave together by
-symmetry, which the route now handles. So is goal 7 at 70% (34.1 s).
+68 of the 90 cases solve, all under 60 s: the median is 12.7 s and the slowest 55.5 s.
+Goal 2 at 70% (torques only) missed the cap at 60.1 s, after 55.9 s last time; a probe ran
+beside the census for about ten seconds early in this run. The rate-limited goal 2 at 70%
+also finishes near the cap, and which side of it it lands on varies from run to run.
 
-- **`goal` and `rest`:** all 45 solve.
+- **`goal` and `rest`:** 44 of 45: all but goal 2 at 70%.
 - **`vgoal`:** 19 of 30: nine at 90% (all but goal 0), seven at 80% (goals 0, 1, 2, 5,
   6, 7 and 8) and three at 70% (goals 6, 7 and 8).
 - **`vrest`:** 5 of 15: rest 0 and rest 9 (rates at 90%), rest 7 (at 80%), and rests 2

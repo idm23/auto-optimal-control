@@ -389,13 +389,21 @@ class SingleShooting:
     #: keeps it (the chord method), ``"broyden"`` updates it after each accepted step.
     chord_updates = None
 
-    def solve_chord(self, guess, tol=1e-10, max_iterations=12, contraction=0.5):
+    def solve_chord(self, guess, tol=1e-10, max_iterations=12, contraction=0.5,
+                    reject_theta=None):
         """Newton with one Jacobian reused while the residual falls by ``contraction``.
 
         On a path with a good predictor a step needs one Jacobian and a few
         residuals, and a hopeless one stops after a fresh Jacobian fails to
         contract, where a quasi-Newton iteration would use its whole budget.
-        Returns a ``ShootingSolution`` (``max_violation`` is not computed)."""
+        Returns a ``ShootingSolution`` (``max_violation`` is not computed).
+
+        The solution carries ``contraction``: Newton's first contraction from the guess,
+        ``theta = ||J^-1 R(v1)|| / ||J^-1 R(v0)||`` with the Jacobian at the guess (the
+        affine-covariant estimate of half the Kantorovich quantity ``omega ||dv0||``;
+        Deuflhard 2004, sec. 2.1). With ``reject_theta``, a first step that contracts
+        less than that (or does not propagate) ends the iteration at the guess, with
+        ``too_far`` set: a continuation reads this as a step too long for Newton."""
         from scipy.linalg import lu_factor, lu_solve
         v = np.asarray(guess, dtype=float).copy()
         nfev = 1
@@ -406,6 +414,7 @@ class SingleShooting:
         R, J = start
         err = float(np.linalg.norm(R))
         lu = None if not np.isfinite(err) else lu_factor(J)
+        theta, first = None, True
         for _ in range(max_iterations):
             if err < tol or lu is None:
                 break
@@ -415,6 +424,22 @@ class SingleShooting:
             Rt = self._safe_residual(v + dv)
             nfev += 1
             trial = float(np.linalg.norm(Rt))
+            if first:
+                first = False
+                size = float(np.linalg.norm(dv))
+                if np.isfinite(trial) and trial < tol:
+                    # Converged in one step: the corrections are at the integration's
+                    # noise, where their ratio says nothing; the residuals' ratio is a
+                    # bound on theta's order.
+                    theta = trial / err
+                elif np.isfinite(trial) and size > 0:
+                    theta = float(np.linalg.norm(lu_solve(lu, -Rt))) / size
+                elif size > 0:
+                    theta = float("inf")
+                if reject_theta is not None and theta is not None and not theta <= reject_theta:
+                    sol = self._chord_result(v, err, nfev)
+                    sol.contraction, sol.too_far = theta, True
+                    return sol
             if np.isfinite(trial) and trial < contraction * err:
                 if self.chord_updates == "broyden":
                     # Broyden's update: the secant condition J dv = dR at the cost of one
@@ -450,6 +475,12 @@ class SingleShooting:
                 break
             R, J = fresh_RJ
             lu, fresh = lu_factor(J), True
+        sol = self._chord_result(v, err, nfev, tol)
+        sol.contraction, sol.too_far = theta, False
+        return sol
+
+    def _chord_result(self, v, err, nfev, tol=0.0):
+        """:meth:`solve_chord`'s result at ``v`` (``max_violation`` is not computed)."""
         x0, lam0, nu, tf = self.unpack(v)
         return ShootingSolution(v=v, x0=x0, lam0=lam0.copy(), nu=nu.copy(), t0=self.t0, tf=tf,
                                 residual_norm=err, success=err < tol, nfev=nfev, result=None,

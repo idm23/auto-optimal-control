@@ -1910,6 +1910,77 @@ where it stalled at 17 s or 19 s before (by sampling, then by the zero width). T
 twelve structural stalls of the census page, on the first route with 120 s, are where
 they were: none of them was held by these.
 
+### Where a route's time goes, and Newton's contraction as the step: Rule R37
+
+*Where the time goes.* Rest 11 on the first route (release rules) solves in 227 s. The
+integrator is not the cost: 266,607 arc integrations average 0.58 ms each. What costs is
+their number. The route makes 621 path solves and 20,986 evaluations of the shooting
+function, and 233 of the solves fail (78 s). MINPACK, the fallback after a chord solve
+ends close, uses about 66 evaluations a solve, 166 s in all. Most failures sit on stretches
+where the structure does not change: on one with 20 junctions, steps of 3 to 5% of the leg
+alternate between converging and failing for 30 s of route. The step control halved after a
+failure and grew by 1.5 after a success, so it settled into that sawtooth, and each
+failure cost a full solve.
+
+*The quantity.* Newton's first contraction from a step's predictor,
+$\Theta = \|J^{-1} R(v_1)\| / \|J^{-1} R(v_0)\|$ with the Jacobian at the predictor,
+estimates half the Kantorovich quantity $\omega \|\Delta v_0\|$ (Deuflhard 2004, sec. 2.1,
+affine-covariant form). The predictor's error grows like $h^p$ in the step: $p = 2$ for
+the secant predictor and $p = 1$ from the last solution. So $\Theta \approx c\,h^p$, and the
+step that gives a target contraction $\Theta^*$ is $h\,(\Theta^*/\Theta)^{1/p}$ (Deuflhard's
+adaptive pathfollowing, sec. 5.1).
+
+*Rule R37* (`Homotopy.contraction_steps`). The chord solve reports $\Theta$. Above
+$\Theta = 1/2$ the step is too long for Newton: the solve ends after one Jacobian and one
+residual, no fallback solver is run, and the step is cut to $h\,(1/4\,/\,\Theta)^{1/p}$,
+clipped to $[0.1h, 0.5h]$. After a success that kept its structure, the next step is
+$h\,(1/4\,/\,\Theta)^{1/p}$, clipped to $[0.5h, 2h]$. It only steers: every step is
+still solved to the path tolerance and settled as before.
+
+*Two corrections, found on the first prototype.*
+- After a predictor that is nearly exact, both corrections are at the integration's noise.
+  Their ratio is then about 1 whatever the step, and the rule shrank good steps (goal 5
+  at 70%: 581 steps instead of 98). When the first step already reaches the tolerance,
+  $\Theta$ is now the ratio of the residuals, which bounds its order.
+- The one-limit-at-a-time legs end at $\mathrm{d}s_{\min} = 10^{-3}$. With the rule's floor
+  there too, a rejected step went straight to the leg's end without the fallback that
+  used to rescue it (rest 1 stalled at $|o| = 18.9$). The rule now stops steering within
+  three halvings of the leg's $\mathrm{d}s_{\min}$ ($8\,\mathrm{d}s_{\min}$), so the old
+  behaviour finishes each leg.
+
+*Result, first route.* Release rules plus the rounding fixes above, 300 s, four cases
+at once:
+
+| case | without R37 | with R37 |
+|---|---|---|
+| goal 2 at 70% | 60.2 s | 54.8 s |
+| goal 4 at 80% | unsolved ($\lvert o\rvert = 0.61$) | 55.1 s |
+| goal 5 at 70% | unsolved (0.05) | 141.4 s |
+| rest 3 | unsolved (8.1) | 147.5 s |
+| goal 7 at 70% | 287.6 s | unsolved (2.18) |
+| goal 9 at 80% | 251.1 s | unsolved (0.73) |
+| rest 1, rest 2, rest 8, rest 11 | unsolved | unsolved |
+
+Steps that do not converge fall from 1,472 to 273 over the ten cases. Where a case is
+decided, R37 wins four and loses two. Single runs move cases on and off by chance (rest 11
+solved in 77 s with R37 and 193 s without it on the code before the rounding fixes), so
+the census page decides.
+
+*Census page (release configuration plus R37, 60 s cap): 67 of 90, against 69 without it.*
+Goal 4 at 80% is gained (57.5 s). Rests 2, 9 and 14 are lost, each at the cap, and the 66
+common solves take 7% longer (956 s to 1021 s). R37 stays off.
+
+*Why it cannot be right here.* The theory needs a residual with a Lipschitz Jacobian, and
+the route's residual is only piecewise smooth: the held set on a riding arc changes at
+events (R22). On rest 14, $\Theta$ is about $10^{-5}$ for steps of $1.2 \times 10^{-3}$ and
+20 to 80 for steps of $2.4 \times 10^{-3}$ from the same point, with a start residual of
+about $10^{-2}$. That is a kink crossed, not the $h^2$ growth of a smooth predictor. R37
+reads it as distance and cuts the step by ten, so rest 14 takes 351 steps instead of 65
+(16.8 s against 11.9 s alone, past the cap on the page). Where the residual is smooth
+the rule does what the theory says (rest 11). A version for this residual would need to
+tell a kink from distance, for instance from where the held-set events fall in the step,
+and that is not done.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

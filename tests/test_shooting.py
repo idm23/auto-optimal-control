@@ -177,6 +177,53 @@ def test_multistart_and_continuation(compiled):
                      1.0, [2.0], sol.v)
 
 
+def _chord_stub(fun, jac):
+    """A SingleShooting whose residual is ``fun`` (Jacobian ``jac``): only what
+    solve_chord reads."""
+    shoot = SingleShooting.__new__(SingleShooting)
+    shoot.t0 = 0.0
+    shoot.unpack = lambda v: (v, np.zeros(1), np.zeros(0), 1.0)
+    calls = {"jac": 0, "res": 0}
+
+    def try_(v):
+        calls["jac"] += 1
+        return fun(v), jac(v)
+
+    def res(v):
+        calls["res"] += 1
+        return fun(v)
+
+    shoot._try, shoot._safe_residual = try_, res
+    return shoot, calls
+
+
+def test_chord_contraction_reads_the_distance_to_the_root():
+    """Rule R37's measurement: Newton's first contraction from a guess at distance d
+    of a root of a smooth map is omega d / 2 to first order (Kantorovich), so it halves
+    with d, and a guess too far for Newton is turned back after one Jacobian and one
+    residual, with the guess unchanged."""
+    a = np.array([[2.0, 0.3], [0.1, 1.0]])
+    fun = lambda v: a @ v + np.array([v[0] ** 2, v[0] * v[1]])
+    jac = lambda v: a + np.array([[2 * v[0], 0.0], [v[1], v[0]]])
+    thetas = []
+    for d in (1e-2, 5e-3):
+        shoot, _ = _chord_stub(fun, jac)
+        sol = shoot.solve_chord(np.array([d, -d]), tol=1e-12)
+        assert sol.success and not sol.too_far
+        thetas.append(sol.contraction)
+    assert 0 < thetas[1] < thetas[0] < 0.05
+    assert thetas[0] / thetas[1] == pytest.approx(2.0, rel=0.05)
+    shoot, calls = _chord_stub(fun, jac)
+    guess = np.array([-0.9, 0.5])
+    sol = shoot.solve_chord(guess, tol=1e-12, reject_theta=0.5)
+    assert sol.too_far and not sol.success and sol.contraction > 0.5
+    np.testing.assert_array_equal(sol.v, guess)
+    assert calls == {"jac": 1, "res": 1}
+    # Without the threshold the same guess is iterated as before.
+    shoot, _ = _chord_stub(fun, jac)
+    assert not shoot.solve_chord(guess, tol=1e-12).too_far
+
+
 def test_a_segment_of_rounding_width_samples_without_raising():
     """Two junctions at one instant leave a segment one float wide (or of zero width):
     linspace repeats a time there, which an integrator refuses. The segment is then its
