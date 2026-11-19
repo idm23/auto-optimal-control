@@ -388,9 +388,42 @@ margin is zero exactly when the corner is the only control that holds $g$.
   - Neither satisfies the hypothesis "control interior". In goal 0 at 70%, jerks 2 to 4
     are at their lower bounds, on joints other than the pair's own controls. In goal 4
     at 70%, jerk 4, `tau4_max`'s own control, is at its upper bound: M's corner entry.
-- **Next.** Extend (i) to (iii) to a held set that is the same on all four arcs at $t^*$,
-  with B's KKT matrix for a held set in place of interior controls. That covers goal 0
-  at 70%. The corner (goal 4 at 70%) needs its own version, from K and M.
+- **(iv) Held controls.** "Control interior" can be relaxed to "the same held set
+  $\mathcal H$ on all four arcs at $t^*$". The held controls sit at their bounds, with
+  strictly positive bound multipliers, so $\mathcal H$ is locally constant. Write $F$
+  for the free controls. Then:
+  - J′ holds as it is, since it needs only a convex $U$.
+  - The free law and every riding law are stationary in $u_F$ only, with $u_{\mathcal H}$
+    fixed: $\big(R u + r_0 + G^\top \lambda + \sum_c \mu_c a_c\big)_F = 0$.
+  - The proof of (i) runs over the components in $F$:
+    $(\mu_A - \pi_A)(a_A)_F + (\mu_B - \pi_B)(b_B)_F = 0$. So $\mu_A = \pi_A$ and
+    $\mu_B = \pi_B$ follow whenever $(a_A)_F$ and $(b_B)_F$ are independent.
+  - (ii) and (iii) are unchanged.
+  - The independence is B's rank condition for the pair restricted to $F$. It holds when
+    the pair's own controls are free and distinct, since a positive definite mass matrix
+    makes the $2 \times 2$ minor on those components nonsingular. It can also hold for two
+    limits of one joint.
+  - Exits follow from entries by exchanging the sides, and a hand-over by combining the
+    two.
+- **Applied, with R43.**
+  - *Goal 0 at 70%.* Both limits are on joint 5. Its rate gives $b_B = e_5$ over the
+    jerks, and its torque gives $a_A = M_{5,:}$. Jerks 2 to 4 are held, so
+    $F = \{1, 5, 6\}$. $(a_A)_F$ and $(b_B)_F$ are independent unless
+    $M_{51} = M_{56} = 0$, which is to check at $t^*$ and is not the generic case.
+    Under that check and the held set's constancy (not yet checked on both sides of
+    $t^*$), (iv) applies and the fold is genuine: no structure with the two exits
+    adjacent continues the route there.
+  - *Goal 4 at 70%.* The entering limit's own jerk (jerk 4 for `tau4_max`) is held. The
+    multiplier rows lose their meaning (M: a corner entry, where $\dot g$ under the
+    arriving control is the margin). This is outside (iv) and needs a corner version
+    from K and M.
+- **What a genuine fold asks of the route.** The solution curve continues on the other
+  order's branch with $s$ decreasing, until another event changes the structure. Steps
+  in $s$ cannot follow it, but arclength continuation can (Allgower and Georg): take the
+  other order, and step back along its branch. This only steers. Whether the turned
+  curve reaches $s = 1$ is the global question of homotopy path-following: it does when
+  the solution set is a bounded regular one-manifold through the start. That is not
+  shown here.
 - **Used by.** The diagnosis of the entry swaps.
 
 ### K. A forced exit is a corner, and its rate row is the margin — proved, relative to S1
