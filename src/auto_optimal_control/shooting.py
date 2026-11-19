@@ -1001,6 +1001,25 @@ class MultiArcShooting(SingleShooting):
     def _segment(self, kind, c, ta, dta, z, D, tb, dtb, jac, cost=False, flags=None):
         """Propagate a free (``kind is None``), boundary or singular arc; chain ``D = dz/dv``."""
         k, p = self.kernels, self.params
+        if tb == ta:
+            # Two events at one instant (touches seeded at one sample, as by symmetry):
+            # the flow over no time is the identity, and its derivatives in the end
+            # times are +-F there, the limit of the positive widths.
+            if kind is None:
+                F = (self._chains.rhs(z, p) if self._chains is not None and not flags
+                     else k.rhs_arc(ta, z, p, self._free_arc(ta, z, flags or {})
+                                    if k.N_MODES else None))
+            elif kind == "boundary":
+                F = k.boundary_rhs(c, ta, z, p)
+            else:
+                F = k.singular_rhs(c, ta, z, p)
+            F = np.asarray(F, dtype=float)
+            r = {"t": ta, "z": np.array(z, dtype=float), "stm": np.eye(len(z)) if jac else None,
+                 "cost": 0.0 if cost else None, "dz_dt1": F, "nfev": 0, "status": 0,
+                 "arc0": self._free_arc(ta, z, flags or {}) if kind is None else None}
+            if jac:
+                D = D + np.outer(F, dtb - dta)
+            return r, D
         if not tb > ta and not (self.backward_segments and tb < ta):
             raise ShootingError(f"arc times out of order: {ta} then {tb}", "negative_width")
         tolerance = {"stm_rtol": self.jacobian_rtol} if jac else {}
