@@ -2003,6 +2003,48 @@ first reorder still has `w1_max` and `w5_max` crossed by $8 \times 10^{-8}$, and
 is accepted (residual $6 \times 10^{-12}$). On the census pages since the rounding fixes, this
 rejection is the only one among the unsolved cases besides goal 0 at 90%'s violations:
 rest 8 on each, and rest 14 on the page with R37.
+### Order-2 junctions: Lemma H2's rows in place of H continuity (Rule R43)
+
+*Where the time goes inside a solve.* On rest 1 (first route, release rules) a path solve
+that converges takes a median of 5 fresh Jacobians and 9 residuals, and its residual falls
+by about 4 per Jacobian: 1e-1, 1e-4, 3e-5, 8e-6, 2e-6, 5e-7. Newton converges like that,
+linearly, either on a wrong Jacobian or on a multiple root. Against central differences at a
+converged path solution, every segment's STM is right to $10^{-7}$ (free arcs in closed
+form, riding arcs with their held-set events, a set of two limits ridden at once), and so
+are the gradients of every set's $H$. The rows whose Jacobian disagrees, by up to 28%, are
+all one kind: $H$ continuity at the exit of an order-2 (rate) arc.
+
+*Why.* At a tangential junction the control is continuous (Lemma J), and
+$H(z, u_{\rm arc}) - H(z, u_{\rm free}) \approx \tfrac12 (u_{\rm arc} - u_{\rm free})^\top
+R\,(u_{\rm arc} - u_{\rm free})$ is quadratic in the mismatch. That is a double root. Newton on
+it converges linearly, and differences across it are dominated by the curvature. The
+shooting already replaces $H$ continuity at order-1 junctions by simple-root rows (R7:
+$\mu = 0$ at an exit, $\mu = \pi$ at an entry), and kept it at every order-2 junction.
+
+*Rule R43* (`MultiArcShooting.order2_rows_default`). An order-2 arc's junctions take
+Lemma H2's rows: $\mu(t_{\rm out}^-) = 0$ at the exit and $\mu(t_{\rm in}^+) = \pi_2$ at the
+entry, with $\pi_2$ the coefficient of $\nabla\dot g$ in the entry's jump. H2 proves both
+for the shooting's formulation (indirect form, $\lambda$ continuous at the exit), with no
+corner exception. They replace one row each, so the count is unchanged. Acceptance is
+unchanged too: the exact solution is judged as before.
+
+*Result.* The same path solves now take one Jacobian and one to three residuals, the
+residual falling by $10^3$ to $10^4$ a step. On the first route (release rules plus R43,
+300 s, four cases at once):
+
+| case | before | with R43 |
+|---|---|---|
+| goal 2 at 70% | 60 s | 28.9 s |
+| rest 11 | 193 to 227 s | 41.8 s |
+| goal 4 at 80% | 88 s, or unsolved | 46.9 s |
+| rest 3 | 144 s, or unsolved | 65.4 s |
+| rest 1 | 222 s | 81.1 s |
+| goal 5 at 70% | 105 s, or unsolved | 232.7 s |
+| rest 12 | unsolved | 235.3 s |
+
+Goals 9 at 80%, 0, 1 and 4 at 70%, 3 at 80%, and rests 2, 10 and 13 still stall. The jerk axis
+riding its rate limit gives the same extremal with either row (final time to $10^{-10}$,
+initial costates to $10^{-8}$), with symbolic arcs and with arcs ridden at run time.
 
 *Census page (release configuration plus R32 and R41, 60 s cap): 71 of 90, against 69.*
 Rest 8 is new (46.3 s, R41), and so is goal 0 at 90% (14.1 s, R32: its exact solution
