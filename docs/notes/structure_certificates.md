@@ -2003,6 +2003,7 @@ first reorder still has `w1_max` and `w5_max` crossed by $8 \times 10^{-8}$, and
 is accepted (residual $6 \times 10^{-12}$). On the census pages since the rounding fixes, this
 rejection is the only one among the unsolved cases besides goal 0 at 90%'s violations:
 rest 8 on each, and rest 14 on the page with R37.
+
 ### Order-2 junctions: Lemma H2's rows in place of H continuity (Rule R43)
 
 *Where the time goes inside a solve.* On rest 1 (first route, release rules) a path solve
