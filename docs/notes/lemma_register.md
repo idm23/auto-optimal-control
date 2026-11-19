@@ -385,9 +385,11 @@ margin is zero exactly when the corner is the only control that holds $g$.
     $10^5$. Goal 0 at 70% has two exits, `w5_max` and `tau5_max`: $\alpha = -0.011$,
     $\beta = +0.062$. Goal 4 at 70% has the exit of `w5_max` and the entry of
     `tau4_max`: $\alpha = -1.1$, $\beta = +2.1$. Both show the fold signature.
-  - Neither satisfies the hypothesis "control interior". In goal 0 at 70%, jerks 2 to 4
-    are at their lower bounds, on joints other than the pair's own controls. In goal 4
-    at 70%, jerk 4, `tau4_max`'s own control, is at its upper bound: M's corner entry.
+  - The free law evaluated at $t^*$ has jerks at their bounds in both cases, but the
+    motion is not on the free law there. It rides other limits through $t^*$: `w2_min`,
+    `w3_min` and `w4_min` in goal 0 at 70%, `w4_max` in goal 4 at 70%. The riding
+    controls of all four arcs around $t^*$ hold no jerk at a bound. The pair's control
+    gradients are independent: normalized $\sigma_{\min}$ 0.37 and 0.99.
 - **(iv) Held controls.** "Control interior" can be relaxed to "the same held set
   $\mathcal H$ on all four arcs at $t^*$". The held controls sit at their bounds, with
   strictly positive bound multipliers, so $\mathcal H$ is locally constant. Write $F$
@@ -405,18 +407,26 @@ margin is zero exactly when the corner is the only control that holds $g$.
     limits of one joint.
   - Exits follow from entries by exchanging the sides, and a hand-over by combining the
     two.
-- **Applied, with R43.**
-  - *Goal 0 at 70%.* Both limits are on joint 5. Its rate gives $b_B = e_5$ over the
-    jerks, and its torque gives $a_A = M_{5,:}$. Jerks 2 to 4 are held, so
-    $F = \{1, 5, 6\}$. $(a_A)_F$ and $(b_B)_F$ are independent unless
-    $M_{51} = M_{56} = 0$, which is to check at $t^*$ and is not the generic case.
-    Under that check and the held set's constancy (not yet checked on both sides of
-    $t^*$), (iv) applies and the fold is genuine: no structure with the two exits
-    adjacent continues the route there.
-  - *Goal 4 at 70%.* The entering limit's own jerk (jerk 4 for `tau4_max`) is held. The
-    multiplier rows lose their meaning (M: a corner entry, where $\dot g$ under the
-    arriving control is the margin). This is outside (iv) and needs a corner version
-    from K and M.
+- **(v) A background riding set.** Limits ridden through $t^*$ (a set $S_0$ on every
+  arc) change nothing in (i) to (iii). "Free" becomes "riding $S_0$", and the rank
+  condition is B's for all of $S_0 \cup \{A, B\}$. For a hand-over (one exit, one entry)
+  the rows of both orders hold at the joint point:
+  - the control and $\lambda^+$ are the same on the joint arc and on the arc after the
+    exit;
+  - subtracting the two stationarities leaves
+    $\sum_c (\mu_c - \mu_c')\, a_c + \mu_{\rm exit}\, a_{\rm exit} = 0$ over $S_0$ and the
+    entering limit;
+  - independence then gives $\mu_{\rm exit} = 0$, the exit row, in both orders.
+- **Applied, with R43.** Goal 0 at 70% (two exits of joint 5's limits, over riding
+  `w2_min`, `w3_min`, `w4_min`) and goal 4 at 70% (`w5_max` leaving where `tau4_max`
+  enters, over riding `w4_max`) satisfy the hypotheses:
+  - interior riding controls;
+  - B's rank, checked on the pair;
+  - nonsingular Jacobians, raw condition 1.7e11 and 4.5e11 against about 1e15 before
+    R43.
+
+  And $\alpha\beta < 0$. Under X they are genuine folds: no structure with the pair
+  adjacent continues the route forward there.
 - **What a genuine fold asks of the route.** The solution curve continues on the other
   order's branch with $s$ decreasing, until another event changes the structure. Steps
   in $s$ cannot follow it, but arclength continuation can (Allgower and Georg): take the
