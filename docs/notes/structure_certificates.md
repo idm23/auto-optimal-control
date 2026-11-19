@@ -2004,6 +2004,12 @@ is accepted (residual $6 \times 10^{-12}$). On the census pages since the roundi
 rejection is the only one among the unsolved cases besides goal 0 at 90%'s violations:
 rest 8 on each, and rest 14 on the page with R37.
 
+*Census page (release configuration plus R32 and R41, 60 s cap): 71 of 90, against 69.*
+Rest 8 is new (46.3 s, R41), and so is goal 0 at 90% (14.1 s, R32: its exact solution
+violated a limit off its arcs by $2.5 \times 10^{-7}$, above the check's $10^{-7}$). Nothing
+is lost, and the 69 common solves take the same time (1071 s and 1076 s). Both rules join
+the release configuration.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
