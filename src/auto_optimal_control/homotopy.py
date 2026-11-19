@@ -2069,8 +2069,17 @@ class Homotopy:
         return True
 
     def _coincide(self):
-        """Rule R38's tolerance (of T) for coincident junctions, 0 when it is off."""
-        return float(self.coincide_tol) if getattr(self, "coincident_junctions", False) else 0.0
+        """The tolerance (of T) below which junctions of different limits coincide, in
+        either order: Rule R38's ``coincide_tol`` when it is on, and never less than the
+        integration's ``rtol``. Two junctions crossed by ``d`` leave a segment of width
+        ``-d`` integrated backward, which moves the motion by ``O(d |f|)``: below
+        ``rtol T`` that is inside the integration's own error, so no order of the two
+        can be told from the other (by symmetry, rate arcs of a rest-to-rest motion
+        enter and leave at one instant, and their computed times differ by rounding)."""
+        floor = float(getattr(self, "options", {}).get("rtol", 0.0))
+        if getattr(self, "coincident_junctions", False):
+            return max(float(self.coincide_tol), floor)
+        return floor
 
     def _retire(self, shoot, v):
         """The structure without arcs that have died: a boundary arc shrunk to
