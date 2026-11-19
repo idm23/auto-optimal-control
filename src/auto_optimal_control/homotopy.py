@@ -351,6 +351,13 @@ class Homotopy:
         #: them crossed by rounding, which R30 chased step after step.
         self.coincident_junctions = False
         self.coincide_tol = 1e-8
+        #: Rule R39 (a hand-over, Lemma K's forced exit): when R30's reorder of two
+        #: junctions of different limits crosses back, each order's solution pushes
+        #: them past each other, so they are one junction. They are tied: the earlier
+        #: event's own row gives way to its time equal to the next one's, and the tie
+        #: stays wherever the two events are adjacent. Acceptance judges the result.
+        self.handover_ties = False
+        self._ties = set()
         #: Rule R31 (V1's jump monitor on the route): an order-1 arc whose entry
         #: multiplier pi is negative goes. By Lemma H, 0 <= mu <= pi on the arc, so at
         #: pi = 0 the multiplier vanishes on it and the arc dies without moving the motion.
@@ -1238,6 +1245,8 @@ class Homotopy:
         """A :class:`MultiArcShooting`, with :attr:`riding_nfev` on its boundary arcs when
         they are solved at run time."""
         shoot = MultiArcShooting(kernels, params, arcs, **options)
+        if getattr(self, "handover_ties", False) and self._ties:
+            shoot.tied = self._tied_events(shoot)
         system = getattr(kernels, "system", None)
         if getattr(system, "riding", None) is not None and self.riding_nfev:
             shoot.boundary_max_nfev = int(self.riding_nfev)
@@ -2006,6 +2015,61 @@ class Homotopy:
             if r.success:
                 return (arcs, values), sh, r
         return None
+
+    @staticmethod
+    def _event_labels(shoot):
+        """Each event of ``shoot`` as ``(kind, limit)``: ``("out", c)``, ``("in", c)``..."""
+        return [(ev, shoot.arcs[i][1]) for ev, i in shoot.events]
+
+    def _tied_events(self, shoot):
+        """Rule R39: the indices of ``shoot``'s events tied to the next one."""
+        labels = self._event_labels(shoot)
+        return {j for j in range(len(labels) - 1)
+                if (labels[j], labels[j + 1]) in self._ties and labels[j][0] != "touch"}
+
+    def _tie_locked(self, shoot, v, tol=1e-5):
+        """Rule R39: tie the closest adjacent pair of junctions of different limits
+        (neither a touch) that lie within ``tol`` of T, untied so far. True if one was."""
+        if not isinstance(shoot, MultiArcShooting) or not shoot.arcs:
+            return False
+        times = shoot.event_times(v)
+        labels = self._event_labels(shoot)
+        T = shoot.unpack(v)[3] - shoot.t0
+        best = None
+        for j in range(len(times) - 1):
+            a, b = labels[j], labels[j + 1]
+            gap = abs(times[j + 1] - times[j])
+            if (a[1] != b[1] and "touch" not in (a[0], b[0]) and (a, b) not in self._ties
+                    and gap <= tol * T and (best is None or gap < best[0])):
+                best = (gap, a, b)
+        if best is None:
+            return False
+        _, a, b = best
+        self._ties.add((a, b))
+        self.diagnostics.fired("R39")
+        N = self.kr.CONSTRAINT_NAMES
+        self._detail(f"    {a[0]}:{N[a[1]]} and {b[0]}:{N[b[1]]} locked together at a "
+                     f"failed step: one junction")
+        return True
+
+    def _tie_crossing(self, shoot, v):
+        """Rule R39: tie the two junctions that cross most in ``v`` (of different limits,
+        neither a touch). True if a new tie was made."""
+        if not isinstance(shoot, MultiArcShooting) or not shoot.arcs:
+            return False
+        times = shoot.event_times(v)
+        labels = self._event_labels(shoot)
+        if len(times) < 2:
+            return False
+        j = int(np.argmax([a - b for a, b in zip(times, times[1:])]))
+        a, b = labels[j], labels[j + 1]
+        if a[1] == b[1] or "touch" in (a[0], b[0]) or (a, b) in self._ties:
+            return False
+        self._ties.add((a, b))
+        self.diagnostics.fired("R39")
+        N = self.kr.CONSTRAINT_NAMES
+        self._detail(f"    {a[0]}:{N[a[1]]} and {b[0]}:{N[b[1]]} hand over: one junction")
+        return True
 
     def _coincide(self):
         """Rule R38's tolerance (of T) for coincident junctions, 0 when it is off."""
@@ -2845,6 +2909,10 @@ class Homotopy:
                     if reorders > 2:
                         self._detail("    the reorder crosses back: not settled")
                         state["why"] = "reorder did not settle"
+                        if getattr(self, "handover_ties", False):
+                            # Rule R39: the pair is one junction; the step is taken again
+                            # with the tie.
+                            self._tie_crossing(sh, r.v)
                         return None
                 viol = None if crossed else self._free_violations(sh, r.v, scale)
                 if viol:
@@ -3051,6 +3119,9 @@ class Homotopy:
                         if done is not None:
                             f, le, off = fw, le_w, off_w
                             break
+                if (done is None and getattr(self, "handover_ties", False)
+                        and self._tie_locked(sh0, v0)):
+                    continue               # Rule R39: the same step, with the tie
                 if done is None:
                     if located is not None:
                         self.diagnostics.fired("R16")
@@ -3293,6 +3364,7 @@ class Homotopy:
             raise ValueError(f"expected {len(self.stated.params)} parameters "
                              f"{[str(p) for p in self.stated.params]}, got {len(params)}")
         self.diagnostics = Diagnostics()
+        self._ties = set()                 # R39's hand-overs belong to one solve
         sink, SingleShooting.sink = SingleShooting.sink, self.diagnostics.evaluations
         budget = self.active_set_seconds
         if self.solve_seconds is not None:

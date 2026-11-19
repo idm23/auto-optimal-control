@@ -846,6 +846,12 @@ class MultiArcShooting(SingleShooting):
         #: The same with the STM (None: as ``boundary_max_nfev``). Integrating the STM is
         #: the dear part, and its steps are those of the motion.
         self.boundary_stm_max_nfev = None
+        #: Events whose time row is a tie to the next event instead (rule R39): indices
+        #: into :attr:`events`. Two limits that hand over at one instant (one leaves
+        #: where the other enters) share their junction; the tied event's own row
+        #: (rate, multiplier or H continuity) gives way to ``t_next - t = tie_gap * T``.
+        self.tied = set()
+        self.tie_gap = 1e-12
 
     def _switching_index(self, c):
         k = self.kernels
@@ -1294,7 +1300,19 @@ class MultiArcShooting(SingleShooting):
             segments.append((seg, aid, t, t_end, z, dict(flags) if aid is None else None, r))
             return r, D
 
-        for ev, i in self.events:
+        def event_time(j):
+            ev_j, i_j = self.events[j]
+            sl_j = self._arc_slices[i_j]
+            at_j = (0 if i_j in self._started else 1) if ev_j == "out" else 0
+            return v[sl_j][at_j], unit(sl_j.start + at_j)
+
+        def tie_row(j, t_ev, d_ev):
+            # Rule R39: this event and the next are one junction, a hair apart.
+            t_next, d_next = event_time(j + 1)
+            rows.append(t_next - t_ev - self.tie_gap * (tf - self.t0))
+            grads.append(d_next - d_ev if jac else None)
+
+        for j_ev, (ev, i) in enumerate(self.events):
             kind, c, q = self.arcs[i]
             sl = self._arc_slices[i]
             w = v[sl]
@@ -1303,6 +1321,7 @@ class MultiArcShooting(SingleShooting):
                 t_ev, d_ev = w[at], unit(sl.start + at)
             else:
                 t_ev, d_ev = w[0], unit(sl.start)
+            tied_here = j_ev in self.tied and j_ev + 1 < len(self.events)
             aid = self._arc_id(active)
             seg = None if aid is None else "boundary"
             try:
@@ -1328,7 +1347,9 @@ class MultiArcShooting(SingleShooting):
             t, dt = t_ev, d_ev
             if ev == "out":
                 after = self._arc_id(active - {c})
-                if self._rate_row_here(kind, q, aid, c, t, z):
+                if tied_here:
+                    tie_row(j_ev, t, dt)
+                elif self._rate_row_here(kind, q, aid, c, t, z):
                     # The departure is tangential: under the control that follows the
                     # exit, dg/dt = 0 (Lemma J). At the edge of the holdable set, with
                     # the riding control at the box's corner, it holds with mu_c > 0,
@@ -1380,7 +1401,9 @@ class MultiArcShooting(SingleShooting):
                 Dp[n:, mult_cols] -= Nx[used].T
             if kind == "boundary":
                 after = self._arc_id(active | {c})
-                if (self._rate_row_here(kind, q, after, c, t, zp)
+                if tied_here:
+                    tie_row(j_ev, t, dt)
+                elif (self._rate_row_here(kind, q, after, c, t, zp)
                         or self._regular_junction(kind, q, aid, t, z)):
                     # The arrival is tangential: g peaks there along the arc
                     # before, so dg/dt = 0 (a simple root in t_in, where g = 0

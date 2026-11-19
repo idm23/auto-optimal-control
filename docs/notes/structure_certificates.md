@@ -1814,6 +1814,36 @@ common solves take 12% less time (430 s to 377 s). Rest 8, alone on the machine,
 reaches $|o| = 0.094$ with a symmetric structure (`w5_max` and `w4_min` on the same
 span about $T/2$), still progressing at the cap. The forced hand-overs are untouched.
 
+### Hand-overs: Rule R39, tried
+
+A forced coincidence (R38's second kind) is a hand-over: one limit leaves where another
+enters, and each order's solution pushes the two junctions past each other. In rest 2
+`tau1_min` leaves where `w4_min` enters, the same instant to five digits over 45 s of
+route; in goal 9 at 70% `tau2_min` leaves where `tau6_min` enters; in goal 1 at 80% the
+entries of `tau5_min` and `w3_max` swap by about $7 \times 10^{-5}$ of $T$. The likely
+mechanism is Lemma K's forced exit: past the instant, the two cannot be held together
+(the edge of the holdable set), so the leaving limit's multiplier need not reach zero.
+
+*Rule R39* (`Homotopy.handover_ties`). The two events are one junction. The earlier
+event's own row (rate, multiplier or $H$ continuity, never a tangency row) gives way to
+a tie, $t_{\rm next} - t = 10^{-12}\,T$: a hair apart, so the segment between them has
+positive width and integrates as any other. The unknowns are unchanged. A tie is made
+when R30's reorder crosses back, or when a step fails while two adjacent junctions of
+different limits (neither a touch) lie within $10^{-5}$ of $T$; it holds wherever the
+two events are adjacent, for the rest of the solve, and acceptance judges the result
+(the exiting limit's $\mu \ge 0$, and Lemmas H and H2).
+
+*Result.* The ties take hold: rest 2 moves past its locked pair (from $|o| = 21.9$ to
+$20.2$, with `tau1_min`, `w4_min` and `w5_min` then at one instant), and goal 1 at 80%
+reaches its exact solve at 16 s instead of churning at the end. That solve converges
+(residual $5 \times 10^{-13}$) and is rejected by Lemma H2: $\mu$ rises by 0.8% and
+1.5% of its largest value on `w5_max` and `w2_max`. Rate cases on the first route, 60 s
+cap (R38 on as well): 16 of 45 with and without R39, the same cases; R39 fires in 8.
+
+On the census page's accepted rate answers, which run with R36 off, Lemma H2 holds:
+re-solving the 21 on the first route alone, the 15 that solve there have no rise on any
+order-2 arc above rounding ($10^{-16}$ of the arc's largest $\mu$).
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
