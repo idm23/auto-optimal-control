@@ -370,8 +370,28 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Gap.** The $O(|s - s^*|^2)$ terms are uniform only while the Jacobians stay
   nonsingular. This is a standard implicit-function-theorem estimate, but not yet
   written out.
-- **Used by.** The diagnosis of the entry swaps (goal 1 at 70% before R43, and the
-  stalls still open).
+- **Seen.** Where the route solves both orders of a crossed pair at one step and both
+  come out crossed (the churn), $\alpha$ and $\beta$ come from each order's tangent
+  $-J^{-1}\partial_s R$ along the route's direction.
+  - *Goal 1 at 70%, before R43 (2026-11-19).* At the entries of `tau5_min` and `w3_max`,
+    $\alpha\beta < 0$ every time. But the Jacobians were near-singular: equilibrated
+    condition about $10^{10}$, $\sigma_{\min} \approx 10^{-9}$. The weak direction was
+    an order-2 entry's $(t_{\rm in}, \pi_2)$ against its tangency and $H$-continuity
+    rows, elsewhere in the structure. At a tangential order-2 entry $g$, $\dot g$ and
+    (by J′) $\ddot g$ vanish, so no row fixes $t_{\rm in}$ to first order: the double
+    root R43 removes. The fold reading there is not reliable, and the case solves with
+    R43.
+  - *With R43.* Most churn points are well conditioned: equilibrated condition about
+    $10^5$. Goal 0 at 70% has two exits, `w5_max` and `tau5_max`: $\alpha = -0.011$,
+    $\beta = +0.062$. Goal 4 at 70% has the exit of `w5_max` and the entry of
+    `tau4_max`: $\alpha = -1.1$, $\beta = +2.1$. Both show the fold signature.
+  - Neither satisfies the hypothesis "control interior". In goal 0 at 70%, jerks 2 to 4
+    are at their lower bounds, on joints other than the pair's own controls. In goal 4
+    at 70%, jerk 4, `tau4_max`'s own control, is at its upper bound: M's corner entry.
+- **Next.** Extend (i) to (iii) to a held set that is the same on all four arcs at $t^*$,
+  with B's KKT matrix for a held set in place of interior controls. That covers goal 0
+  at 70%. The corner (goal 4 at 70%) needs its own version, from K and M.
+- **Used by.** The diagnosis of the entry swaps.
 
 ### K. A forced exit is a corner, and its rate row is the margin — proved, relative to S1
 
