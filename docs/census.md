@@ -18,27 +18,28 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-19, on the branch that adds Rule R39
-(off by default, so the release's answers are those of `main`). Rules R1, R2, R15, R16, R20, R25 and R26 are turned on (the release's
+The data shown is from the census of 2026-11-19, on the branch that fixes R36's jump
+seeds (R36 is off by default, so the release's answers are those of `main`). Rules R1, R2, R15, R16, R20, R25 and R26 are turned on (the release's
 configuration), with held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has six routes: two draws of the offsets and sequential births, each
 also at ten times the secondary weight (R24). The routes run in parallel, one case at a
 time, on 8 physical cores. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-67 of the 90 cases solve, all under 60 s: the median is 13.8 s and the slowest 51.1 s.
-Goal 2 at 70% finishes near the cap, and which side of it it lands on varies from run to
-run (60.1 s, 58.6 s, 60.1 s, 58.9 s, 59.5 s and 60.2 s on the last six); this run it
-missed.
+69 of the 90 cases solve, all under 60 s: the median is 14.9 s and the slowest 59.7 s.
+Goal 2 at 70% and rest 8 finish near the cap, and which side of it they land on varies
+from run to run: goal 2 at 70% took 60.1 s, 58.6 s, 60.1 s, 58.9 s, 59.5 s, 60.2 s and
+59.7 s on the last seven; rest 8 made it this time, at 59.0 s.
 
 - **`goal` and `rest`:** all 45 solve.
-- **`vgoal`:** 18 of 30: nine at 90% (all but goal 0), seven at 80% (goals 0, 1, 2, 5,
-  6, 7 and 8) and two at 70% (goals 6 and 8).
-- **`vrest`:** 4 of 15: rest 0 and rest 9 (rates at 90%), rest 7 (at 80%) and rest 2
-  (at 70%).
+- **`vgoal`:** 19 of 30: nine at 90% (all but goal 0), seven at 80% (goals 0, 1, 2, 5,
+  6, 7 and 8) and three at 70% (goals 2, 6 and 8).
+- **`vrest`:** 5 of 15: rest 0 and rest 9 (rates at 90%), rests 7 and 8 (at 80% and
+  70%) and rest 2 (at 70%).
 
-Six of the rate-limited answers hold a torque limit and a rate limit on another joint
-at the same instant: goals 3 and 4 at 90%, goals 0 and 1 at 80%, rest 2 and rest 9.
+Seven of the rate-limited answers hold a torque limit and a rate limit on another joint
+at the same instant: goals 3 and 4 at 90%, goals 0 and 1 at 80%, goal 2 at 70%, rest 2
+and rest 9.
 Goal 3 at 90% also holds `tau4_min` and `w4_min` together, and goal 1 at 80%
 `tau5_min` and `w5_max`.
 

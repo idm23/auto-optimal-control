@@ -2422,11 +2422,16 @@ class Homotopy:
         self.diagnostics.fired("R36")
         self._detail(f"    {self.kr.CONSTRAINT_NAMES[arcs[i][1]]}: multiplier rises on "
                      f"[{t_lo:.5f}, {t_hi:.5f}] (Lemma H2): split the order-2 arc")
-        dmu = np.gradient(mu_on, t_on)
+        # The trajectory samples each junction from both sides, so a time can repeat:
+        # mu' is taken on the distinct times (the last value at each), never across a
+        # zero step, which would make the jump seed NaN.
+        t_u, last = np.unique(np.asarray(t_on, float)[::-1], return_index=True)
+        mu_u = np.asarray(mu_on, float)[::-1][last]
+        dmu = np.gradient(mu_u, t_u) if len(t_u) > 1 else np.zeros_like(mu_u)
         pi_first = np.atleast_1d(np.asarray(pi, float)).copy()
 
         def entering(t):
-            return np.array([-float(np.interp(t, t_on, dmu)), float(np.interp(t, t_on, mu_on))])
+            return np.array([-float(np.interp(t, t_u, dmu)), float(np.interp(t, t_u, mu_u))])
 
         out_a = arcs[:i] + [arcs[i], arcs[i]] + arcs[i + 1:]
         out = []

@@ -586,3 +586,37 @@ def test_a_locked_pair_of_junctions_is_tied_under_r39():
     assert not h._tie_locked(shoot, None)                  # nothing else within 1e-5 T
     shoot.events = [("in", 0), ("in", 1), ("out", 0), ("out", 1)]
     assert h._tied_events(shoot) == set()                  # no longer adjacent
+
+
+def test_r36_seeds_stay_finite_where_a_junction_is_sampled_twice():
+    """A trajectory samples each junction from both sides, so a time can repeat on an
+    arc. R36's jump seed takes mu' there, and a difference across the repeated time
+    made it NaN, so every split it offered failed to propagate."""
+    import types
+
+    import numpy as np
+
+    def mu(t):
+        return 1e-3 * (0.9 - t) + 4e-4 * np.clip((t - 0.5) / 0.05, 0, 1)
+
+    arcs = [("boundary", 0)]
+    values = [(0.2, 0.9, np.array([3e-3, mu(0.2)]))]
+    h, shoot = _stub_structure(arcs, values, [2], T=1.0)
+    h.kr.CONSTRAINT_NAMES = ["w_min"]
+    h._detail = lambda *a: None
+    h.trim_rising = h.exit_before_saturation = h.split_normal_form = False
+    h.relative_rise = h.wide_gaps = False
+    h.order2_rise = True
+    t = np.sort(np.concatenate([np.linspace(0.0, 1.0, 801), [0.6, 0.7]]))   # two repeats
+    shoot.params = None
+    shoot.kernels = types.SimpleNamespace(
+        N_CONSTRAINTS=1, arc_constraints=lambda aid: (0,),
+        boundary_multiplier=lambda aid, t_, z, p: mu(t_))
+    shoot.trajectory = lambda v, n: {
+        "t": t, "z": t, "arc": np.zeros(len(t), int),
+        "active": ((t >= 0.2) & (t <= 0.9))[:, None]}
+    out = h._split_rising(shoot, None)
+    assert out
+    for _, vals in out:
+        for val in vals:
+            assert np.all(np.isfinite(np.atleast_1d(val[2])))
