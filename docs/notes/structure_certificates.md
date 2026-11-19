@@ -1776,6 +1776,22 @@ in three cases (goal 0 at 80% and 70%, rest 2), each of which reaches the rise o
 near its cap. The two rejections for `mu negative` are gone. What these cases need now
 is a faster route to the rise.
 
+*R36's seeds, fixed (2026-11-19).* The splits with a gap never propagated because the
+seed was NaN: the second piece's jump $(-\dot\mu, \mu)$ took $\dot\mu$ by a difference over
+the arc's samples, and the trajectory samples each junction from both sides, so a time
+repeats and the difference divides by zero. With $\dot\mu$ taken on the distinct times no
+offer fails to ride. Rate cases on the first route, 60 s cap (R35, R36, R38 on): 16 of 45
+before and after, the same cases; the two rejections for `mu negative` are gone.
+
+*Lemma H2's other half, tried (not kept).* $\mu$ is convex on an order-2 arc, so the exact
+$\dot\mu$ (the multiplier's gradient along the riding flow) must not fall. It falls a
+great deal: by 60 to 180% of $\max|\dot\mu|$ on the long rate arcs of goals 0 and 1 at 80%,
+on several arcs over one stretch, at another limit's entry (`w2_min`'s at 0.5894 in goal
+0). The violation is real, but splitting the arcs that show it, over that stretch, made
+the routes worse (goal 0 at 80% stops at $|o| = 1.25$ instead of reaching the end; goal 1
+at 0.13): the stretch is the entering limit's junction, and it is the entry, not the
+arcs beside it, that the lemma faults.
+
 ### Where the rate-limited routes stall, and coincident junctions: Rule R38, tried
 
 On the first route alone (R35 and R36 on, 60 s cap), 29 of the 45 rate cases fail. Each
