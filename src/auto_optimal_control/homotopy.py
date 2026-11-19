@@ -396,6 +396,9 @@ class Homotopy:
         self.contraction_target = 0.25
         self.contraction_reject = 0.5
         self.contraction_floor = 1e-3
+        #: Rule R41: an exact solution rejected because junctions of different limits
+        #: crossed is solved again with the events in the order of their times (E5).
+        self.exact_reorders = False
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -2774,10 +2777,10 @@ class Homotopy:
         _, _, ta, tb = ends(level)
         return ta, tb, float(level)
 
-    def _exact_jump(self, arcs, v, tol):
+    def _exact_jump(self, arcs, v, tol, reorders=0):
         """The exact problem's solve of structure ``arcs`` from ``v``: ``(J, shoot, sol)`` or None."""
         kx, px = self.exact_kernels, self.exact_params()
-        tol = _scaled(tol, v)
+        tol_in, tol = tol, _scaled(tol, v)
         # A large problem's search has run on tangential junctions; if a control really does
         # jump at one, the rows that allow it are the ones to try next.
         for tangent in ((True, False) if kx.system.riding is not None else (False,)):
@@ -2815,6 +2818,26 @@ class Homotopy:
                 self._detail(f"  exact solve: residual {sol.residual_norm:.1e} (max |v| "
                              f"{np.abs(sol.v).max():.1e}), "
                              f"max violation {sol.max_violation:.1e}; {self._rejection(shoot, sol)}")
+                if (getattr(self, "exact_reorders", False) and arcs and reorders < 2
+                        and sol.success and isinstance(shoot, MultiArcShooting)
+                        and not shoot.in_order(sol.v, self._coincide())):
+                    # Rule R41: junctions of the exact solution crossed. Two events of
+                    # different limits pass each other transversally (E5), so the
+                    # structure with the events in the order of their times is the one
+                    # beyond the crossing; it is solved from this solution and judged as
+                    # any other.
+                    arcs_x, vals_x = self._arcs_of(shoot, sol.v)
+                    entries_x, ev_x = self._mas_entries(arcs_x, vals_x)
+                    if list(entries_x) != list(arcs):
+                        self.diagnostics.fired("R41")
+                        self._detail("  exact solve: junctions crossed; the events in the "
+                                     "order of their times")
+                        seed = self._multi_arc(kx, px, entries_x, max_nfev=self.attempt_nfev,
+                                               open_end=True, **self.options).pack_arcs(
+                                                   sol.v[:shoot.n_base], ev_x)
+                        hit = self._exact_jump(entries_x, seed, tol_in, reorders + 1)
+                        if hit is not None:
+                            return hit
             except _FAILURES as exc:
                 self._detail(f"  exact solve failed: {exc}")
         return None
