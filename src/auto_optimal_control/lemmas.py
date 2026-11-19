@@ -26,6 +26,41 @@ import numpy as np
 import sympy as sp
 
 
+# The symbolic parts of LimitObjects, per Pontryagin system: lambdified once, since the
+# route builds a LimitObjects for every check (a route step can make several).
+_SYMBOLIC = {}
+
+
+def _symbolic_parts(sysm):
+    """``(G(p), R(p), f0(t, x, p), n_states, n_controls)`` of ``sysm``'s problem: the
+    control matrix, the cost's Hessian in the controls and the drift. Raises ValueError
+    when ``G`` or ``R`` is not constant (certificates C1, C2)."""
+    key = id(sysm)
+    hit = _SYMBOLIC.get(key)
+    if hit is not None and hit[0] is sysm:
+        if isinstance(hit[1], ValueError):
+            raise hit[1]
+        return hit[1]
+    prob = sysm.problem
+    x, u = list(prob.states), list(prob.controls)
+    f = sp.Matrix(prob.dynamics)
+    G = f.jacobian(u)
+    R = sp.hessian(sp.sympify(prob.running_cost), u)
+    if any(e.free_symbols & set(x) for e in G):
+        out = ValueError("the control matrix is not constant (certificate C1)")
+    elif any(e.free_symbols & set(x) | e.free_symbols & set(u) for e in R):
+        out = ValueError("the cost's Hessian in the controls is not constant (C2)")
+    else:
+        args = list(sysm.params)
+        out = (sp.lambdify(args, G, "numpy"), sp.lambdify(args, R, "numpy"),
+               sp.lambdify([prob.time, x, args], f.subs({v: 0 for v in u}), "numpy"),
+               len(x), len(u))
+    _SYMBOLIC[key] = (sysm, out)
+    if isinstance(out, ValueError):
+        raise out
+    return out
+
+
 class LimitObjects:
     """``a``, ``d``, the margin, ``alpha`` and the free rate of each limit, at ``(t, z)``.
 
@@ -33,21 +68,10 @@ class LimitObjects:
 
     def __init__(self, kernels, params):
         self.k, self.p = kernels, np.asarray(params, dtype=float)
-        sysm = kernels.system
-        prob = sysm.problem
-        x, u = list(prob.states), list(prob.controls)
-        f = sp.Matrix(prob.dynamics)
-        G = f.jacobian(u)
-        if any(e.free_symbols & set(x) for e in G):
-            raise ValueError("the control matrix is not constant (certificate C1)")
-        R = sp.hessian(sp.sympify(prob.running_cost), u)
-        if any(e.free_symbols & set(x) | e.free_symbols & set(u) for e in R):
-            raise ValueError("the cost's Hessian in the controls is not constant (C2)")
-        args = list(sysm.params)
-        self.G = np.array(sp.lambdify(args, G, "numpy")(*self.p), dtype=float).reshape(len(x), len(u))
-        self.R = np.array(sp.lambdify(args, R, "numpy")(*self.p), dtype=float).reshape(len(u), len(u))
-        self._f0 = sp.lambdify([prob.time, x, args], f.subs({v: 0 for v in u}), "numpy")
-        self.n = len(x)
+        G_fn, R_fn, self._f0, nx, nu = _symbolic_parts(kernels.system)
+        self.G = np.array(G_fn(*self.p), dtype=float).reshape(nx, nu)
+        self.R = np.array(R_fn(*self.p), dtype=float).reshape(nu, nu)
+        self.n = nx
 
     def grad(self, c, t, z):
         _, Nx, _, _ = self.k.tangency_gradient(c, t, z, self.p)
@@ -58,6 +82,14 @@ class LimitObjects:
         gx = self.grad(c, t, z)
         f0 = np.asarray(self._f0(t, list(z[:self.n]), list(self.p)), dtype=float).reshape(-1)
         return self.G.T @ gx, float(gx @ f0)
+
+    def curvature(self, c, t, z, u):
+        """``d2g_c/dt2`` at ``(t, z)`` with control ``u``, for a limit of order 2: ``g'``
+        is free of the controls there, so ``g'' = grad(g') . (f0 + G u)``."""
+        _, Nx, _, _ = self.k.tangency_gradient(c, t, z, self.p)
+        grad1 = np.asarray(Nx[1], dtype=float)[:self.n]
+        f0 = np.asarray(self._f0(t, list(z[:self.n]), list(self.p)), dtype=float).reshape(-1)
+        return float(grad1 @ (f0 + self.G @ np.asarray(u, dtype=float)))
 
     def margin(self, c, t, z):
         a, d = self.rate_parts(c, t, z)

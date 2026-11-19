@@ -1719,10 +1719,12 @@ class Homotopy:
 
     def _touch_curvatures(self, shoot, v, rel=1e-3):
         """Rule R35: the order-2 touch points of ``v`` whose limit is convex there,
-        ``{arc index: g''}``. ``g'`` is exact at each sample (``LimitObjects``: at order
-        2 the control does not enter it), and ``g''`` is the slope of a straight line
-        through ``g'`` within ``0.002 T`` of the touch. A curvature counts when it
-        exceeds ``rel`` times the largest ``|g'|`` over ``T`` (``g''``'s own scale)."""
+        ``{arc index: g''}``. At order 2 the control does not enter ``g'``, so
+        ``g'' = grad(g') . (f0 + G u)`` is exact at a state: it is taken at the samples
+        on either side of the touch (the control is continuous there) and averaged. A
+        curvature counts when it exceeds ``rel`` times the largest ``|g'|`` over ``T``
+        (``g''``'s own scale). The trajectory is R5's (801 points), so a route step
+        samples ``v`` once for both."""
         if not isinstance(shoot, MultiArcShooting):
             return {}
         arcs, values = self._arcs_of(shoot, v)
@@ -1733,27 +1735,25 @@ class Homotopy:
         from auto_optimal_control.lemmas import LimitObjects
         try:
             obj = LimitObjects(shoot.kernels, shoot.params)
-            tr = shoot.trajectory(v, n_points=4001)
+            tr = shoot.trajectory(v, n_points=801)
         except Exception:
             return {}
         T = shoot.unpack(v)[3] - shoot.t0
-        ts, zs = np.asarray(tr["t"]), tr["z"]
+        ts, zs, us = np.asarray(tr["t"]), tr["z"], np.asarray(tr["u"], dtype=float)
         out = {}
         for i in touches:
             c, tc = arcs[i][1], float(values[i][0])
-
-            def rate(k):
-                a_, d_ = obj.rate_parts(c, ts[k], zs[k])
-                return float(d_ + np.asarray(a_) @ np.asarray(tr["u"][k], dtype=float))
-
-            near = np.flatnonzero(np.abs(ts - tc) <= 0.002 * T)
-            if len(near) < 4:
+            before = np.flatnonzero(ts <= tc)
+            after = np.flatnonzero(ts >= tc)
+            if not len(before) or not len(after):
                 continue
-            g1 = np.array([rate(k) for k in near])
-            slope = float(np.polyfit(ts[near] - tc, g1, 1)[0])
-            reach = max(abs(rate(k)) for k in range(0, len(ts), max(1, len(ts) // 200)))
-            if slope > rel * max(reach, 1e-300) / T:
-                out[i] = slope
+            m0, m1 = before[-1], after[0]
+            g2 = 0.5 * (obj.curvature(c, ts[m0], zs[m0], us[m0])
+                        + obj.curvature(c, ts[m1], zs[m1], us[m1]))
+            reach = max(abs(obj.rate_parts(c, ts[m], zs[m])[1])
+                        for m in range(0, len(ts), max(1, len(ts) // 200)))
+            if g2 > rel * max(reach, 1e-300) / T:
+                out[i] = g2
         return out
 
     def _peak_time(self, shoot, v, c, a, b, n_points=2001):
