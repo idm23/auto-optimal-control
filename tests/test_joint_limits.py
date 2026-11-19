@@ -31,6 +31,31 @@ def test_a_rate_limit_ridden_at_run_time_matches_its_symbolic_arc(kernel_cache, 
     assert np.max(np.abs(symbolic.solution.lam0 - run_time.solution.lam0)) < 1e-8
 
 
+def test_lemma_h2_rows_at_order2_junctions_give_the_same_extremal(kernel_cache):
+    """Rule R43: at D = 8 the axis rides v <= V (order 2). Lemma H2's rows at its
+    junctions (mu = 0 at the exit, mu = pi_2 at the entry) replace H continuity, and
+    the extremal is the same, symbolic arcs and arcs ridden at run time alike."""
+    from auto_optimal_control.shooting import MultiArcShooting
+
+    outcomes = {}
+    for rows in (False, True):
+        MultiArcShooting.order2_rows_default = rows
+        try:
+            for kw in ({}, {"outline_above": 0}):
+                h = Homotopy(examples.jerk_limited_move(), cache_dir=kernel_cache,
+                             policy=SecondaryCost(), **kw)
+                r = h.solve([1.0, 1.0, 1.0, 8.0], ([-1.0] * 3, [1.0] * 3), (0.5, 20.0))
+                assert r.exact, r.message
+                outcomes[rows, bool(kw)] = r
+        finally:
+            MultiArcShooting.order2_rows_default = False
+    for run_time in (False, True):
+        a, b = outcomes[False, run_time], outcomes[True, run_time]
+        assert ("boundary", "v_max") in b.arcs and a.arcs == b.arcs
+        assert abs(a.solution.tf - b.solution.tf) < 1e-10
+        assert np.max(np.abs(a.solution.lam0 - b.solution.lam0)) < 1e-8
+
+
 ARM = [1.0, 1.0, 1.0, 1.0, 1.5, 1.0, 1.0, 1.5, 0.4]      # m, l, q_f, j_max, tau_max
 LOOSE_RATES, LOOSE_ANGLES = [100.0, 100.0], [-100.0, -100.0, 100.0, 100.0]
 

@@ -696,6 +696,9 @@ class MultiArcShooting(SingleShooting):
     #: under the arriving control at an entry and the departing control at an exit.
     rate_junctions_default = True
     junction_rows_default = "lemma J"
+    #: Rule R43: an order-2 arc's junctions take Lemma H2's multiplier rows, simple
+    #: roots, in place of H continuity (a double root at a tangential junction).
+    order2_rows_default = False
     #: Touch points of order-1 limits, at the edge of the holdable set (Lemma L).
     order1_touches_default = False         # Lemma L: degenerate at the corner (see the note)
     #: Past the edge of the holdable set, continue an exit-bound arc on the free law
@@ -733,6 +736,7 @@ class MultiArcShooting(SingleShooting):
         #: rows elsewhere), "corner" (rate rows at the corner, the regular rows or H
         #: continuity elsewhere) or "rate" (rate rows at every order-1 junction).
         self.junction_rows = MultiArcShooting.junction_rows_default
+        self.order2_rows = MultiArcShooting.order2_rows_default
         self._find_edges = False
         self.past_edge = MultiArcShooting.past_edge_default
         self.backward_segments = MultiArcShooting.backward_default
@@ -1214,12 +1218,21 @@ class MultiArcShooting(SingleShooting):
         """Rule R7, off the corner: whether an order-1 junction takes a multiplier row
         (``mu = 0`` at an exit, ``mu = pi`` at an entry) in place of ``H`` continuity.
         Under C2 these hold at every junction where the riding control is not at the
-        corner (Lemma J); the caller has already checked for the corner."""
-        return bool(self.rate_junctions and self.junction_rows == "lemma J"
-                    and kind == "boundary" and q == 1
-                    and self.junctions == "auto" and not self.kernels.N_SWITCHING
-                    and self.kernels.system.problem.control_sets
-                    and self._control_matrix() is not None)
+        corner (Lemma J); the caller has already checked for the corner.
+
+        Rule R43: an order-2 arc's junctions take the multiplier rows of Lemma H2,
+        ``mu(t_out-) = 0`` at the exit and ``mu(t_in+) = pi_2`` at the entry (``pi_2`` the
+        jump's coefficient of the gradient of dg/dt), in place of ``H`` continuity. With
+        the control continuous at a junction (Lemma J), ``H`` continuity is quadratic in
+        the control's mismatch there, a double root on which Newton converges only
+        linearly; the multiplier rows are simple roots."""
+        if not (self.rate_junctions and self.junction_rows == "lemma J"
+                and kind == "boundary" and self.junctions == "auto"
+                and not self.kernels.N_SWITCHING
+                and self.kernels.system.problem.control_sets
+                and self._control_matrix() is not None):
+            return False
+        return q == 1 or (q == 2 and self.order2_rows)
 
     def _control_matrix(self):
         """``df/du``, constant by certificate C1, or None if it is not."""
@@ -1509,11 +1522,12 @@ class MultiArcShooting(SingleShooting):
                     # Off the corner, under C2, the entry carries mu_c(t_in+) = pi: a
                     # control that moves dg/dt is interior on the arc, and continuity of
                     # the control at the junction forces (mu_c - pi) a_k = 0 (Lemma J).
+                    # Order 1: pi; order 2 (R43, Lemma H2): pi_2, the second coefficient.
                     val, Mt, Mz = self._multiplier_of(after, c, t, zp)
-                    rows.append(val - float(mult[0]))
+                    rows.append(val - float(mult[q - 1]))
                     if jac:
                         g_ = Mt * d_ev + Mz @ Dp
-                        g_[mult_cols[0]] -= 1.0
+                        g_[mult_cols[q - 1]] -= 1.0
                         grads.append(g_)
                     else:
                         grads.append(None)
