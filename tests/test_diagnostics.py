@@ -556,6 +556,25 @@ def test_junctions_crossed_by_rounding_are_coincident_under_r38():
     assert not MultiArcShooting.in_order(shoot, None, tol=h._coincide())
 
 
+def test_junctions_crossed_below_the_integration_tolerance_coincide_without_r38():
+    """Without R38, junctions crossed by less than the integration's rtol of T still
+    coincide: the backward segment between them moves the motion by less than the
+    integration's own error. A crossing above it is out of order."""
+    arcs = [("boundary", 0), ("boundary", 1)]
+    values = [(0.5, 0.8, None), (0.5 - 7.7e-17, 0.8, None)]
+    h, shoot = _stub_structure(arcs, values, [2, 2], T=1.0)
+    shoot.event_times = lambda v: [values[0][0], values[1][0]]
+    from auto_optimal_control.shooting import MultiArcShooting
+    h.options = dict(rtol=1e-12, atol=1e-12)
+    h.coincident_junctions, h.coincide_tol = False, 1e-8
+    assert h._coincide() == 1e-12
+    assert MultiArcShooting.in_order(shoot, None, tol=h._coincide())
+    values[1] = (0.5 - 1e-10, 0.8, None)
+    assert not MultiArcShooting.in_order(shoot, None, tol=h._coincide())
+    h.coincident_junctions = True
+    assert h._coincide() == 1e-8
+
+
 def test_a_locked_pair_of_junctions_is_tied_under_r39():
     """Rule R39: a limit that leaves where another enters, at one instant step after step,
     is one junction. The closest such pair (different limits, no touch) is tied, and the

@@ -1875,6 +1875,41 @@ On the census page's accepted rate answers, which run with R36 off, Lemma H2 hol
 re-solving the 21 on the first route alone, the 15 that solve there have no rise on any
 order-2 arc above rounding ($10^{-16}$ of the arc's largest $\mu$).
 
+### Events at one instant, to rounding (fixes, not rules)
+
+By symmetry, a rest-to-rest motion with no torque arc left puts its rate peaks at
+$T/2$: rest 14 ends with six rate arcs entering at one instant and leaving at another,
+and on the way five rate touches at $T/2$. The route then lost every step to three
+floating-point effects, each independent of the limits and their lemmas:
+
+- **Sampling a segment one float wide.** Newton leaves two coincident junctions crossed
+  or apart by an ulp ($7.7 \times 10^{-17}$ of $T$). `np.linspace` over such a segment
+  repeats a time, and the integrator refuses times that are not strictly monotone, so
+  the violation check after every converged step raised. Rest 14 lost 424 converged
+  steps this way. A segment narrower than its samples is now sampled at its two ends
+  (`shooting.sample_segment`), and at zero width it is its one point.
+- **Ordering junctions closer than the integration resolves.** Acceptance and `_retire`
+  require the junctions in the structure's order. Without R38 the slack was zero, so a
+  crossing of one ulp rejected an exact solution that passed every other check (rest
+  14: residual $1.3 \times 10^{-13}$, violation $2 \times 10^{-14}$, no $\mu$ negative
+  or rising). Junctions crossed by $d$ leave a segment of width $-d$, integrated
+  backward. That moves the motion by $O(d\,|f|)$, which is below the integration's own
+  error when $d < \mathrm{rtol}\, T$, so the two orders cannot be told apart. The
+  tolerance is now never less than the route's `rtol` ($10^{-12}$), with R38's
+  `coincide_tol` above it when R38 is on.
+- **A segment of zero width.** Touches seeded at the same sample, the peak at $T/2$,
+  have equal times, and `_segment` refused any segment that was not strictly
+  increasing. The seed then never propagated (residual $7 \times 10^{6}$ for every
+  step). The flow over no time is the identity, and its derivatives in the end times
+  are $\mp F$ there, the limit of the positive widths. The residual is therefore
+  continuous through the coincidence, and Newton separates the events if their
+  conditions do.
+
+Rest 14 on the first route (release rules) solves in 13.5 s with the three fixes,
+where it stalled at 17 s or 19 s before (by sampling, then by the zero width). The other
+twelve structural stalls of the census page, on the first route with 120 s, are where
+they were: none of them was held by these.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

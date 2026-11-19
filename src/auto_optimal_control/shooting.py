@@ -92,6 +92,23 @@ class EdgeReached(ShootingError):
         self.t_edge, self.ta, self.tb = t_edge, ta, tb
 
 
+def sample_segment(dynamics, ta, tb, za, m, **options):
+    """``(t, z)``: the flow of ``dynamics`` from ``(ta, za)`` sampled at ``m`` times from
+    ``ta`` to ``tb`` (either direction). A segment narrower than ``m`` distinct floats (two
+    junctions at one instant, to rounding) is sampled at its two ends, and at zero
+    width it is the one point: an integrator takes only strictly monotone times."""
+    from fast_numerical_integration.integrators import solve_ivp
+
+    te = np.linspace(ta, tb, m)
+    steps = np.diff(te)
+    if not (np.all(steps > 0) or np.all(steps < 0)):
+        if ta == tb:
+            return np.array([float(ta)]), np.asarray(za, dtype=float)[None, :].copy()
+        te = np.array([ta, tb], dtype=float)
+    sol = solve_ivp(dynamics, (ta, tb), za, t_eval=te, **options)
+    return sol.t, sol.y.T
+
+
 @dataclass
 class ShootingSolution:
     """The result of :meth:`SingleShooting.solve`.
@@ -984,6 +1001,25 @@ class MultiArcShooting(SingleShooting):
     def _segment(self, kind, c, ta, dta, z, D, tb, dtb, jac, cost=False, flags=None):
         """Propagate a free (``kind is None``), boundary or singular arc; chain ``D = dz/dv``."""
         k, p = self.kernels, self.params
+        if tb == ta:
+            # Two events at one instant (touches seeded at one sample, as by symmetry):
+            # the flow over no time is the identity, and its derivatives in the end
+            # times are +-F there, the limit of the positive widths.
+            if kind is None:
+                F = (self._chains.rhs(z, p) if self._chains is not None and not flags
+                     else k.rhs_arc(ta, z, p, self._free_arc(ta, z, flags or {})
+                                    if k.N_MODES else None))
+            elif kind == "boundary":
+                F = k.boundary_rhs(c, ta, z, p)
+            else:
+                F = k.singular_rhs(c, ta, z, p)
+            F = np.asarray(F, dtype=float)
+            r = {"t": ta, "z": np.array(z, dtype=float), "stm": np.eye(len(z)) if jac else None,
+                 "cost": 0.0 if cost else None, "dz_dt1": F, "nfev": 0, "status": 0,
+                 "arc0": self._free_arc(ta, z, flags or {}) if kind is None else None}
+            if jac:
+                D = D + np.outer(F, dtb - dta)
+            return r, D
         if not tb > ta and not (self.backward_segments and tb < ta):
             raise ShootingError(f"arc times out of order: {ta} then {tb}", "negative_width")
         tolerance = {"stm_rtol": self.jacobian_rtol} if jac else {}
@@ -1811,9 +1847,8 @@ class MultiArcShooting(SingleShooting):
             else:
                 Dyn = k.BoundaryDynamics if kind == "boundary" else k.SingularDynamics
                 ctl = k.boundary_control if kind == "boundary" else k.singular_control
-                sol = solve_ivp(Dyn(c, p), (ta, tb), za, method=self.options["method"],
-                                t_eval=te, rtol=self.options["rtol"], atol=self.options["atol"])
-                ts, zs = sol.t, sol.y.T
+                ts, zs = sample_segment(Dyn(c, p), ta, tb, za, npts, method=self.options["method"],
+                                        rtol=self.options["rtol"], atol=self.options["atol"])
                 us = [ctl(c, ti, zi, p) for ti, zi in zip(ts, zs)]
             for ti, zi, ui in zip(ts, zs, us):
                 T.append(ti)

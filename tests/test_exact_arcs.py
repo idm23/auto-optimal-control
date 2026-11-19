@@ -353,3 +353,22 @@ def test_validation(bd, compiled):
         shoot.residual(backward)
     with pytest.raises(ValueError, match="pi must have 2"):
         shoot.pack_arcs([20, 6, 0, 0], [(0.3, 0.7, [0])])
+
+
+def test_a_segment_of_zero_width_is_the_identity_with_its_end_derivatives(bd):
+    """Two events seeded at one instant leave a free segment of zero width. Its flow is
+    the identity and its sensitivities to the end times are -F and +F there: the limit
+    of the positive widths, so the residual is continuous through the coincidence."""
+    shoot = MultiArcShooting(bd, [0.1, 0.0], [("touch", "x_max")])
+    v = shoot.pack_arcs([4.0, 3.0, 0.0, 0.0], [(0.5, 5.0)])
+    n = len(v)
+    z = np.array([0.05, 0.2, 1.0, -0.5])
+    D = np.zeros((4, n))
+    dta, dtb = np.eye(n)[0], np.eye(n)[1]
+    r, D0 = shoot._segment(None, None, 0.3, dta, z, D, 0.3, dtb, True, flags={})
+    np.testing.assert_array_equal(r["z"], z)
+    np.testing.assert_array_equal(r["stm"], np.eye(4))
+    delta = 1e-7
+    r1, D1 = shoot._segment(None, None, 0.3, dta, z, D, 0.3 + delta, dtb, True, flags={})
+    np.testing.assert_allclose((r1["z"] - z) / delta, r["dz_dt1"], rtol=1e-5, atol=1e-8)
+    np.testing.assert_allclose(D1, D0, atol=1e-5)

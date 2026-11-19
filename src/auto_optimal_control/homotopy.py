@@ -89,7 +89,7 @@ from auto_optimal_control.policy import (Lexicographic, SecondaryCost, _effort, 
 from auto_optimal_control.pontryagin import OUTLINE_ABOVE_OPS, bang_bang_controls, derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
 from auto_optimal_control.diagnostics import Diagnostics
-from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting
+from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting, sample_segment
 
 # The path of the continuation is followed to 1e-6: a rough Jacobian steers Newton as well.
 PATH_JACOBIAN_RTOL = 1e-7
@@ -1283,8 +1283,6 @@ class Homotopy:
 
     def _sample_segments(self, shoot, v, n_points):
         """``_free_samples`` for a multi-arc structure, without reuse."""
-        from fast_numerical_integration.integrators import solve_ivp
-
         k = shoot.kernels
         _, _, segs = shoot._evaluate(np.asarray(v, dtype=float), jac=False)
         span = segs[-1][3] - shoot.t0
@@ -1297,13 +1295,12 @@ class Homotopy:
                                   **self.options)
                 out.append((tr["t"], tr["g"], ()))
             elif kind == "boundary":
-                te = np.linspace(ta, tb, m)
-                sol = solve_ivp(k.BoundaryDynamics(aid, shoot.params), (ta, tb), za,
-                                method="DOP853", t_eval=te, rtol=self.options["rtol"],
-                                atol=self.options["atol"])
+                ts, zs = sample_segment(k.BoundaryDynamics(aid, shoot.params), ta, tb, za, m,
+                                        method="DOP853", rtol=self.options["rtol"],
+                                        atol=self.options["atol"])
                 g = np.array([k.constraint(ti, zi, shoot.params)
-                              for ti, zi in zip(sol.t, sol.y.T)]).reshape(len(sol.t), -1)
-                out.append((sol.t, g, tuple(k.arc_constraints(aid))))
+                              for ti, zi in zip(ts, zs)]).reshape(len(ts), -1)
+                out.append((ts, g, tuple(k.arc_constraints(aid))))
         return out
 
     def _birth_fraction(self, shoot, v, overshoot, scale, target=2e-4):
@@ -2072,8 +2069,17 @@ class Homotopy:
         return True
 
     def _coincide(self):
-        """Rule R38's tolerance (of T) for coincident junctions, 0 when it is off."""
-        return float(self.coincide_tol) if getattr(self, "coincident_junctions", False) else 0.0
+        """The tolerance (of T) below which junctions of different limits coincide, in
+        either order: Rule R38's ``coincide_tol`` when it is on, and never less than the
+        integration's ``rtol``. Two junctions crossed by ``d`` leave a segment of width
+        ``-d`` integrated backward, which moves the motion by ``O(d |f|)``: below
+        ``rtol T`` that is inside the integration's own error, so no order of the two
+        can be told from the other (by symmetry, rate arcs of a rest-to-rest motion
+        enter and leave at one instant, and their computed times differ by rounding)."""
+        floor = float(getattr(self, "options", {}).get("rtol", 0.0))
+        if getattr(self, "coincident_junctions", False):
+            return max(float(self.coincide_tol), floor)
+        return floor
 
     def _retire(self, shoot, v):
         """The structure without arcs that have died: a boundary arc shrunk to
