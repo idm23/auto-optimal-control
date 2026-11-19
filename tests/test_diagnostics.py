@@ -554,3 +554,35 @@ def test_junctions_crossed_by_rounding_are_coincident_under_r38():
     assert h._coincide() == 1e-8
     values[1] = (0.5 - 1e-6, 0.1)                    # a real crossing
     assert not MultiArcShooting.in_order(shoot, None, tol=h._coincide())
+
+
+def test_a_locked_pair_of_junctions_is_tied_under_r39():
+    """Rule R39: a limit that leaves where another enters, at one instant step after step,
+    is one junction. The closest such pair (different limits, no touch) is tied, and the
+    tie maps to the events wherever the two are adjacent."""
+    import types
+
+    import numpy as np
+
+    from auto_optimal_control.diagnostics import Diagnostics
+    from auto_optimal_control.shooting import MultiArcShooting
+
+    h = Homotopy.__new__(Homotopy)
+    h.kr = types.SimpleNamespace(CONSTRAINT_NAMES=["tau1_min", "w4_min", "w5_min"])
+    h.diagnostics = Diagnostics()
+    h._detail = lambda *a: None
+    h._ties = set()
+    shoot = MultiArcShooting.__new__(MultiArcShooting)
+    shoot.t0 = 0.0
+    shoot.arcs = [("boundary", 0, 1), ("boundary", 1, 2), ("touch", 2, 2)]
+    shoot.events = [("in", 0), ("out", 0), ("in", 1), ("touch", 2), ("out", 1)]
+    times = [0.65, 0.70366, 0.70366 + 2e-7, 0.70366 + 3e-7, 0.8]
+    shoot.event_times = lambda v: list(times)
+    shoot.unpack = lambda v: (None, None, None, 1.0)
+    assert h._tie_locked(shoot, None)
+    assert h._ties == {(("out", 0), ("in", 1))}          # not the touch, though closer
+    assert h._tied_events(shoot) == {1}
+    assert h.diagnostics.rules.get("R39") == 1
+    assert not h._tie_locked(shoot, None)                  # nothing else within 1e-5 T
+    shoot.events = [("in", 0), ("in", 1), ("out", 0), ("out", 1)]
+    assert h._tied_events(shoot) == set()                  # no longer adjacent
