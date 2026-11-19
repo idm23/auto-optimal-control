@@ -2040,6 +2040,7 @@ residual falling by $10^3$ to $10^4$ a step. On the first route (release rules p
 | rest 3 | 144 s, or unsolved | 65.4 s |
 | rest 1 | 222 s | 81.1 s |
 | goal 5 at 70% | 105 s, or unsolved | 232.7 s |
+| goal 9 at 70% | unsolved | 213.5 s |
 | rest 12 | unsolved | 235.3 s |
 
 Goals 9 at 80%, 0, 1 and 4 at 70%, 3 at 80%, and rests 2, 10 and 13 still stall. The jerk axis
