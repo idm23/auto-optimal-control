@@ -1776,6 +1776,44 @@ in three cases (goal 0 at 80% and 70%, rest 2), each of which reaches the rise o
 near its cap. The two rejections for `mu negative` are gone. What these cases need now
 is a faster route to the rise.
 
+### Where the rate-limited routes stall, and coincident junctions: Rule R38, tried
+
+On the first route alone (R35 and R36 on, 60 s cap), 29 of the 45 rate cases fail. Each
+was traced, and the route after its last progress (its least $|o|$ within 1%) was
+classified:
+
+| what the route does | cases |
+|---|---|
+| still progressing when the time runs out | 11: goals 0, 2 at 70%; 3, 4, 5 at 80% or 70%; rests 1, 3, 9, 10, 11 |
+| R30 reorders the same pair of junctions back and forth | 10: goals 1 at 80% and 70%, 4 and 5 at 90%, 9 at 70%; rests 6, 8, 12, 13, 14 |
+| crawls: most solves fail, at steps near $10^{-4}$ | 5: rests 2, 4, 5; goals 3 and 7 at 70% |
+| reaches the end of its offsets, the exact solve rejected | goal 0 at 80% (goals 1 at 80% and 5 at 90% also reach $|o| = 0$) |
+
+The reorders are coincident events, which Lemma D's genericity does not cover:
+
+- **By symmetry.** Rest 8 ends with five rate touches at one instant, 0.63184: with no
+  torque arc left, the motion is time-symmetric and every rate peak falls at $T/2$.
+  R30 saw crossings below $10^{-9}$ of $T$, rounding, and reordered for them.
+- **Forced.** In goal 1 at 80% the entries of `tau5_min` and `w3_max` swap back and forth
+  by about $7 \times 10^{-5}$ of $T$, each order's solution pushing them past each other;
+  in goal 9 at 70% `tau2_min` leaves where `tau6_min` enters; in rest 2 `tau1_min` leaves
+  where `w4_min` enters, the same instant to five digits at every step. A hand-over
+  of this kind (likely a forced exit, Lemma K) needs one junction for the two events,
+  which the shooting does not have.
+
+*Rule R38* (`Homotopy.coincident_junctions`). Junctions of different limits that cross by
+less than `coincide_tol` ($10^{-8}$) of $T$ are coincident, in either order: R30 does not
+reorder them, `_retire` does not re-sort them, and acceptance takes them. Below the
+junction times' own resolution the two orders give the same motion. R35's short arc no
+longer takes its width from events coincident with the touch, which had made it zero
+(rest 8: R35 then fired 140 times, each arc retired back to a touch).
+
+*Result.* Rate cases on the first route, 60 s cap (R1, R2, R16, R20, R21, R25–R27,
+R30–R36 on): 16 of 45 with and without R38, the same cases; R38 fires in 15, and the
+common solves take 12% less time (430 s to 377 s). Rest 8, alone on the machine, now
+reaches $|o| = 0.094$ with a symmetric structure (`w5_max` and `w4_min` on the same
+span about $T/2$), still progressing at the cap. The forced hand-overs are untouched.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

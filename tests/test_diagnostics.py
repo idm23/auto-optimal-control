@@ -136,7 +136,7 @@ def _stub_structure(arcs, values, orders, T=2.0):
     shoot = MultiArcShooting.__new__(MultiArcShooting)
     shoot.t0 = 0.0
     shoot.unpack = lambda v: (None, None, None, T)
-    shoot.in_order = lambda v: True
+    shoot.in_order = lambda v, tol=0.0: True
     return h, shoot
 
 
@@ -532,3 +532,25 @@ def test_boundary_arcs_ridden_at_run_time_get_their_own_evaluation_caps(monkeypa
     assert (s.boundary_max_nfev, s.boundary_stm_max_nfev) == (10000, 2000)
     s = h._multi_arc(symbolic, (), (), max_nfev=50000)
     assert (s.boundary_max_nfev, s.boundary_stm_max_nfev) == (None, None)
+
+
+def test_junctions_crossed_by_rounding_are_coincident_under_r38():
+    """Rule R38: symmetry makes junctions of different limits coincide exactly, and Newton
+    leaves them crossed by rounding. Below ``coincide_tol`` of T they count as in order,
+    for acceptance and for retiring arcs alike; a real crossing still does not."""
+    import numpy as np
+
+    arcs = [("touch", 0), ("touch", 1)]
+    values = [(0.5, 0.2), (0.5 - 1e-10, 0.1)]       # the second touch "before" the first
+    h, shoot = _stub_structure(arcs, values, [2, 2], T=1.0)
+    shoot.event_times = lambda v: [values[0][0], values[1][0]]
+    shoot.unpack = lambda v: (None, None, None, 1.0)
+    from auto_optimal_control.shooting import MultiArcShooting
+    assert not MultiArcShooting.in_order(shoot, None)
+    assert MultiArcShooting.in_order(shoot, None, tol=1e-8)
+    h.coincident_junctions, h.coincide_tol = False, 1e-8
+    assert h._coincide() == 0.0
+    h.coincident_junctions = True
+    assert h._coincide() == 1e-8
+    values[1] = (0.5 - 1e-6, 0.1)                    # a real crossing
+    assert not MultiArcShooting.in_order(shoot, None, tol=h._coincide())

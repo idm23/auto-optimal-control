@@ -18,17 +18,17 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-19, on the branch that computes R35's
-curvature exactly and builds `LimitObjects` once per system. Rules R1, R2, R15, R16, R20, R25 and R26 are turned on (the release's
+The data shown is from the census of 2026-11-19, on the branch that adds Rule R38
+(off by default, so the release's answers are those of `main`). Rules R1, R2, R15, R16, R20, R25 and R26 are turned on (the release's
 configuration), with held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has six routes: two draws of the offsets and sequential births, each
 also at ten times the secondary weight (R24). The routes run in parallel, one case at a
 time, on 8 physical cores. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-68 of the 90 cases solve, all under 60 s: the median is 14.1 s and the slowest 58.9 s.
+68 of the 90 cases solve, all under 60 s: the median is 14.1 s and the slowest 59.5 s.
 Goal 2 at 70% finishes near the cap, and which side of it it lands on varies from run to
-run (60.1 s, 58.6 s, 60.1 s and 58.9 s on the last four).
+run (60.1 s, 58.6 s, 60.1 s, 58.9 s and 59.5 s on the last five).
 
 - **`goal` and `rest`:** all 45 solve.
 - **`vgoal`:** 19 of 30: nine at 90% (all but goal 0), seven at 80% (goals 0, 1, 2, 5,
