@@ -279,6 +279,97 @@ margin is zero exactly when the corner is the only control that holds $g$.
   hypothesis.
 - **Used by.** R7.
 
+### J′. Coincident junctions are tangential too — proved, relative to S1
+
+- **Statement.** Assume C1, C2 and a convex $U$. At an instant $t^*$ where several
+  limits of order 1 or 2 enter, leave or are touched at once, the control is
+  continuous.
+- **Proof.** S1 gives $\lambda^+ - \lambda^- = -\sum_c \nu_c \nabla g_c$, with atoms
+  $\nu_c \ge 0$. For a limit of order 2, $\dot g_c = \nabla g_c F$ is free of $u$, so
+  $G^\top \nabla g_c = 0$. Hence $G^\top(\lambda^+ - \lambda^-) = -\sum_{q_c = 1} \nu_c a_c$:
+  only the order-1 atoms reach the control. The pointwise minimisation on each side
+  gives (S5) $(R u^\pm + G^\top \lambda^\pm)^\top (v - u^\pm) \ge 0$ for all $v \in U$.
+  Taking $v = u^\mp$ and adding gives
+  $$\|\Delta u\|_R^2 \le \sum_{q_c = 1} \nu_c\, a_c^\top \Delta u, \qquad \Delta u = u^+ - u^-.$$
+  For an order-1 limit, each case gives $a_c^\top \Delta u \le 0$:
+  - entering: $\dot g_c(t^{*-}) = d_c + a_c^\top u^- \ge 0$, since $g_c$ rises to 0,
+    and $\dot g_c = d_c + a_c^\top u^+ = 0$ on the arc;
+  - leaving: the same with the sides exchanged;
+  - touched: $\dot g_c(t^{*-}) \ge 0 \ge \dot g_c(t^{*+})$;
+  - ridden through $t^*$: $\dot g_c = 0$ on both sides.
+
+  So the right-hand side is $\le 0$, and $\Delta u = 0$. $\square$
+- **Consequence.** Every junction row that encodes the control's continuity (rate rows,
+  multiplier rows, R43's rows) is necessary at a coincidence too.
+- **Depends on.** S1, S5.
+- **Used by.** X.
+
+### X. Two entries at one instant: where the orders meet, and when they continue each other — proved, relative to J′ and B (regularity assumed)
+
+- **Setting.** Limit $A$ has order 1, with $a_A = (\nabla g_A G)^\top$. Limit $B$ has
+  order 1 or 2, with $b_B$ the gradient in $u$ of its first rate that depends on $u$.
+  The two are on distinct joints, so $a_A$ and $b_B$ are independent (B).
+  - Structure $\mathcal A$ enters $A$ first: free, then $\{A\}$, then $\{A, B\}$.
+  - Structure $\mathcal B$ enters $B$ first: free, then $\{B\}$, then $\{A, B\}$.
+
+  Each is a square system $R_{\mathcal A}(s, w, t_A, t_B) = 0$ or
+  $R_{\mathcal B}(s, w, t_A, t_B) = 0$, with the same unknowns and the route's
+  parameter $s$. Write $\delta = t_B - t_A$. $\mathcal A$'s solution is valid where
+  $\delta \ge 0$, and $\mathcal B$'s where $\delta \le 0$.
+- **(i) The joint junction.** At a solution with $t_A = t_B = t^*$ and the control
+  interior to $U$ there, J′ and B give the conditions of a joint entry:
+  - the states: $g_A = 0$, plus $g_B = \dot g_B = 0$ (order 2) or $g_B = 0$ (order 1);
+  - the multipliers: $\mu_A(t^{*+}) = \pi_A$ and $\mu_B(t^{*+}) = \pi_B$, with
+    $\pi_B$ the coefficient that reaches the control (the second, $\pi_2$, at order 2).
+
+  For the multipliers, subtract the stationarity of the free law from that of the
+  joint riding law, at the same $u$: $(\mu_A - \pi_A) a_A + (\mu_B - \pi_B) b_B = 0$.
+  Counting, the joint entry has one fewer unknown than two separate entries and the
+  same number of conditions. So it is overdetermined by one, and occurs only at
+  isolated values of $s$ (a hypersurface $\Sigma$ in the space of route parameters).
+- **(ii) Both orders meet there.** The joint point solves $R_{\mathcal A}$ and
+  $R_{\mathcal B}$ at $\delta = 0$. In $\mathcal A$ at zero width, the arc $\{A\}$
+  starts from $\lambda' = \lambda^- - \pi_A \nabla g_A$. The free control
+  $u = -R^{-1} G^\top \lambda^-$ satisfies the riding law there:
+  - its stationarity, since $R u + G^\top \lambda' + \mu_A a_A = (\mu_A - \pi_A) a_A = 0$;
+  - and $\dot g_A = 0$, which holds at the joint point.
+
+  So $\mathcal A$'s entry row for $A$ holds, and $B$'s entry rows are the joint ones.
+  $\mathcal B$ is the same with the roles exchanged.
+- **(iii) Crossing or fold.** Let both Jacobians in $(w, t_A, t_B)$ be nonsingular at
+  the joint point. By the implicit function theorem each order has a unique smooth
+  branch through it, and the gaps along them are
+  $\delta_{\mathcal A}(s) = \alpha (s - s^*) + O(|s - s^*|^2)$ and
+  $\delta_{\mathcal B}(s) = \beta (s - s^*) + O(|s - s^*|^2)$.
+  - If $\alpha\beta > 0$, exactly one order is valid on each side of $s^*$, and it
+    continues the other: E5.
+  - If $\alpha\beta < 0$, both orders are valid on one side, and neither has a
+    solution near the joint point on the other. The coincidence is a fold of the
+    route's solution curve, which turns back in $s$ there.
+
+  Both $\delta_{\mathcal A}$ and $\delta_{\mathcal B}$ vanish exactly on $\Sigma$, so
+  their gradients in the route's parameters are both normal to it. The sign of
+  $\alpha\beta$ is therefore a property of the point of $\Sigma$, not of the
+  direction the route crosses it in. $\square$
+- **Consequence.** A route that reaches a fold with $s$ increasing finds each order's
+  solution on its invalid side (the churn of goal 1 at 70%). No reorder, tie or drop
+  of an arc can continue it there. The solution curve continues on the other order's
+  branch with $s$ decreasing, which is a turning point. Following it needs arclength
+  continuation (Allgower and Georg), not steps in $s$.
+- **To check where it is used.**
+  - $\alpha$ and $\beta$ come from each order's Jacobian and $\partial_s R$ at a
+    converged point near the coincidence: the tangent of the branch, at no extra
+    integration.
+  - The hypotheses are the control interior at $t^*$ (the box margins), B's rank for
+    the pair, and both Jacobians nonsingular.
+  - Where any of these fails, the lemma is silent. The cases are Lemma K's corner, a
+    singular riding set, or a degenerate junction.
+- **Gap.** The $O(|s - s^*|^2)$ terms are uniform only while the Jacobians stay
+  nonsingular. This is a standard implicit-function-theorem estimate, but not yet
+  written out.
+- **Used by.** The diagnosis of the entry swaps (goal 1 at 70% before R43, and the
+  stalls still open).
+
 ### K. A forced exit is a corner, and its rate row is the margin — proved, relative to S1
 
 - **Statement.** Under J, with $a_k \ne 0$ for all $k$: an exit on the edge
