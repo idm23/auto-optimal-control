@@ -384,6 +384,18 @@ class Homotopy:
         #: order 2 too, and R5 splits an order-2 arc where it rises, the second piece
         #: entering with the jump that continues the arc's costate there.
         self.order2_rise = False
+        #: Rule R37 (Deuflhard's adaptive pathfollowing): Newton's first contraction
+        #: theta from a step's predictor sets the step. A theta above
+        #: ``contraction_reject`` ends that solve at once (the step is too long for
+        #: Newton, and no fallback solver is spent on it), and the next step, after a
+        #: success or such a rejection, is ``h * (contraction_target / theta)^(1/p)``:
+        #: theta grows like ``h^p`` (p = 2 from the secant predictor, 1 from the last
+        #: solution). Steers only; acceptance is unchanged. Below ``contraction_floor``
+        #: (in the leg's fraction) a step is solved as without the rule.
+        self.contraction_steps = False
+        self.contraction_target = 0.25
+        self.contraction_reject = 0.5
+        self.contraction_floor = 1e-3
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
@@ -2232,7 +2244,10 @@ class Homotopy:
         if self.kr.system.riding is not None:
             # Limits ridden at run time make every evaluation dear: a cheap attempt
             # first, and only a step that gets close earns the slower solve.
-            r = sh.solve_chord(guess, tol=path_tol)
+            reject = getattr(self, "_reject_theta", None)
+            r = sh.solve_chord(guess, tol=path_tol, reject_theta=reject)
+            if getattr(r, "too_far", False):
+                return sh, r               # Rule R37: a shorter step, not a slower solve
             if (not r.success and r.residual_norm >= 1e5 and self.edge_exits and arcs
                     and isinstance(sh, MultiArcShooting)):
                 # The seed did not propagate. If an arc rides past the edge of the
@@ -3032,18 +3047,39 @@ class Homotopy:
                     guesses.insert(0, v0 + (v0 - prev[1]) * (f - frac) / (frac - prev[0]))
                 done = None
                 outcome, attempt = None, None
-                for g in guesses:
+                # Below the floor, and within three halvings of the leg's ds_min, a
+                # step is solved as without the rule (the fallback solver included).
+                floor = max(self.contraction_floor, 8 * ds_min) if getattr(
+                    self, "contraction_steps", False) else np.inf
+                steered = f - frac > floor
+                theta_far, theta_done = None, None
+                for gi, g in enumerate(guesses):
+                    order = 2 if len(guesses) > 1 and gi == 0 else 1
                     base = g[:sh0.n_base] if isinstance(sh0, MultiArcShooting) else g
                     vals = self._arcs_of(sh0, g)[1] if arcs else values
                     attempt = (arcs, vals, base)
                     before = dict(self.diagnostics.evaluations)
                     state["why"] = None
                     try:
-                        sh, r = solve_structure(arcs, vals, base, le, off)
+                        self._reject_theta = self.contraction_reject if steered else None
+                        try:
+                            sh, r = solve_structure(arcs, vals, base, le, off)
+                        finally:
+                            self._reject_theta = None
+                        theta = getattr(r, "contraction", None)
+                        if getattr(r, "too_far", False):
+                            theta_far = (theta, order)
+                            self.diagnostics.fired("R37")
+                            self._detail(f"  step to {f:.6f} (ds {ds:.1e}): too long for "
+                                         f"Newton (theta {theta:.2g})")
+                            outcome = "too far (R37)"
+                            break          # the shorter step takes the predictor again
                         self._detail(f"  step to {f:.6f} (ds {ds:.1e}): residual "
                                      f"{r.residual_norm:.1e}; junctions "
                                      f"{self._junction_text(sh, r.v)}")
                         done = settle(sh, r, le, off) if r.success else None
+                        if done is not None:
+                            theta_done = (theta, order)
                         if r.success:
                             outcome = ("converged" if done is not None
                                        else f"settle failed: {state.get('why') or 'other'}")
@@ -3091,7 +3127,8 @@ class Homotopy:
                             done = settle(sh, r, le, off) if r.success else None
                         except _FAILURES as exc:
                             self._detail(f"  arcs run out to the ends: {exc}")
-                if done is None and self.locate_deaths and prev is not None and prev[2] == arcs:
+                if (done is None and self.locate_deaths and prev is not None and prev[2] == arcs
+                        and theta_far is None):
                     for drop, s_star in self._death_points(sh0, prev[1], v0, prev[0], frac, f):
                         fd = min(s_star + 0.25 * (s_star - frac), f)
                         le_d = le0 + fd * (target_le - le0)
@@ -3138,6 +3175,11 @@ class Homotopy:
                         self.diagnostics.fired("R16")
                         self._detail(f"    birth located at {located:.2f} of the step")
                         ds = (f - frac) * located
+                    elif theta_far is not None and np.isfinite(theta_far[0]):
+                        # Rule R37: theta ~ h^p, so this h is cut to the target theta.
+                        ds = (f - frac) * float(np.clip(
+                            (self.contraction_target / theta_far[0]) ** (1.0 / theta_far[1]),
+                            0.1, 0.5))
                     else:
                         ds *= 0.5
                     continue
@@ -3162,7 +3204,15 @@ class Homotopy:
                 if changed:
                     prev = None            # the structure changed: no secant across it
                     state["progress_at"] = time.perf_counter()     # progress, for R15
-                frac, ds = f, min(ds * 1.5, 0.25)
+                nxt = ds * 1.5
+                if (not changed and theta_done is not None and theta_done[0] is not None
+                        and f - frac > floor):
+                    # Rule R37: the step that gives the target contraction next.
+                    self.diagnostics.fired("R37")
+                    th, order = theta_done
+                    nxt = (f - frac) * float(np.clip(
+                        (self.contraction_target / max(th, 1e-12)) ** (1.0 / order), 0.5, 2.0))
+                frac, ds = f, min(nxt, 0.25)
                 if on_step is not None and on_step():
                     return True
             return True
