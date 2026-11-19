@@ -156,7 +156,7 @@ RULES = (
          "reorder did not settle", "coincident_junctions"),
     Rule("R39", "consistent step", "R30's reorder of two junctions of different limits crosses back (neither a touch)",
          "tie them: the earlier event's own row gives way to its time equal to the next one's (a hair apart), wherever the two are adjacent", ("K", "D"),
-         "heuristic (a hand-over: Lemma K's forced exit, where mu may stay positive up to the exit); acceptance judges the result",
+         "unsound as a rule: the row it drops is a necessary condition (Lemma J's tangency, the multiplier's continuity, or H continuity); only symmetry or Lemma K's corner makes such a coincidence, and it checks for neither. Kept off; acceptance rejects what it makes",
          "reorder did not settle", "handover_ties"),
     Rule("R32", "exact rejected", "the exact solution is rejected for a violation off the arcs that the route's threshold does not see",
          "bring it in as the route does (birth or widening), settle at the end of the offsets, solve exactly again (as R21)", ("E", "V"),

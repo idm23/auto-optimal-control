@@ -1840,6 +1840,21 @@ reaches its exact solve at 16 s instead of churning at the end. That solve conve
 1.5% of its largest value on `w5_max` and `w2_max`. Rate cases on the first route, 60 s
 cap (R38 on as well): 16 of 45 with and without R39, the same cases; R39 fires in 8.
 
+*Why it cannot be right (found after the census).* Every row a tie can replace is a
+necessary condition. Goal 1 at 80%'s tie replaced the rate row of `tau5_min`'s entry
+(the arrival is tangential), and its rejected answer has $\mu$ of `w5_max` and `w2_max`
+jumping up by about 1% at that instant, 0.65902. Lemma H2 makes an order-2
+multiplier continuous ($\mu(t) = \nu_{\rm out}(t_{\rm out} - t) + \int_t (s - t)\, \eta$),
+and Lemma J makes every junction tangential, bounds or not, so the rate rows and the
+multiplier rows both carry the control's continuity there; $H$ continuity is necessary
+too. A tie that drops one lets the control jump at the junction, and the multipliers of
+the limits ridden beside it jump with it. Rest 2's progress under R39 came the same way:
+keeping its multiplier rows (a variant tried and dropped), it does not move. Two
+junctions of different limits that keep all their conditions coincide only for a
+reason, as symmetry (R38) or Lemma K's corner, where the control is at the box's corner
+and the rate row is the margin; R39 does not check for either. It stays off, as a
+record. Acceptance caught every answer it produced.
+
 On the census page's accepted rate answers, which run with R36 off, Lemma H2 holds:
 re-solving the 21 on the first route alone, the 15 that solve there have no rise on any
 order-2 arc above rounding ($10^{-16}$ of the arc's largest $\mu$).
