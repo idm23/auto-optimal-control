@@ -1037,12 +1037,14 @@ class MultiArcShooting(SingleShooting):
             out.append(float(w[at]))
         return out
 
-    def in_order(self, v):
+    def in_order(self, v, tol=0.0):
         """Whether ``v``'s junctions come in the order of the structure (with
-        :attr:`backward_segments` the residual is defined either way)."""
+        :attr:`backward_segments` the residual is defined either way), up to ``tol``
+        of ``T``: junctions closer than that are coincident, in either order."""
         x0, lam0, nu, tf = self.unpack(v)
         times = [self.t0, *self.event_times(v), tf]
-        return all(b >= a for a, b in zip(times, times[1:]))
+        slack = tol * (tf - self.t0)
+        return all(b >= a - slack for a, b in zip(times, times[1:]))
 
     def _arc_id(self, active):
         """The kernels' arc id for the set of constraints ``active`` (None: free)."""

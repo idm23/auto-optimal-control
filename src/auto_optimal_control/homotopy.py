@@ -344,6 +344,13 @@ class Homotopy:
         #: step means a shorter step; a smaller one is the reorder (E5), and a reorder
         #: that crosses back again has not continued the event.
         self.watch_order = False
+        #: Rule R38: junctions of different limits that cross by less than
+        #: ``coincide_tol`` of T are coincident, not crossed: the order monitor (R30), the
+        #: retiring of arcs and acceptance read them as in order. Symmetry makes events
+        #: coincide exactly (rest-to-rest rate peaks at T/2), and Newton then leaves
+        #: them crossed by rounding, which R30 chased step after step.
+        self.coincident_junctions = False
+        self.coincide_tol = 1e-8
         #: Rule R31 (V1's jump monitor on the route): an order-1 arc whose entry
         #: multiplier pi is negative goes. By Lemma H, 0 <= mu <= pi on the arc, so at
         #: pi = 0 the multiplier vanishes on it and the arc dies without moving the motion.
@@ -1144,7 +1151,7 @@ class Homotopy:
             return "limit violated off its arcs"
         if not isinstance(shoot, MultiArcShooting) or not shoot.arcs:
             return None
-        if not shoot.in_order(sol.v):
+        if not shoot.in_order(sol.v, self._coincide()):
             return "junctions out of order"
         try:
             d = shoot.diagnostics(sol.v)
@@ -2000,6 +2007,10 @@ class Homotopy:
                 return (arcs, values), sh, r
         return None
 
+    def _coincide(self):
+        """Rule R38's tolerance (of T) for coincident junctions, 0 when it is off."""
+        return float(self.coincide_tol) if getattr(self, "coincident_junctions", False) else 0.0
+
     def _retire(self, shoot, v):
         """The structure without arcs that have died: a boundary arc shrunk to
         nothing becomes a touch point (order 2 or more) or goes (order 1), and a touch
@@ -2010,7 +2021,7 @@ class Homotopy:
         T = shoot.unpack(v)[3] - shoot.t0
         # Junctions that crossed (rule R10 lets the residual through them): the same arcs,
         # with their events sorted again, is a structure change.
-        crossed = isinstance(shoot, MultiArcShooting) and not shoot.in_order(v)
+        crossed = isinstance(shoot, MultiArcShooting) and not shoot.in_order(v, self._coincide())
         out_a, out_v, changed = [], [], crossed
         convex = self._touch_curvatures(shoot, v) if getattr(self, "touch_curvature", False) else {}
         for i, ((kind, c), val) in enumerate(zip(arcs, values)):
@@ -2022,7 +2033,12 @@ class Homotopy:
                 others = [t_ for j, (k_, v_) in enumerate(zip(arcs, values)) if j != i
                           for t_ in ((v_[0],) if k_[0] == "touch" else (v_[0], v_[1]))
                           if np.isfinite(t_)]
-                gap = min((abs(t_ - val[0]) for t_ in others), default=T)
+                # Events coincident with the touch (R38: other limits' touches at the
+                # same instant, as by symmetry) bound no width: their arcs start and end
+                # together with this one.
+                same = self._coincide() * T
+                gap = min((abs(t_ - val[0]) for t_ in others if abs(t_ - val[0]) > same),
+                          default=T)
                 w = min(1e-3 * T, 0.25 * gap)
                 out_a.append(("boundary", c))
                 out_v.append((val[0] - w, val[0] + w, np.array([float(val[1]), 0.0])))
@@ -2814,6 +2830,9 @@ class Homotopy:
             for _ in range(2 * self.nc + 4):
                 optional = False
                 back = self._order_crossing(sh, r.v) if self.watch_order else 0.0
+                if 0.0 < back <= self._coincide():
+                    self.diagnostics.fired("R38")
+                    back = 0.0             # coincident junctions, in either order
                 crossed = back > 0.0
                 if crossed:
                     # Rule R30: the order monitor (V1) is negative.
