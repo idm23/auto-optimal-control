@@ -3486,10 +3486,14 @@ class Homotopy:
             shoot = SingleShooting(kx, px, **self.options)
             guess = shoot.pack(lam0, None, T if kx.FREE_FINAL_TIME else None)
         if kx.N_MULTIPLIERS:
-            # The terminal multipliers enter linearly: fit them.
-            Rv, Jv = shoot.residual_jacobian(guess)
-            cols = slice(shoot.n_free + n, shoot.n_free + n + kx.N_MULTIPLIERS)
-            guess[cols] += np.linalg.lstsq(Jv[:, cols], -Rv, rcond=None)[0]
+            # The terminal multipliers enter linearly: fit them. A mapped extremal that does
+            # not propagate forward has nothing to fit; the exact solve judges it as it is.
+            try:
+                Rv, Jv = shoot.residual_jacobian(guess)
+                cols = slice(shoot.n_free + n, shoot.n_free + n + kx.N_MULTIPLIERS)
+                guess[cols] += np.linalg.lstsq(Jv[:, cols], -Rv, rcond=None)[0]
+            except _FAILURES as exc:
+                self._say(f"reversal: the mapped extremal does not propagate ({exc})")
         hit = self._exact_jump(entries, guess, _scaled(options.get("tol", 1e-10), guess))
         if hit is None:
             self._say("reversal: the mapped extremal was not accepted")
