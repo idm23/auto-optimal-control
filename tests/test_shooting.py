@@ -175,3 +175,22 @@ def test_multistart_and_continuation(compiled):
     with pytest.raises(RuntimeError, match="stalled"):
         continuation(lambda w, g: ShootingSolution(g, None, None, None, 0, 1, 1.0, False, 0),
                      1.0, [2.0], sol.v)
+
+
+def test_a_segment_of_rounding_width_samples_without_raising():
+    """Two junctions at one instant leave a segment one float wide (or of zero width):
+    linspace repeats a time there, which an integrator refuses. The segment is then its
+    ends, or its one point."""
+    from auto_optimal_control.shooting import sample_segment
+
+    def decay(t, y):
+        return -y
+
+    a = 0.636959565379545
+    for b in (np.nextafter(a, 1.0), np.nextafter(a, 0.0)):
+        t, z = sample_segment(decay, a, b, [1.0], 5, method="DOP853", rtol=1e-12, atol=1e-12)
+        assert list(t) == [a, b] and z.shape == (2, 1)
+    t, z = sample_segment(decay, a, a, [1.0], 5, method="DOP853", rtol=1e-12, atol=1e-12)
+    assert list(t) == [a] and z.tolist() == [[1.0]]
+    t, z = sample_segment(decay, 0.0, 1.0, [1.0], 5, method="DOP853", rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(z[:, 0], np.exp(-t), rtol=1e-9)

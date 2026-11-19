@@ -92,6 +92,23 @@ class EdgeReached(ShootingError):
         self.t_edge, self.ta, self.tb = t_edge, ta, tb
 
 
+def sample_segment(dynamics, ta, tb, za, m, **options):
+    """``(t, z)``: the flow of ``dynamics`` from ``(ta, za)`` sampled at ``m`` times from
+    ``ta`` to ``tb`` (either direction). A segment narrower than ``m`` distinct floats (two
+    junctions at one instant, to rounding) is sampled at its two ends, and at zero
+    width it is the one point: an integrator takes only strictly monotone times."""
+    from fast_numerical_integration.integrators import solve_ivp
+
+    te = np.linspace(ta, tb, m)
+    steps = np.diff(te)
+    if not (np.all(steps > 0) or np.all(steps < 0)):
+        if ta == tb:
+            return np.array([float(ta)]), np.asarray(za, dtype=float)[None, :].copy()
+        te = np.array([ta, tb], dtype=float)
+    sol = solve_ivp(dynamics, (ta, tb), za, t_eval=te, **options)
+    return sol.t, sol.y.T
+
+
 @dataclass
 class ShootingSolution:
     """The result of :meth:`SingleShooting.solve`.
@@ -1811,9 +1828,8 @@ class MultiArcShooting(SingleShooting):
             else:
                 Dyn = k.BoundaryDynamics if kind == "boundary" else k.SingularDynamics
                 ctl = k.boundary_control if kind == "boundary" else k.singular_control
-                sol = solve_ivp(Dyn(c, p), (ta, tb), za, method=self.options["method"],
-                                t_eval=te, rtol=self.options["rtol"], atol=self.options["atol"])
-                ts, zs = sol.t, sol.y.T
+                ts, zs = sample_segment(Dyn(c, p), ta, tb, za, npts, method=self.options["method"],
+                                        rtol=self.options["rtol"], atol=self.options["atol"])
                 us = [ctl(c, ti, zi, p) for ti, zi in zip(ts, zs)]
             for ti, zi, ui in zip(ts, zs, us):
                 T.append(ti)
