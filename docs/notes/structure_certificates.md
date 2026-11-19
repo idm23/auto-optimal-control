@@ -1981,6 +1981,29 @@ the rule does what the theory says (rest 11). A version for this residual would 
 tell a kink from distance, for instance from where the held-set events fall in the step,
 and that is not done.
 
+### Crossed junctions at the exact solve: Rule R41
+
+After the rounding fixes, rest 8's route reaches the end of its offsets, and its exact
+solve converges (residual $9.6 \times 10^{-11}$, violation $10^{-11}$, no $\mu$ negative
+or rising). It is rejected because junctions are out of order: the exits of `w1_max` and
+`w2_max` are crossed by $2.6 \times 10^{-8}$ of $T$, and those of `w5_max` and `w4_min` by
+$1.3 \times 10^{-7}$. Both crossings are well above the integration's resolution, so they
+are real. Below the route's own tolerance, the path structure was in order. The exact
+problem, without the regularization, moves the junctions far enough to pass each other.
+
+*Rule R41* (`Homotopy.exact_reorders`). When an exact solution converges with junctions
+crossed past the coincidence tolerance, the structure with the events in the order of
+their times is solved from it, at most twice. Lemma E5 says two limits' junctions cross
+transversally, so the swapped order is the structure beyond the crossing. The swapped
+seed has the crossed segment at width $|d|$ instead of $-|d|$. Acceptance judges the
+result as any other.
+
+*Result, first route.* Rest 8 (release rules plus R41, 120 s) is reordered twice. The
+first reorder still has `w1_max` and `w5_max` crossed by $8 \times 10^{-8}$, and the second
+is accepted (residual $6 \times 10^{-12}$). On the census pages since the rounding fixes, this
+rejection is the only one among the unsolved cases besides goal 0 at 90%'s violations:
+rest 8 on each, and rest 14 on the page with R37.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
