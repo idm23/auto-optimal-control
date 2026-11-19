@@ -1961,10 +1961,25 @@ at once:
 | goal 9 at 80% | 251.1 s | unsolved (0.73) |
 | rest 1, rest 2, rest 8, rest 11 | unsolved | unsolved |
 
-Steps that do not converge fall from 1,472 to 273 over the ten cases. Where a case is decided, R37 wins
-four and loses two. Single runs move cases on and off by chance (rest 11 solved in 77 s
-with R37 and 193 s without it on the code before the rounding fixes), so the census page
-decides.
+Steps that do not converge fall from 1,472 to 273 over the ten cases. Where a case is
+decided, R37 wins four and loses two. Single runs move cases on and off by chance (rest 11
+solved in 77 s with R37 and 193 s without it on the code before the rounding fixes), so
+the census page decides.
+
+*Census page (release configuration plus R37, 60 s cap): 67 of 90, against 69 without it.*
+Goal 4 at 80% is gained (57.5 s). Rests 2, 9 and 14 are lost, each at the cap, and the 66
+common solves take 7% longer (956 s to 1021 s). R37 stays off.
+
+*Why it cannot be right here.* The theory needs a residual with a Lipschitz Jacobian, and
+the route's residual is only piecewise smooth: the held set on a riding arc changes at
+events (R22). On rest 14, $\Theta$ is about $10^{-5}$ for steps of $1.2 \times 10^{-3}$ and
+20 to 80 for steps of $2.4 \times 10^{-3}$ from the same point, with a start residual of
+about $10^{-2}$. That is a kink crossed, not the $h^2$ growth of a smooth predictor. R37
+reads it as distance and cuts the step by ten, so rest 14 takes 351 steps instead of 65
+(16.8 s against 11.9 s alone, past the cap on the page). Where the residual is smooth
+the rule does what the theory says (rest 11). A version for this residual would need to
+tell a kink from distance, for instance from where the held-set events fall in the step,
+and that is not done.
 
 ## Rules these license
 

@@ -152,7 +152,7 @@ RULES = (
          "rejected: mu negative (Lemma H)", "order2_rise"),
     Rule("R37", "path step", "Newton's first contraction theta from the step's predictor (the chord's first step)",
          "theta > 1/2: end the solve and cut the step to h (1/4 / theta)^(1/p); after a success, the next step is h (1/4 / theta)^(1/p) (clipped), p = 2 from the secant predictor, 1 without", ("V",),
-         "steers only (Deuflhard 2004, adaptive pathfollowing: theta estimates half the Kantorovich quantity omega ||dv0||, which grows like h^p); acceptance is unchanged",
+         "steers only (Deuflhard 2004, adaptive pathfollowing: theta estimates half the Kantorovich quantity omega ||dv0||, which grows like h^p); acceptance is unchanged. Tried: the census page falls from 69 to 67, since the route's residual is only piecewise smooth (held-set events) and a kink reads as distance",
          "not converged", "contraction_steps"),
     Rule("R38", "consistent step", "junctions of different limits cross by less than coincide_tol (1e-8) of T",
          "read them as coincident, in order: no reorder (R30), no re-sorting (retire), and acceptance takes them", ("D", "V"),
