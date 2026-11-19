@@ -2004,6 +2004,12 @@ is accepted (residual $6 \times 10^{-12}$). On the census pages since the roundi
 rejection is the only one among the unsolved cases besides goal 0 at 90%'s violations:
 rest 8 on each, and rest 14 on the page with R37.
 
+*Census page (release configuration plus R32 and R41, 60 s cap): 71 of 90, against 69.*
+Rest 8 is new (46.3 s, R41), and so is goal 0 at 90% (14.1 s, R32: its exact solution
+violated a limit off its arcs by $2.5 \times 10^{-7}$, above the check's $10^{-7}$). Nothing
+is lost, and the 69 common solves take the same time (1071 s and 1076 s). Both rules join
+the release configuration.
+
 ### Order-2 junctions: Lemma H2's rows in place of H continuity (Rule R43)
 
 *Where the time goes inside a solve.* On rest 1 (first route, release rules) a path solve
@@ -2048,11 +2054,14 @@ Goals 9 at 80%, 0, 1 and 4 at 70%, 3 at 80%, and rests 2, 10 and 13 still stall.
 riding its rate limit gives the same extremal with either row (final time to $10^{-10}$,
 initial costates to $10^{-8}$), with symbolic arcs and with arcs ridden at run time.
 
-*Census page (release configuration plus R32 and R41, 60 s cap): 71 of 90, against 69.*
-Rest 8 is new (46.3 s, R41), and so is goal 0 at 90% (14.1 s, R32: its exact solution
-violated a limit off its arcs by $2.5 \times 10^{-7}$, above the check's $10^{-7}$). Nothing
-is lost, and the 69 common solves take the same time (1071 s and 1076 s). Both rules join
-the release configuration.
+*Census page (release configuration with R32, R41 and R43, 60 s cap): 80 of 90, against
+71.* Nine cases are new: goals 5 and 9 at 70% (16.5 s, 18.6 s), rest 13 (21.8 s), goal 2 at
+70% (22.4 s), rest 3 (25.5 s), goal 9 at 80% (29.5 s), goal 1 at 70% (35.4 s), rest 11
+(38.3 s) and goal 4 at 80% (45.2 s). None is lost. The 71 common solves take 826 s instead of
+1137 s, and the median falls from 13.8 s to 10.4 s. Goal 1 at 70% is among them, the case
+whose entries of `tau5_min` and `w3_max` swapped back and forth on its first route (why
+it now solves is not yet traced). Ten stay unsolved: goals 0, 3 and 4 at 70%, goal 3 at 80%, and rests 1, 4, 5,
+6, 10 and 12. R43 joins the release configuration.
 
 ## Rules these license
 
