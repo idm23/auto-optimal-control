@@ -210,7 +210,9 @@ margin is zero exactly when the corner is the only control that holds $g$.
   negative.
 - **Depends on.** S1, B (independent gradients on the arc).
 - **Used by.** Acceptance ("mu negative" applies at every order; R36 adds the rise
-  check at order 2), and R36's split of an order-2 arc where $\mu$ rises.
+  check at order 2), R36's split of an order-2 arc where $\mu$ rises, and R43's junction
+  rows: $\mu(t_{\rm out}^-) = 0$ at the exit and $\mu(t_{\rm in}^+) = \pi_2$ at the entry,
+  simple roots in place of $H$ continuity.
 
 ### H′. An arc whose entry multiplier reaches zero dies without moving the motion — proved, relative to S1
 
