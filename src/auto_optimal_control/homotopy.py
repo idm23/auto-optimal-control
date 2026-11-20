@@ -396,6 +396,12 @@ class Homotopy:
         self.contraction_target = 0.25
         self.contraction_reject = 0.5
         self.contraction_floor = 1e-3
+        #: Rule R44: a fold of Lemma X (both orders of a crossed pair crossed, at a regular
+        #: point with alpha * beta < 0) is passed by arclength: the route turns back on the
+        #: other order's branch until the structure changes, then goes on to its target.
+        self.fold_turns = False
+        self.fold_condition = 1e8          # the largest equilibrated condition of J taken as regular
+        self.fold_turn_limit = 4           # turn-backs per route
         #: Rule R41: an exact solution rejected because junctions of different limits
         #: crossed is solved again with the events in the order of their times (E5).
         self.exact_reorders = False
@@ -2096,6 +2102,164 @@ class Homotopy:
             return max(float(self.coincide_tol), floor)
         return floor
 
+    def _turn_back(self, fold, frac, f, le0, off_start, target_le, target_off,
+                   solve_structure, settle, state):
+        """Rule R44: put the route on the other order's branch of a fold, at a point the
+        route has already passed (the side of Lemma X's fold where both orders are
+        valid). The seed moves along that branch's tangent from where it was solved.
+        True if a solution of that order, in order, is settled there."""
+        sh_b, v_b, tangent = fold["shoot"], fold["v"], fold["tangent"]
+        for f_back in (frac, frac + 0.5 * (f - frac), frac + 0.75 * (f - frac)):
+            le_b = le0 + f_back * (target_le - le0)
+            off_b = off_start + f_back * (np.asarray(target_off, dtype=float) - off_start)
+            seed = v_b + (f_back - f) * tangent
+            arcs_b, vals_b = self._arcs_of(sh_b, seed)
+            try:
+                sh, r = solve_structure(arcs_b, vals_b, seed[:sh_b.n_base], le_b, off_b)
+            except _FAILURES:
+                continue
+            if not (r.success and isinstance(sh, MultiArcShooting)
+                    and sh.in_order(r.v, self._coincide())):
+                continue
+            state["backward"] = True       # no second fold test inside this settle
+            try:
+                done = settle(sh, r, le_b, off_b, changed=True)
+            finally:
+                state["backward"] = False
+            if done is None:
+                continue
+            self._detail(f"    R44: the other order's branch at {f_back:.6f} of the leg "
+                         f"(the fold at {f:.6f}); following it back")
+            state.update(shoot=done[0], v=done[1].v, le=le_b, off=off_b)
+            return True
+        self._detail("    R44: the other order's branch could not be taken")
+        return False
+
+    @staticmethod
+    def _event_column(shoot, j):
+        """The column of ``v`` that holds event ``j``'s time."""
+        ev, i = shoot.events[j]
+        sl = shoot._arc_slices[i]
+        return sl.start + ((0 if i in shoot._started else 1) if ev == "out" else 0)
+
+    def _fold_rates(self, shoot, v, le, off, direction, first, second, h=1e-6):
+        """Lemma X's quantities for one order: the gap ``t(second) - t(first)`` between two
+        events (given as indices in ``shoot.events``), its rate along the route's
+        ``direction`` = (d le, d off) per unit step, from the branch's tangent
+        ``-J^-1 dR/ds``, the tangent itself, and J's condition after row and column
+        equilibration."""
+        v = np.asarray(v, dtype=float)
+        dle, doff = direction
+        p0 = shoot.params
+
+        def residual_at(sign):
+            shoot.params = np.asarray(self.regularized_params(
+                self._eps_at(le + sign * h * dle), np.zeros(self.nc), off + sign * h * doff),
+                dtype=float)
+            try:
+                return shoot.residual(v)
+            finally:
+                shoot.params = p0
+
+        Rs = (residual_at(1.0) - residual_at(-1.0)) / (2 * h)
+        _, J = shoot.residual_jacobian(v)
+        rows = 1.0 / np.maximum(np.abs(J).max(axis=1), 1e-300)
+        A = J * rows[:, None]
+        cols = 1.0 / np.maximum(np.abs(A).max(axis=0), 1e-300)
+        sv = np.linalg.svd(A * cols[None, :], compute_uv=False)
+        tangent = -np.linalg.solve(J, Rs)
+        times = shoot.event_times(v)
+        gap = times[second] - times[first]
+        rate = tangent[self._event_column(shoot, second)] - tangent[self._event_column(shoot, first)]
+        return gap, rate, tangent, float(sv[0] / max(sv[-1], 1e-300))
+
+    def _fold_hypotheses(self, shoot, v, t_star, window):
+        """Whether Lemma X's hypotheses hold at ``t_star``: every arc within ``window`` of it
+        rides with its control interior to the box, and the control gradients of the
+        limits active there are independent (Lemma B's rank). ``(ok, why)``."""
+        k, p = shoot.kernels, shoot.params
+        G = shoot._control_matrix()
+        if G is None:
+            return False, "no constant control matrix"
+        _, _, segs = shoot._evaluate(np.asarray(v, dtype=float), jac=False, record=True)
+        active = set()
+        for kind, aid, ta, tb, za, flags, rr in segs:
+            if not (min(ta, tb) <= t_star + window and max(ta, tb) >= t_star - window):
+                continue
+            for tt, zz in ((ta, za), (tb, rr["z"])):
+                u = np.asarray(k.control(tt, zz, p) if kind is None
+                               else k.boundary_control(aid, tt, zz, p), dtype=float)
+                lo, hi = (np.asarray(x, dtype=float) for x in k.control_bounds(tt, zz, p))
+                if np.any(np.minimum(u - lo, hi - u) <= 1e-9 * np.maximum(hi - lo, 1.0)):
+                    return False, "a control at its bound at the junction (a corner)"
+            if kind == "boundary":
+                active |= set(k.arc_constraints(aid)) if aid >= k.N_CONSTRAINTS else {aid}
+        z_star = None
+        for kind, aid, ta, tb, za, flags, rr in segs:
+            if min(ta, tb) <= t_star <= max(ta, tb):
+                z_star = za
+                break
+        if z_star is None or not active:
+            return True, ""
+        grads = []
+        for c in sorted(active):
+            q = k.CONSTRAINT_ORDERS[c]
+            Nx = np.asarray(k.tangency_gradient(c, t_star, z_star, p)[1])
+            g_u = G.T @ Nx[q - 1][:k.N_STATES]
+            grads.append(g_u / max(np.linalg.norm(g_u), 1e-300))
+        sv = np.linalg.svd(np.array(grads), compute_uv=False)
+        if len(grads) > G.shape[1] or sv[-1] < 1e-6:
+            return False, "the active limits' control gradients are dependent (Lemma B)"
+        return True, ""
+
+    def _fold_check(self, history, shoot, sol, le, off, direction):
+        """Rule R44: whether the crossed solution ``sol`` and an earlier one in ``history``
+        (this settle's solutions, same point) are the two orders of one pair of events,
+        both crossed, at a fold of Lemma X. Returns the other order's branch to turn back
+        on, or None."""
+        if direction is None or not isinstance(shoot, MultiArcShooting):
+            return None
+        mine = self._event_labels(shoot)
+        times = shoot.event_times(sol.v)
+        by_time = [mine[j] for j in sorted(range(len(mine)), key=lambda j_: times[j_])]
+        for sh_o, sol_o in reversed(history):
+            theirs = self._event_labels(sh_o)
+            if theirs != by_time:
+                continue                   # not the order this solution's times ask for
+            diff = [j for j in range(len(mine)) if mine[j] != theirs[j]]
+            if not (len(diff) == 2 and diff[1] == diff[0] + 1
+                    and mine[diff[0]] == theirs[diff[1]] and mine[diff[0]][1] != mine[diff[1]][1]):
+                return None
+            j = diff[0]
+            if sh_o.in_order(sol_o.v, self._coincide()):
+                return None                # the earlier order was not crossed: E5's reorder
+            try:
+                gA, aA, tA, cA = self._fold_rates(sh_o, sol_o.v, le, off, direction, j, j + 1)
+                gB, aB, tB, cB = self._fold_rates(shoot, sol.v, le, off, direction, j + 1, j)
+            except _FAILURES:
+                return None
+            # Common coordinate: the gap t(theirs[j+1]) - t(theirs[j]); valid >= 0 for the
+            # earlier order (A), <= 0 for this one (B).
+            if max(cA, cB) > self.fold_condition:
+                self._detail(f"    fold test: Jacobian condition {max(cA, cB):.1e} (not regular)")
+                return None
+            t_star = 0.5 * (shoot.event_times(sol.v)[j] + sh_o.event_times(sol_o.v)[j])
+            T = shoot.unpack(sol.v)[3] - shoot.t0
+            ok, why = self._fold_hypotheses(shoot, sol.v, t_star, abs(gA) + abs(gB) + 1e-6 * T)
+            if ok:
+                ok, why = self._fold_hypotheses(sh_o, sol_o.v, t_star, abs(gA) + abs(gB) + 1e-6 * T)
+            names = [self.kr.CONSTRAINT_NAMES[c] for _, c in theirs[j:j + 2]]
+            if not ok:
+                self._detail(f"    fold test at {names}: {why}")
+                return None
+            self._detail(f"    fold test at {[e for e, _ in theirs[j:j + 2]]} {names}: gap rates "
+                         f"{aA:+.2e} and {aB:+.2e}" + (": a fold (Lemma X)" if aA * aB < 0 else ""))
+            if aA * aB >= 0:
+                return None
+            return {"shoot": shoot, "v": np.asarray(sol.v, dtype=float), "tangent": tB,
+                    "gap": gB, "rate": aB, "key": (tuple(names), round(t_star, 3))}
+        return None
+
     def _retire(self, shoot, v):
         """The structure without arcs that have died: a boundary arc shrunk to
         nothing becomes a touch point (order 2 or more) or goes (order 1), and a touch
@@ -2931,6 +3095,7 @@ class Homotopy:
             structure was just changed, so a large violation is that change's doing."""
             last = None
             reorders = 0
+            history = []                   # Rule R44: this settle's solutions, at (le, off)
             if self.locate_splits and not changed:
                 # Rule R25: the step crossed a split (an arc's density turned negative
                 # inside it): a shorter step, to the event, before any repair.
@@ -2963,6 +3128,16 @@ class Homotopy:
                             # with the tie.
                             self._tie_crossing(sh, r.v)
                         return None
+                if (getattr(self, "fold_turns", False) and not state.get("backward")
+                        and isinstance(sh, MultiArcShooting)
+                        and not sh.in_order(r.v, self._coincide())):
+                    fold = self._fold_check(history, sh, r, le, off, state.get("leg_dir"))
+                    if fold is not None and fold["key"] not in state.setdefault("folds_seen", set()):
+                        self.diagnostics.fired("R44")
+                        state["fold"] = fold
+                        state["why"] = "fold (Lemma X)"
+                        return None
+                history.append((sh, r))
                 viol = None if crossed else self._free_violations(sh, r.v, scale)
                 if viol:
                     worst = max(peak / scale[c] for c, _, _, peak in viol)
@@ -3048,12 +3223,18 @@ class Homotopy:
             state["why"] = "structure changes did not settle"
             return None
 
-        def advance(target_le, target_off, on_step=None, ds_min=1e-6):
+        def advance(target_le, target_off, on_step=None, ds_min=1e-6, turn_to=None,
+                    backward=False):
             """Towards the target along a straight line; False, at the last solution
-            reached, if the step falls below ``ds_min``."""
+            reached, if the step falls below ``ds_min``. Rule R44 turns at a fold towards
+            ``turn_to`` (the line's other end; the start by default), following the
+            solution curve by arclength; ``backward``: this run goes against the
+            route, so reaching its end means the curve does not lead on (False)."""
             le0, off_start = state["le"], state["off"].copy()
             frac, ds = 0.0, 0.25
             prev = None                    # (frac, v, structure) of the solution before
+            leg_dir = (target_le - le0, np.asarray(target_off, dtype=float) - off_start)
+            state["leg_dir"] = leg_dir
             while frac < 1.0:
                 if (state["solves"] > max_solves or ds < ds_min
                         or time.perf_counter() > deadline or stalled()):
@@ -3193,6 +3374,23 @@ class Homotopy:
                 if (done is None and getattr(self, "handover_ties", False)
                         and self._tie_locked(sh0, v0)):
                     continue               # Rule R39: the same step, with the tie
+                fold = state.pop("fold", None)
+                if (done is None and fold is not None
+                        and state.setdefault("fold_count", 0) < self.fold_turn_limit):
+                    # Rule R44: a fold (Lemma X). The solution curve goes on along the other
+                    # order's branch with the step decreasing: take that branch at the last
+                    # accepted point, follow it back until the structure changes, and go on.
+                    state["fold_count"] += 1
+                    state.setdefault("folds_seen", set()).add(fold["key"])
+                    turned = self._turn_back(fold, frac, f, le0, off_start, target_le,
+                                             target_off, solve_structure, settle, state)
+                    if turned:
+                        # The curve goes on the other way: towards this line's other end,
+                        # turning again at the next fold (arclength continuation).
+                        other_le, other_off = turn_to if turn_to is not None else (le0, off_start)
+                        return advance(other_le, other_off, on_step, ds_min,
+                                       turn_to=(target_le, np.asarray(target_off, dtype=float)),
+                                       backward=not backward)
                 if done is None:
                     if located is not None:
                         self.diagnostics.fired("R16")
@@ -3238,6 +3436,9 @@ class Homotopy:
                 frac, ds = f, min(nxt, 0.25)
                 if on_step is not None and on_step():
                     return True
+            if backward:
+                self._detail("    R44: the curve led back to the start of the leg")
+                return False
             return True
 
         found = []

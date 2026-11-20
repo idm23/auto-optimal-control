@@ -2063,6 +2063,40 @@ whose entries of `tau5_min` and `w3_max` swapped back and forth on its first rou
 it now solves is not yet traced). Ten stay unsolved: goals 0, 3 and 4 at 70%, goal 3 at 80%, and rests 1, 4, 5,
 6, 10 and 12. R43 joins the release configuration.
 
+### Folds of Lemma X on the route: Rule R44, tried
+
+With R43, two of the unsolved cases stall at a pair of junctions of different limits whose
+two orders both come out crossed at one step:
+- goal 0 at 70%: the exits of `w5_max` and `tau5_max`;
+- goal 4 at 70%: `w5_max` leaving where `tau4_max` enters.
+
+There the hypotheses of Lemma X (lemma register) hold. The riding controls of the arcs at
+the junction are interior, the pair's control gradients are independent, and both orders'
+Jacobians are nonsingular. The gap rates have opposite signs: $-1.5 \times 10^{-1}$ and
+$+8.0 \times 10^{-1}$, and $-4.8$ and $+9.4$. By X these are folds: on the side the route
+is heading to, neither order solves near the junction, and the solution curve turns back
+in the route's parameter.
+
+*Rule R44* (`Homotopy.fold_turns`). It follows the curve by arclength:
+1. At a fold, confirmed by the hypotheses checked at the point and $\alpha\beta < 0$, the
+   route takes the other order's branch at the last accepted point, seeded along that
+   branch's tangent.
+2. It follows the branch toward the leg's other end, turning again at the next fold.
+3. A backward run that reaches the leg's start without a fold means the curve does not
+   lead on.
+
+It only steers, and acceptance is unchanged. A first version went forward again as soon
+as the backward run's structure changed. That retraces the same curve to the same fold,
+and it did.
+
+*Result, first route.* Goal 4 at 70%: the other branch, taken at 0.8541 of the leg (the
+fold at 0.8543), leads back to the start of the leg without a second fold. Goal 0 at 70%:
+the backward run stalls among collapses of short arcs (R20). Neither solves. On this leg's
+line in the offsets, the solution curve through each fold does not reach the target.
+These answers are on another component of the solution set, reached by a different path
+in the offsets or a different structure, which no continuation from this fold finds.
+R44 stays off, as a record of what X implies.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
