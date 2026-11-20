@@ -402,6 +402,9 @@ class Homotopy:
         self.fold_turns = False
         self.fold_condition = 1e8          # the largest equilibrated condition of J taken as regular
         self.fold_turn_limit = 4           # turn-backs per route
+        #: Rule R45: "corner" tightens the limits at R24's larger weight and then lowers the
+        #: weight; "diagonal" lowers it together with the offsets.
+        self.weight_path = "corner"
         #: Rule R41: an exact solution rejected because junctions of different limits
         #: crossed is solved again with the events in the order of their times (E5).
         self.exact_reorders = False
@@ -3560,7 +3563,12 @@ class Homotopy:
                     self.diagnostics.fired("R13")
                     advance(state["le"], target, ds_min=1e-4)
             while True:
-                if advance(state["le"], np.zeros(self.nc)):
+                # Rule R45: with a larger starting weight (R24), the weight comes down
+                # together with the offsets, on the diagonal of the (log w, offsets)
+                # plane, instead of after them (each point a real problem: Lemma W).
+                le_leg = (le_target if getattr(self, "weight_path", "corner") == "diagonal"
+                          and le_target is not None else state["le"])
+                if advance(le_leg, np.zeros(self.nc)):
                     return True
                 if out_of_budget():
                     return False

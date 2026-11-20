@@ -189,8 +189,8 @@ BY_NAME = {r.name: r for r in RULES}
 #: and (Rule R24, for a policy with a numeric secondary weight) the first route and these
 #: two again, started at 10 w.
 DEFAULT_PORTFOLIO = ({"offset_seed": 1}, {"offset_order": "sequential"}, {"weight_start": 10},
-                     {"weight_start": 10, "offset_seed": 1},
-                     {"weight_start": 10, "offset_order": "sequential"})
+                     {"weight_start": 30},
+                     {"weight_start": 100, "weight_path": "diagonal"})
 
 
 def enabled(h):
