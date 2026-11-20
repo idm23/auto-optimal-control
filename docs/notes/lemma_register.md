@@ -87,6 +87,35 @@ margin is zero exactly when the corner is the only control that holds $g$.
   edge of the holdable set.
 - **Used by.** Riding code; Lemma E (H0).
 
+### SP. The riding law sees the costates only through $F_u^\top\lambda$ — proved
+
+- **Statement.** Let $H = L(x, u) + \lambda^\top f(x, u)$ with $f$ affine in $u$,
+  $f = f_0(x) + F_u(x)\,u$, and let the ridden limits' rates
+  $h_k^{(q_k)} = A_k(x)\,u + b_k(x)$ and the control bounds depend on $x$ only. Then
+  on a riding arc the control and the multipliers $(u, \mu)$ (Lemma B's system, held
+  controls included) depend on $\lambda$ only through $F_u(x)^\top\lambda$. So for
+  every costate $\lambda_j$ whose row $j$ of $F_u$ is zero,
+  $\partial(u, \mu)/\partial\lambda_j = 0$ on the arc.
+  - For a jerk chain, $\dot x = (\dot q, \ddot q, u)$, $F_u = (0; 0; I)$: the law moves
+    with $\lambda_{\ddot q}$ alone. 12 of the six-joint arm's 18 costates do not move it.
+- **Proof.** In Lemma B's system, $R = \partial^2 H/\partial u^2 = \partial^2 L/\partial u^2$
+  (since $f$ is affine in $u$), and the limits' rows and the bounds are functions of $x$.
+  The right-hand side's first block is $-\partial H/\partial u|_{u=0} =
+  -\partial L/\partial u(x, 0) - F_u(x)^\top\lambda$. So $\lambda$ enters only there,
+  through $F_u^\top\lambda$, and by the implicit function theorem the solution is a
+  function of $(x, F_u^\top\lambda)$ wherever the held set is fixed. ∎
+- **What it saves.**
+  - The riding Jacobian needs $\mathrm{d}(u, \mu)/\mathrm{d}z$: one solve with the
+    factored system per column of $z$. By SP, the columns of the costates outside
+    $F_u$'s rows have a zero right-hand side, so their solution is zero, and their
+    terms in the costate rows' Jacobian need no products.
+  - The code tests for a zero right-hand side at run time. That is exact, and it
+    covers further zeros that SP does not predict.
+  - On goal 3 at 80% ($k = 100$, release rules) this takes 45.1 s to 43.5 s, with the
+    route unchanged.
+- **Depends on.** B.
+- **Used by.** The riding kernels (`riding.py`: `r_sensitivity`, `riding_rhs_jac`).
+
 ### C. The old path makes births coincide — proved
 
 - **Statement.** Take the route $o(s) = (1 - s)(p + \epsilon)$ from the

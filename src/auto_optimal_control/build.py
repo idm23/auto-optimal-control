@@ -245,7 +245,11 @@ class Kernels:
     def __getattr__(self, attr):
         if attr.startswith("_"):
             raise AttributeError(attr)
-        return getattr(self.module, attr)
+        # Found once, then an instance attribute: a solve looks these up millions of
+        # times, and the module's names do not change.
+        value = getattr(self.module, attr)
+        self.__dict__[attr] = value
+        return value
 
     def __repr__(self):
         return f"<Kernels {self.module.__name__} at {self.path}>"

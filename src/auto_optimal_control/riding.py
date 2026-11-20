@@ -473,20 +473,31 @@ int {P}riding_rhs(int c, double t, const double* z, const double* p, double* dz)
     return 0;
 }}
 
-/* dy/dz, y = (u, ms), as a {dim} x {nz} array, from the system already factored. */
+/* dy/dz, y = (u, ms), as a {dim} x {nz} array, from the system already factored.
+   Lemma SP: a column whose right-hand side is zero (a costate that does not enter the
+   law, a row of Fu that is zero) has dy/dz_j = 0; it is not solved, and zero[j] says so. */
 static int {P}r_sensitivity(int c, double t, const double* z, const double* p, const double* u,
                             const double* mr, const double* K, const int* piv, int d, double* D,
-                            const double* Fu, const double* Hxu, const double* Lxu, double* Gx) {{
+                            const double* Fu, const double* Hxu, const double* Lxu, double* Gx,
+                            unsigned char* zero) {{
     const int s = {P}r_size[c];
     double v[{dim}];
     {P}r_rate_grad(t, z, p, u, mr, Gx);
     for (int j = 0; j < {nz}; ++j) {{
+        int any = 0;
         for (int i = 0; i < {m}; ++i) {{
             v[i] = j < {n} ? -(Hxu[j * {m} + i] + Lxu[j * {m} + i]) : -Fu[(j - {n}) * {m} + i];
+            any |= v[i] != 0.0;
         }}
         for (int i = 0; i < s; ++i) {{
             const int l = {P}r_set[c][i];
             v[{m} + i] = j < {n} ? -{P}r_sign[l] * Gx[{P}r_root[l] * {n} + j] : 0.0;
+            any |= v[{m} + i] != 0.0;
+        }}
+        zero[j] = !any;
+        if (!any) {{
+            for (int i = 0; i < d; ++i) D[i * {nz} + j] = 0.0;
+            continue;
         }}
         for (int i = {m} + s; i < d; ++i) v[i] = 0.0;   /* a held control does not move */
         {P}r_lu_solve(K, d, piv, v);
@@ -504,11 +515,17 @@ int {P}riding_jac(int c, double t, const double* z, const double* p, double* A) 
     const int s = {P}r_size[c];
     {P}r_derivatives(t, z, p, u, Fx, Fu, Hxx, Hxu);
     {P}r_lagrangian_hess(t, z, p, u, mr, L2);
-    {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, Lxu, Gx);
+    unsigned char zero[{nz}];
+    {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, Lxu, Gx, zero);
     for (int j = 0; j < {nz}; ++j) {{
         for (int i = 0; i < {n}; ++i) {{
             double a = j < {n} ? Fx[i * {n} + j] : 0.0;
             double b = j < {n} ? -(Hxx[i * {n} + j] + Lxx[i * {n} + j]) : -Fx[(j - {n}) * {n} + i];
+            if (zero[j]) {{                  /* Lemma SP: the law does not move with z_j */
+                A[i * {nz} + j] = a;
+                A[({n} + i) * {nz} + j] = b;
+                continue;
+            }}
             for (int q = 0; q < {m}; ++q) {{
                 a += Fu[i * {m} + q] * D[q * {nz} + j];
                 b -= (Hxu[i * {m} + q] + Lxu[i * {m} + q]) * D[q * {nz} + j];
@@ -539,11 +556,17 @@ int {P}riding_rhs_jac(int c, double t, const double* z, const double* p, double*
     const int s = {P}r_size[c];
     {P}r_derivatives(t, z, p, u, Fx, Fu, Hxx, Hxu);
     {P}r_lagrangian_hess(t, z, p, u, mr, L2);
-    {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, Lxu, Gx);
+    unsigned char zero[{nz}];
+    {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, Lxu, Gx, zero);
     for (int j = 0; j < {nz}; ++j) {{
         for (int i = 0; i < {n}; ++i) {{
             double a = j < {n} ? Fx[i * {n} + j] : 0.0;
             double b = j < {n} ? -(Hxx[i * {n} + j] + Lxx[i * {n} + j]) : -Fx[(j - {n}) * {n} + i];
+            if (zero[j]) {{                  /* Lemma SP: the law does not move with z_j */
+                A[i * {nz} + j] = a;
+                A[({n} + i) * {nz} + j] = b;
+                continue;
+            }}
             for (int q = 0; q < {m}; ++q) {{
                 a += Fu[i * {m} + q] * D[q * {nz} + j];
                 b -= (Hxu[i * {m} + q] + Lxu[i * {m} + q]) * D[q * {nz} + j];
@@ -594,7 +617,8 @@ static int {P}r_gradients(int c, double t, const double* z, const double* p, dou
     if (rc) return rc;
     {P}r_derivatives(t, z, p, u, Fx, Fu, Hxx, Hxu);
     {P}r_lagrangian_hess(t, z, p, u, mr, L2);
-    return {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, L2 + {n * n}, Gx);
+    unsigned char zero[{nz}];
+    return {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, L2 + {n * n}, Gx, zero);
 }}
 
 int {P}riding_multiplier_grad(int c, double t, const double* z, const double* p, double* Mt,
