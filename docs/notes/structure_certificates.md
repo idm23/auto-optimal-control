@@ -2120,7 +2120,7 @@ stage of the route, not the answer.
 | $k = 1$ (release) | none of the ten failures | none |
 | $k = 30$, corner (R24) | 7 of 10 | goal 3 at 80% (134 s) |
 | $k = 100$, corner (R24) | 9 of 10 | rests 5 and 12 (61 s, 93 s) |
-| $k = 100$, diagonal (R45) | 4 of 10 | rests 1, 5 and 12 (69 s, 100 s, 110 s) |
+| $k = 100$, diagonal (R45) | 5 of 10 | rests 1, 5 and 12 (69 s, 100 s, 110 s) |
 
 Past zero offsets, the corner path lowers the weight with every limit exact, and that
 walk meets its own events. On goal 4 at 70% it meets a turning point: an arc's width
