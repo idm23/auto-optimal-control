@@ -421,6 +421,8 @@ class Homotopy:
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
+        #: Rule R54: R25's location is not repeated at a density that jumps (Lemma P).
+        self.density_jumps = False
         #: Rule R50: an order-2 arc whose width crosses zero inside a step dies there
         #: into a touch (Lemmas E'' and Z): the death is located by the secant and the
         #: touch solved just past it.
@@ -1443,6 +1445,20 @@ class Homotopy:
             eta0 = float(np.interp(t_star, t, eta))
             if not eta0 > 0.0:
                 return None                # the step starts past the event: R5 splits
+            T = shoot1.unpack(v1)[3] - shoot1.t0
+            memo = getattr(self, "_split_memo", None)
+            self._split_memo = (c, t_star, eta1)
+            if (getattr(self, "density_jumps", False) and memo is not None and memo[0] == c
+                    and abs(memo[1] - t_star) < 1e-3 * T and eta1 < 0.5 * memo[2]):
+                # Rule R54: the last location put the step where eta(t*) is a tenth of its
+                # end value, if eta(t*) is continuous in s. It is not smaller by half: eta
+                # jumps at t* where a held-set change sweeps through it (Lemma P), at the
+                # base. No shorter step reaches the zero; R5 splits from here.
+                self.diagnostics.fired("R54")
+                self._split_memo = None
+                self._detail(f"    {self.kr.CONSTRAINT_NAMES[c]}: density at t = {t_star:.5f} "
+                             f"jumps at the base ({memo[2]:.2e}, then {eta1:.2e}): no location")
+                return None
             theta = (eta0 - target * eta1) / (eta0 - eta1)
             self._detail(f"    {self.kr.CONSTRAINT_NAMES[c]}: density at t = {t_star:.5f} "
                          f"falls from {eta0:.2e} to {eta1:.2e} over the step")
