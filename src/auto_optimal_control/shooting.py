@@ -1045,7 +1045,7 @@ class MultiArcShooting(SingleShooting):
             arc[c] = flag
         return arc
 
-    def _free_hamiltonian(self, t, z, flags):
+    def _free_hamiltonian(self, t, z, flags, grad=True):
         """``(H, dH/dt, dH/dz)`` on a free arc, with the held controls at their bounds.
 
         ``H`` is linear in a bang-bang control ``u`` with coefficient ``S``,
@@ -1053,11 +1053,11 @@ class MultiArcShooting(SingleShooting):
         the bounds are piecewise constant in ``z``."""
         k, p = self.kernels, self.params
         H = k.hamiltonian(t, z, p)
-        Ht, Hz = k.hamiltonian_gradient(t, z, p)
+        Ht, Hz = k.hamiltonian_gradient(t, z, p) if grad else (None, None)
         if not flags:
             return H, Ht, Hz
         S = k.switching(t, z, p)
-        St, Sz, _ = k.switching_gradient(t, z, p)
+        St, Sz, _ = k.switching_gradient(t, z, p) if grad else (None, None, None)
         u = k.control(t, z, p)
         lo, hi = k.control_bounds(t, z, p)
         controls = list(k.system.controls)
@@ -1066,8 +1066,9 @@ class MultiArcShooting(SingleShooting):
             du = (hi[j] if flag else lo[j]) - u[j]
             if du:
                 H = H + S[c] * du
-                Ht = Ht + St[c] * du
-                Hz = Hz + Sz[c] * du
+                if grad:
+                    Ht = Ht + St[c] * du
+                    Hz = Hz + Sz[c] * du
         return H, Ht, Hz
 
     def _segment(self, kind, c, ta, dta, z, D, tb, dtb, jac, cost=False, flags=None):
@@ -1315,9 +1316,10 @@ class MultiArcShooting(SingleShooting):
         margin = 1e-12 * np.maximum(1.0, np.abs(u))
         return bool(np.all((u - lo > margin) & (hi - u > margin)))
 
-    def _rate_of(self, c, arc_id, t, z, flags):
+    def _rate_of(self, c, arc_id, t, z, flags, grad=True):
         """``(dg_c/dt, its t-derivative, its z-gradient)`` along the free arc
-        (``arc_id`` None) or a boundary arc, for a time-invariant limit."""
+        (``arc_id`` None) or a boundary arc, for a time-invariant limit. Without
+        ``grad`` (a residual alone) the derivatives are None."""
         k, p = self.kernels, self.params
         n = k.N_STATES
         _, Nx, Nxx, _ = k.tangency_gradient(c, t, z, p)
@@ -1329,6 +1331,8 @@ class MultiArcShooting(SingleShooting):
             return k.boundary_rhs(arc_id, tt, z, p)
 
         F = flow(t)
+        if not grad:
+            return float(Nx[0] @ F[:n]), None, None
         if arc_id is None:
             A = (k.jacobian(t, z, p, arc=self._free_arc(t, z, flags)) if k.N_MODES
                  else k.jacobian(t, z, p))
@@ -1342,19 +1346,25 @@ class MultiArcShooting(SingleShooting):
         gt = float(gx @ (flow(t + h)[:n] - flow(t - h)[:n])) / (2 * h)
         return val, gt, gz
 
-    def _multiplier_of(self, arc_id, c, t, z):
-        """``(mu_c, dmu_c/dt, dmu_c/dz)`` of constraint ``c`` on arc ``arc_id``."""
+    def _multiplier_of(self, arc_id, c, t, z, grad=True):
+        """``(mu_c, dmu_c/dt, dmu_c/dz)`` of constraint ``c`` on arc ``arc_id``; without
+        ``grad`` the derivatives (a riding sensitivity solve) are None."""
         k, p = self.kernels, self.params
         mu = np.atleast_1d(k.boundary_multiplier(arc_id, t, z, p))
-        Mt, Mz = k.boundary_multiplier_gradient(arc_id, t, z, p)
         i = list(k.arc_constraints(arc_id)).index(c)
+        if not grad:
+            return float(mu[i]), None, None
+        Mt, Mz = k.boundary_multiplier_gradient(arc_id, t, z, p)
         return float(mu[i]), float(Mt[i]), Mz[i]
 
-    def _set_hamiltonian(self, arc_id, t, z, flags):
-        """``(H, dH/dt, dH/dz)`` on the free arc (``arc_id`` None) or a boundary arc."""
+    def _set_hamiltonian(self, arc_id, t, z, flags, grad=True):
+        """``(H, dH/dt, dH/dz)`` on the free arc (``arc_id`` None) or a boundary arc;
+        without ``grad`` the derivatives are None."""
         k, p = self.kernels, self.params
         if arc_id is None:
-            return self._free_hamiltonian(t, z, flags)
+            return self._free_hamiltonian(t, z, flags, grad)
+        if not grad:
+            return k.boundary_hamiltonian(arc_id, t, z, p), None, None
         Ht, Hz = k.hamiltonian_gradient(t, z, p, boundary=arc_id)
         return k.boundary_hamiltonian(arc_id, t, z, p), Ht, Hz
 
@@ -1492,7 +1502,7 @@ class MultiArcShooting(SingleShooting):
                     # exit, dg/dt = 0 (Lemma J). At the edge of the holdable set, with
                     # the riding control at the box's corner, it holds with mu_c > 0,
                     # where mu_c = 0 cannot (Lemma K).
-                    val, gt, gz = self._rate_of(c, after, t, z, flags)
+                    val, gt, gz = self._rate_of(c, after, t, z, flags, grad=jac)
                     rows.append(val)
                     grads.append(gt * d_ev + gz @ D if jac else None)
                 elif (self._regular_junction(kind, q, after, t, z)
@@ -1502,13 +1512,13 @@ class MultiArcShooting(SingleShooting):
                     # moves dg/dt is interior on the arc and continuity of the control
                     # forces mu_c a_k = 0 (Lemma J). A simple root, where H continuity
                     # has a double one.
-                    val, Mt, Mz = self._multiplier_of(aid, c, t, z)
+                    val, Mt, Mz = self._multiplier_of(aid, c, t, z, grad=jac)
                     rows.append(val)
                     grads.append(Mt * d_ev + Mz @ D if jac else None)
                 else:
                     after = self._arc_id(active - {c})
-                    H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags)
-                    H2, H2t, H2z = self._set_hamiltonian(after, t, z, flags)
+                    H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags, grad=jac)
+                    H2, H2t, H2z = self._set_hamiltonian(after, t, z, flags, grad=jac)
                     rows.append(H1 - H2)
                     grads.append((H1t - H2t) * d_ev + (H1z - H2z) @ D if jac else None)
                 active.discard(c)
@@ -1522,7 +1532,7 @@ class MultiArcShooting(SingleShooting):
                 # An order-1 touch (Lemma L): at the edge, with the control at the corner on
                 # both sides, the one-sided rates are both -margin, so dg/dt = 0 under the
                 # arriving control.
-                val, gt, gz = self._rate_of(c, aid, t, z, flags)
+                val, gt, gz = self._rate_of(c, aid, t, z, flags, grad=jac)
                 rows.append(val)
                 grads.append(gt * d_ev + gz @ D if jac else None)
             used = slice(0, 1) if kind == "touch" else slice(0, q)
@@ -1552,7 +1562,7 @@ class MultiArcShooting(SingleShooting):
                     # The arrival is tangential: g peaks there along the arc
                     # before, so dg/dt = 0 (a simple root in t_in, where g = 0
                     # alone has a double one).
-                    val, gt, gz = self._rate_of(c, aid, t, z, flags)
+                    val, gt, gz = self._rate_of(c, aid, t, z, flags, grad=jac)
                     rows.append(val)
                     grads.append(gt * d_ev + gz @ D if jac else None)
                 elif self._multiplier_row_here(kind, q):
@@ -1560,7 +1570,7 @@ class MultiArcShooting(SingleShooting):
                     # control that moves dg/dt is interior on the arc, and continuity of
                     # the control at the junction forces (mu_c - pi) a_k = 0 (Lemma J).
                     # Order 1: pi; order 2 (R43, Lemma H2): pi_2, the second coefficient.
-                    val, Mt, Mz = self._multiplier_of(after, c, t, zp)
+                    val, Mt, Mz = self._multiplier_of(after, c, t, zp, grad=jac)
                     rows.append(val - float(mult[q - 1]))
                     if jac:
                         g_ = Mt * d_ev + Mz @ Dp
@@ -1570,8 +1580,8 @@ class MultiArcShooting(SingleShooting):
                         grads.append(None)
                 else:
                     # H continuous at the entry: H(before, z-) = H(after, z+).
-                    H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags)
-                    H2, H2t, H2z = self._set_hamiltonian(after, t, zp, flags)
+                    H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags, grad=jac)
+                    H2, H2t, H2z = self._set_hamiltonian(after, t, zp, flags, grad=jac)
                     rows.append(H1 - H2)
                     grads.append((H1t - H2t) * d_ev + H1z @ D - H2z @ Dp if jac else None)
                 active.add(c)
@@ -1589,10 +1599,10 @@ class MultiArcShooting(SingleShooting):
         if aid is not None and k.FREE_FINAL_TIME:
             # H(t_f) is the last residual row, written at the free law: on an arc
             # it is H at the riding control.
-            Hf, Hft, Hfz = self._set_hamiltonian(None, tf, zf, flags)
-            Hb, Hbt, Hbz = self._set_hamiltonian(aid, tf, zf, flags)
+            Hf, Hft, Hfz = self._set_hamiltonian(None, tf, zf, flags, grad=jac)
+            Hb, Hbt, Hbz = self._set_hamiltonian(aid, tf, zf, flags, grad=jac)
             base_rows[-1] += Hb - Hf
-            fix = (Hbt - Hft, Hbz - Hfz)
+            fix = (Hbt - Hft, Hbz - Hfz) if jac else None
         R = np.concatenate([base_rows, rows])
         if not jac:
             return R, None, segments

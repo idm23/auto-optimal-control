@@ -2291,6 +2291,25 @@ Tried on the same case and not kept (2026-11-20):
   are the domain's edge or a kink at a particular point of the route, not a uniform
   radius, and the bracket keeps the steps short long after passing one.
 
+### Work that a solve does not need: Lemma SP, and residuals without gradients
+
+Two changes compute the same numbers with less work. On goal 3 at 80% ($k = 100$,
+release rules) they take a route that is unchanged from 46.8 s to 43.5 s.
+- *Lemma SP.* The riding law sees the costates only through $F_u^\top\lambda$, so the
+  sensitivity solves of the other costates' columns have zero right-hand sides. The
+  kernels test for a zero right-hand side and skip the solve and its products in the
+  costate rows' Jacobian. The arm's Jacobians match main's to the last digit against
+  central differences (0.18 of the test's tolerance on the six-limit set, both).
+- *Residuals without gradients.* A residual-only evaluation still computed its
+  junction rows' gradients: the multiplier's sensitivity (a riding Jacobian solve),
+  the rate's $z$-gradient and $H$'s gradient. Residuals outnumber Jacobians about 7 to
+  1 on the route. They now compute the rows' values alone.
+- The kernels' names are found once, not on each of about two million lookups a
+  solve.
+
+*Census page (release configuration, 60 s cap): 84 of 90, the same cases.* They take
+815 s against 859 s, and the median falls from 7.4 s to 7.0 s.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
