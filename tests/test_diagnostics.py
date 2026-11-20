@@ -29,7 +29,7 @@ def test_a_solve_reports_what_it_ran_into(axis):
     _, r = axis
     assert r.exact
     d = r.diagnostics
-    assert set(d) == {"evaluations", "steps", "rejected", "rules", "oracles", "snapshots"}
+    assert set(d) == {"evaluations", "steps", "rejected", "rules", "oracles", "snapshots", "routes"}
     assert d["steps"].get("converged", 0) > 0
     assert set(d["evaluations"]) <= CLASSES
 
@@ -698,3 +698,39 @@ def test_order2_arc_death_is_located_by_the_secant_in_its_width():
     h.kr.CONSTRAINT_ORDERS = [1, 2]
     s2 = shoot(arcs, [(0.20, 0.29, np.array([0.1])), (0.58840, 0.58866, np.array([0.3, 0.0]))])
     assert h._order2_death(s0, None, s2, None) is None
+
+
+def test_a_density_that_jumps_at_the_base_is_not_located_again():
+    """Lemma V2' and rule R54: R25's located step makes a continuous density's end value
+    about a tenth of the last; one that does not shrink by half jumps at the base (P),
+    and R25 stops locating there."""
+    import types
+
+    import numpy as np
+
+    h = Homotopy.__new__(Homotopy)
+    h.diagnostics = Diagnostics()
+    h.kr = types.SimpleNamespace(CONSTRAINT_NAMES=["tau5_max"])
+    h.density_jumps = True
+    h._detail = lambda msg: None
+    t = np.linspace(0.70, 0.80, 11)
+    shoot = types.SimpleNamespace(t0=0.0, unpack=lambda v: (None, None, None, 1.6))
+    ends = {"eta1": -0.95}
+
+    def densities(sh, v):
+        if v == "old":
+            return [(0, t, np.full_like(t, 3.8), 0.0, 1.0)]
+        eta = np.full_like(t, 3.8)
+        eta[5] = ends["eta1"]
+        return [(0, t, eta, 0.5, 1.0)]
+
+    h._densities = densities
+    first = h._split_fraction(shoot, "old", shoot, "new")
+    assert first is not None and 0.05 <= first <= 0.9
+    # The shorter step ends with the same negative density: a jump at the base.
+    assert h._split_fraction(shoot, "old", shoot, "new") is None
+    assert h.diagnostics.rules.get("R54") == 1
+    # A density that shrinks as a continuous one does is located again.
+    h._split_fraction(shoot, "old", shoot, "new")
+    ends["eta1"] = -0.095
+    assert h._split_fraction(shoot, "old", shoot, "new") is not None

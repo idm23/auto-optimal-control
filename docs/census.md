@@ -18,9 +18,9 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-20, on the branch where an order-2 arc
-that shrinks to nothing inside a step becomes a touch at the death located by the secant
-(Lemma Z). Rules R1, R2, R15, R16, R20, R25, R26, R29, R32, R41, R43, R48 and R50 are turned on (the release's
+The data shown is from the census of 2026-11-20, on the branch where R25 stops locating a
+split at a density that jumps at the step's base (Lemma V2′). Rules R1, R2, R15, R16, R20,
+R25, R26, R29, R32, R41, R43, R48, R50 and R54 are turned on (the release's
 configuration), with held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
 secondary weight (R24); the first draw at a hundred times it, once lowering the weight
@@ -29,10 +29,13 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-85 of the 90 cases solve, all under 60 s: the median is 9.3 s and the slowest 52.3 s.
-R50 changes no case: on the page the common solves take within 1% of the time without it.
-On goal 3 at 70% alone it saves the 7 s that stepping past the death of a `w2_min` arc
-cost, but that case's route is still too slow.
+85 of the 90 cases solve, all under 60 s: the median is 9.4 s and the slowest 51.7 s.
+R54 changes no case on the page: the common solves take within 0.1% of the time without
+it. It matters on routes that meet such a jump. On goal 3 at 80% at a hundred times the
+weight, with R51 on, the route stalls without it and solves with it.
+
+When all seven routes are busy they run at about half speed (Observation O4). On most
+cases all seven run until one wins, and the winners are spread over every route.
 
 - **`goal` and `rest`:** all 45 solve.
 - **`vgoal`:** 26 of 30: all ten at 90%, nine at 80% (all but goal 3) and seven at 70%
