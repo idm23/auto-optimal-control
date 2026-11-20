@@ -2310,6 +2310,21 @@ release rules) they take a route that is unchanged from 46.8 s to 43.5 s.
 *Census page (release configuration, 60 s cap): 84 of 90, the same cases.* They take
 815 s against 859 s, and the median falls from 7.4 s to 7.0 s.
 
+### One sampling of each accepted solution
+
+The settle's checks read the accepted solution at samples. R25's densities used one
+integration of it (the trajectory), and the violations off the arcs a second one at nearly
+the same points. Under cProfile these re-integrations were about a fifth of goal 3 at 80%'s
+time. The violations now read the trajectory's samples, split where the arc changes
+(`Homotopy.one_sampling`, on by default). The points differ only on segments narrower than
+three samples. Lemma V1's update records what such samples can resolve.
+
+*Goal 3 at 80%* ($k = 100$, alone): 43.5 s to 38.5 s.
+
+*Census page (release configuration, 60 s cap): 85 of 90.* Goal 3 at 80% is gained
+(59.4 s), and nothing is lost. The 84 common cases take 727 s against 815 s (11% faster),
+and the median falls from 7.0 s to 6.5 s.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
