@@ -3270,7 +3270,10 @@ class Homotopy:
                     # Secant predictor along the path, while the structure holds.
                     guesses.insert(0, v0 + (v0 - prev[1]) * (f - frac) / (frac - prev[0]))
                     if (getattr(self, "quadratic_predictor", False) and prev2 is not None
-                            and prev2[2] == arcs and prev[0] > prev2[0]):
+                            and prev2[2] == arcs and prev[0] > prev2[0]
+                            and target_le != le0):
+                        # (Only on legs that move the weight, where Newton's radius shrinks
+                        # along the path: Lemma S (2) with W (2).)
                         # Rule R48: the quadratic through the last three solutions; its
                         # error is O(h^3) where the secant's is O(h^2).
                         x0_, x1_, x2_ = prev2[0], prev[0], frac

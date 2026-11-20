@@ -178,7 +178,7 @@ RULES = (
          "solve the exact problem from the walk's last solution", ("W",),
          "steers only: Lemma W (1), the exact problem is the same family's; acceptance judges it",
          "not exact", "walk_exact"),
-    Rule("R48", "consistent step", "the last three path solutions have one structure",
+    Rule("R48", "consistent step", "on a leg that moves the weight, the last three path solutions have one structure",
          "predict the next by the quadratic through them, before the secant", ("S", "W"),
          "steers only: Lemma S (a predictor of order p allows steps of (rho / C)^(1/p) under Newton's radius rho), and W (2) (rho shrinks with the weight)",
          "not converged", "quadratic_predictor"),
