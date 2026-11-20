@@ -2170,6 +2170,34 @@ on and judged by the usual settle. On goal 3 at 70% at a hundred times the weigh
 `w2_min` arc near 0.588 dies at $s = 0.883073$, and the touch solves at the first try,
 where before it took three failed tries and about 7 s.
 
+### A density that jumps at the step's base: Rule R54
+
+R25 locates a split by the secant on the density $\eta(t^*)$ at the time where it is most
+negative, which assumes $\eta(t^*)$ continuous in the route's parameter. That holds away
+from the values where a held-set change sweeps through $t^*$. There, by Lemma P, $\eta$
+jumps (Lemma V2′). If the jump is at the step's base, no shorter step reaches a zero, and
+R25's locations shorten the step forever. *Rule R54* (`Homotopy.density_jumps`) compares
+a location with the last one at the same limit and time. Under continuity the end value
+is about a tenth of the last; if it is not smaller by half, the jump is at the base, and
+R5 splits from there.
+
+Tried on the same cases and not kept (2026-11-20), all measured on goal 3 at 80% at a
+hundred times the weight, alone:
+- *One solution per point* (R51). Once a guess converges and the settle asks for a
+  shorter step, R51 tries no other guess (Lemma B: the solution is locally unique). That
+  lets R16 locate births from the settle's verdict (21 locations instead of 13). Without
+  R54, the changed route met the jump above and stalled. With R54 it solves, in 63 s
+  against 56 s.
+- *The last solve's Jacobian* (R52, Lemma C: the simplified Newton iteration). It saved
+  no Jacobians (1069 against 1053): the old Jacobian's chord seldom halves the residual,
+  and a fresh one follows.
+- *Levenberg–Marquardt steps in the chord* (R53). Where the chord falls back to MINPACK,
+  the Jacobian is right (to $10^{-8}$ against central differences) but nearly singular:
+  four equilibrated singular values near $5 \times 10^{-4}$, whose vector couples order-2
+  touches' jumps with the costates of their joints (L2's mechanism). The full Newton step
+  raises the residual thirtyfold, and no step along it decreases it by more than 0.6%.
+  The LM steps did not make the fallbacks fewer (46 against 41).
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
