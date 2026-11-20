@@ -2145,6 +2145,17 @@ unsolved: goals 0, 3 and 4 at 70%, goal 3 at 80% (113 s on its own at $k = 100$)
 rests 4, 6 and 10. Those reach zero offsets at $k = 100$, and then stall on the weight's
 walk.
 
+*A seventh route.* On the diagonal at $k = 300$, rests 10 and 6 solve on the first route
+(14.5 s and 33.9 s), but rests 1 and 5 do not. Each of the seven routes is then the only
+solver of some case, so none can go. The census now runs its cases in its main process
+when it has one worker (the worker reused one process for every case anyway). The
+seven routes are then the only other processes, eight in all.
+
+*Census page (seven routes, 60 s cap): 84 of 90, against 83.* Rests 6 (40.8 s) and 10
+(24.3 s) are new. Rest 12 missed at 60.1 s, after 55.4 s, and the 82 common solves take
+1043 s instead of 959 s: seven routes share the cores. Weights of 1000, on either path,
+solve none of the rest.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
