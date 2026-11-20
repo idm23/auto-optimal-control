@@ -402,6 +402,9 @@ class Homotopy:
         self.fold_turns = False
         self.fold_condition = 1e8          # the largest equilibrated condition of J taken as regular
         self.fold_turn_limit = 4           # turn-backs per route
+        #: Rule R45: "corner" tightens the limits at R24's larger weight and then lowers the
+        #: weight; "diagonal" lowers it together with the offsets.
+        self.weight_path = "corner"
         #: Rule R41: an exact solution rejected because junctions of different limits
         #: crossed is solved again with the events in the order of their times (E5).
         self.exact_reorders = False
@@ -2790,8 +2793,10 @@ class Homotopy:
 
     def _own_saturation(self, shoot, tr, idx, c, t_rise, samples=3):
         """Lemma U: the time near ``t_rise`` (within ``samples`` samples of ``tr``) at
-        which a control of limit ``c``'s own (the largest ``|a_k|``) joins the held
-        set on the arc, or None. ``idx`` are the arc's samples in ``tr``."""
+        which the held set on the arc changes in a control that moves limit ``c``'s
+        rate (``a_k != 0``), joining or leaving, or None. ``idx`` are the arc's samples
+        in ``tr``. (Lemma U holds at any such change after which the density is
+        negative, not only at the limit's own control joining.)"""
         from .lemmas import LimitObjects
         try:
             obj = LimitObjects(shoot.kernels, shoot.params)
@@ -2800,16 +2805,17 @@ class Homotopy:
         k, p = shoot.kernels, shoot.params
         idx = np.asarray(idx)
         j = int(np.argmin(np.abs(tr["t"][idx] - t_rise)))
-        a_vec = obj.rate_parts(c, tr["t"][idx[j]], tr["z"][idx[j]])[0]
-        own = int(np.argmax(np.abs(a_vec)))
+        a_vec = np.abs(np.asarray(obj.rate_parts(c, tr["t"][idx[j]], tr["z"][idx[j]])[0], float))
+        moving = [kk for kk in range(len(a_vec)) if a_vec[kk] > 1e-6 * max(a_vec.max(), 1e-300)]
 
         def held(q):
             lo, hi = (np.asarray(x, float) for x in k.control_bounds(tr["t"][q], tr["z"][q], p))
-            u = float(tr["u"][q][own])
-            return min(u - lo[own], hi[own] - u) <= 1e-6 * (hi[own] - lo[own])
+            u = np.asarray(tr["u"][q], float)
+            return tuple(kk for kk in moving
+                         if min(u[kk] - lo[kk], hi[kk] - u[kk]) <= 1e-6 * (hi[kk] - lo[kk]))
 
         for q in range(max(j - samples, 1), min(j + samples + 1, len(idx))):
-            if held(idx[q]) and not held(idx[q - 1]):
+            if held(idx[q]) != held(idx[q - 1]):
                 return float(tr["t"][idx[q]])
         return None
 
@@ -3560,7 +3566,12 @@ class Homotopy:
                     self.diagnostics.fired("R13")
                     advance(state["le"], target, ds_min=1e-4)
             while True:
-                if advance(state["le"], np.zeros(self.nc)):
+                # Rule R45: with a larger starting weight (R24), the weight comes down
+                # together with the offsets, on the diagonal of the (log w, offsets)
+                # plane, instead of after them (each point a real problem: Lemma W).
+                le_leg = (le_target if getattr(self, "weight_path", "corner") == "diagonal"
+                          and le_target is not None else state["le"])
+                if advance(le_leg, np.zeros(self.nc)):
                     return True
                 if out_of_budget():
                     return False

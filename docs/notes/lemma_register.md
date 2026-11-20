@@ -469,6 +469,44 @@ margin is zero exactly when the corner is the only control that holds $g$.
 
 ## Entries in progress
 
+### L2. A touch of an order-2 limit at its own control's bound is ill-conditioned — sketch, with evidence
+
+- **Statement (sketch).** Let an order-2 limit $g$ (rate $w_j$, $\ddot g = u_j$ on the
+  jerk chain) touch at $t_c$, with its own control $u_j$ held at a bound on a
+  neighbourhood of $t_c$. Then $\ddot g(t_c) = \pm J$, and the touch is concave (E″) when
+  the bound brakes the rate.
+  - Under the clipped free law, or a riding law holding $u_j$, the costate directions
+    that act on the motion only through $u_j$ reach it only through the times where
+    $u_j$ enters and leaves the bound.
+  - The touch's jump $-\nu \nabla g$ lies in such a direction: $\lambda_{\dot q_j}$, and
+    through the chain $\lambda_{\ddot q_j}$.
+  - So the shooting Jacobian has a near-null direction combining $\nu$ with those
+    costates. With the jerk cost $\varepsilon$, its smallest singular value goes to 0
+    with $\varepsilon$. At $\varepsilon = 0$ it is exactly null, the order-2 analogue of
+    L's degeneracy at order 1.
+- **Why it is only a sketch.** The rate at which $\sigma_{\min}$ goes to 0, and whether
+  the switching times' sensitivity keeps the system regular for every $\varepsilon > 0$,
+  are not derived.
+- **Seen (2026-11-19).**
+  - *The births.* With R43, three rest cases stall at the birth of a rate limit whose
+    peak has $\ddot g = -30.000$, the jerk bound: rest 10 (`w6_max`, ridden there
+    `tau1_max` and `w3_max`), rest 4 (`w1_max`, free) and rest 5 (`w3_max`, over
+    `w1_min`).
+  - *The touch solves at rest 10's located birth.* From the seed (excess $2 \times
+    10^{-4}$ of scale, residual $1.6 \times 10^{-2}$), the Newton step takes the residual
+    to 52, with the Jacobian correct to within 6% of central differences. The
+    equilibrated $\sigma_{\min}$ is $6 \times 10^{-8}$. Its direction is the initial
+    costates of joints 1 and 6 with the touch's $\nu$, against joint 1's terminal rows.
+  - *The direct comparison.* In rest 10's answer, `w6_max` is ridden on
+    $[0.748, 0.840]$, and joint 6's jerk is held only on $[0, 0.098]$ and
+    $[1.451, 1.576]$. The corner touch is a stage of the route, not the answer: the
+    jerk leaves its bound before the arc forms (E″'s touch turning into an arc).
+- **What it asks of the route.** The weight of the jerk cost is a route parameter whose
+  growth widens Newton's radius (W). A route that meets this birth at a larger weight,
+  and lowers the weight after the arc has formed, crosses it where $\sigma_{\min}$ is
+  not small.
+- **Depends on.** E″, L (the order-1 case), W.
+
 ### M. A corner entry is where the margin crosses zero — proved, relative to J
 
 - **Statement.** Assume J and $a_k \ne 0$ for all $k$. Let an order-1 arc
@@ -702,7 +740,7 @@ route stalls.
 - **Used by.** Diagnosis of rest 12 (O2). R33: a rise one limit's held window
   induces in another arc's multiplier.
 
-### U. An arc leaves before its own control saturates — proved relative to P and J
+### U. An arc leaves before a change of its held set that turns its density negative — proved relative to P and J
 
 - **Statement.** Assume C1 and C2, and a single order-1 limit $c$ ridden on
   an arc. Let $t_s$ be a time on the arc where a control $k$ with
@@ -735,6 +773,27 @@ route stalls.
     an exit at 0.34525, with no rise and no violation.
   - Trimmed to leave exactly at the saturation, it converges back to the
     solution that rises.
+- **Any control, either direction (2026-11-19).** The proof uses neither that $k$ is
+  the limit's own control nor that it joins $B$:
+  - step 1 needs only $\eta(t_s^+) < 0$;
+  - step 2 needs only control continuity at an exit (J).
+
+  So U holds at any change of the held set, joining or leaving, by a control with
+  $a_k \ne 0$, after which the density is negative. P's jump is symmetric: the leaving
+  control's terms re-enter the numerator and the denominator.
+- **Seen with R43 and E4.**
+  - Goal 3 at 80%: `tau4_min`'s rise (η < 0 on [0.5287, 0.5356]) sits in the window
+    where joint 2's jerk is held, [0.5274, 0.5423]. Joint 4's own jerk is held only
+    near the entry.
+  - Goal 3 at 70%: the rise starts where joint 3's jerk leaves its bound (0.571).
+  - R29's detection, widened to any such change, then fires at every split (136 in
+    goal 3 at 70%, 52 in rest 12). The trimmed pieces settle, but the route still cycles:
+    the trim, a closing gap, a merge (E4), a rise again.
+  - So U fixes where a piece leaves, but not what continues after it. That is E3's open
+    question, with the held set changing at the gap's ends.
+  - On the weight's walk (W (3)) the same event recurs as the jerks grow. On rest 12 at
+    $k = 100$, R5 split `tau1_max` 92 times on the walk without R29, and 2 times with
+    R29's widened detection. The route takes 50.5 s instead of 67.4 s, and both solve.
 - **Used by.** R29. Settles O2's conjecture for this case.
 
 ### Q. An order-1 touch carries no jump unless the controls absorb it — proved, relative to S1
@@ -907,8 +966,25 @@ route stalls.
 - **To formalize.** (1) is routine. (2) needs the transversality of the band
   crossings, which holds away from a measure-zero set of $v$ (a double root,
   as in Lemma T's gap).
-- **Used by.** R24. Soundness rests on (1) only: no answer is accepted on (2)'s
-  account, which only explains why the route is shorter.
+- **(3) Any path in the plane.** By (1), every point of the plane $(\log w, o)$ with
+  $w \in [w_*, k w_*]$ and offsets $o \ge 0$ is a real problem of the family. So the
+  route may take any path from $(\log(k w_*), o_0)$ to $(\log w_*, 0)$:
+  - R24's corner path tightens the limits at $k w_*$, then lowers $w$ with every limit
+    exact;
+  - R45's diagonal path lowers $w$ together with the offsets.
+- **Seen with L2 (2026-11-19).** The births at a rate peak where the rate's own jerk
+  is saturated (L2) pass at a larger weight. On the first route with R43, the ten
+  failures of the census page all reach zero offsets at $k = 100$ except goal 3 at 70%,
+  against none at $k = 1$. What remains is the path in $w$:
+  - on the corner path at $k = 100$, rests 5 and 12 solve;
+  - at $k = 30$, goal 3 at 80% solves;
+  - on the diagonal at $k = 100$, rests 1, 5 and 12 solve, in 69 to 110 s.
+
+  The corner path's walk in $w$ meets turning points: on goal 4 at 70%, an arc dying
+  with the route's parameter decreasing (R2's width steps).
+- **Used by.** R24, R45, and the portfolio's weight routes. Soundness rests on (1)
+  only: no answer is accepted on (2)'s account, which only explains why the route is
+  shorter.
 
 ### V1–V5. The route as a one-parameter family
 

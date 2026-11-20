@@ -639,3 +639,25 @@ def test_r36_seeds_stay_finite_where_a_junction_is_sampled_twice():
     for _, vals in out:
         for val in vals:
             assert np.all(np.isfinite(np.atleast_1d(val[2])))
+
+
+def test_arcs_of_one_limit_merge_across_another_limits_arc():
+    """Lemma E4 and R11: two arcs of one limit whose gap has closed are one arc, entered
+    with both jumps, even when an arc of another limit starts between them."""
+    import numpy as np
+
+    h = Homotopy.__new__(Homotopy)
+    h.merge_touching = True
+    h.diagnostics = Diagnostics()
+    arcs = [("boundary", 0), ("boundary", 1), ("boundary", 0)]
+    values = [(0.50, 0.5385, np.array([0.008])),          # tau4_min, first piece
+              (0.537, 0.657, np.array([0.19, 0.01])),     # w3_min starts between them
+              (0.5385, 0.749, np.array([0.043]))]         # tau4_min, second piece
+    out_a, out_v = h._merge_touching(arcs, values)
+    assert out_a == [("boundary", 0), ("boundary", 1)]
+    merged = [v for a, v in zip(out_a, out_v) if a == ("boundary", 0)][0]
+    assert merged[0] == 0.50 and merged[1] == 0.749
+    np.testing.assert_allclose(merged[2], [0.051])
+    # A gap that is still open is left alone.
+    values[2] = (0.540, 0.749, np.array([0.043]))
+    assert len(h._merge_touching(arcs, values)[0]) == 3

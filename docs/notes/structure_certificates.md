@@ -2097,6 +2097,54 @@ These answers are on another component of the solution set, reached by a differe
 in the offsets or a different structure, which no continuation from this fold finds.
 R44 stays off, as a record of what X implies.
 
+### Births at a saturated peak, and the weight's path: Rule R45
+
+*The births (Lemma L2).* With R43, three rest cases stall at the birth of a rate limit
+whose peak has $\ddot g = -30.000$, the jerk bound:
+- rest 10: `w6_max`, ridden there `tau1_max` and `w3_max`;
+- rest 4: `w1_max`, on the free law;
+- rest 5: `w3_max`, over `w1_min`.
+
+The touch inserted at the located birth does not converge. From a seed with residual
+$1.6 \times 10^{-2}$, Newton's step takes the residual to 52, with the Jacobian right to
+within 6% of central differences. The equilibrated Jacobian's smallest singular value is
+$6 \times 10^{-8}$: the joint's saturated jerk leaves the costates acting through it, and
+the touch's jump, with almost no effect. Rest 10's direct answer (comparison only) rides
+`w6_max` on $[0.748, 0.840]$ with joint 6's jerk interior there, so the corner touch is a
+stage of the route, not the answer.
+
+*The weight (Lemma W).* At a larger weight the jerk saturates less, and the births pass.
+
+| first route, 150 s | reaches zero offsets | solves |
+|---|---|---|
+| $k = 1$ (release) | none of the ten failures | none |
+| $k = 30$, corner (R24) | 7 of 10 | goal 3 at 80% (134 s) |
+| $k = 100$, corner (R24) | 9 of 10 | rests 5 and 12 (61 s, 93 s) |
+| $k = 100$, diagonal (R45) | 5 of 10 | rests 1, 5 and 12 (69 s, 100 s, 110 s) |
+
+Past zero offsets, the corner path lowers the weight with every limit exact, and that
+walk meets its own events. On goal 4 at 70% it meets a turning point: an arc's width
+shrinking with the route's parameter decreasing. *Rule R45* (`Homotopy.weight_path =
+"diagonal"`) lowers the weight together with the offsets. It only steers, by W (3).
+
+*The portfolio.* Six routes, as before (the census machine has eight cores):
+- the base route and the second draw, each also at $k = 10$;
+- the base route at $k = 100$, on the corner path and on the diagonal.
+
+Sequential births at $k = 1$ and at $k = 10$ drop out. A first try that also dropped
+$k = 10$ with the second draw lost rest 4, which only that route solves (26.9 s).
+
+*R29 on.* On the weight's walk, Lemma U's events recur as the jerks grow, and R29's
+widened detection exits before them. Rest 12 at $k = 100$ goes from 92 splits and 67.4 s
+to 2 splits and 50.5 s. R29 joins the release configuration.
+
+*Census page (release configuration with R29, the new portfolio, 60 s cap): 83 of 90,
+against 80.* Rests 1 (53.9 s on the page without R29), 5 (46.1 s) and 12 (55.4 s) are
+new. None is lost, and the 81 common solves take 913 s instead of 1000 s. Still
+unsolved: goals 0, 3 and 4 at 70%, goal 3 at 80% (113 s on its own at $k = 100$), and
+rests 4, 6 and 10. Those reach zero offsets at $k = 100$, and then stall on the weight's
+walk.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
