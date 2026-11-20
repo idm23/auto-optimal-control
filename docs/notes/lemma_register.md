@@ -434,7 +434,16 @@ margin is zero exactly when the corner is the only control that holds $g$.
   curve reaches $s = 1$ is the global question of homotopy path-following: it does when
   the solution set is a bounded regular one-manifold through the start. That is not
   shown here.
-- **Used by.** The diagnosis of the entry swaps.
+- **Followed, R44 (2026-11-19).** At the folds of goals 0 and 4 at 70%, R44 takes the other
+  order's branch and follows it by arclength, toward the leg's other end and turning at
+  any further fold.
+  - In goal 4 at 70% the branch leads back to the leg's start without a second fold. The
+    curve through the fold joins two solutions at the start, and does not reach the
+    target on this leg's line in the offsets.
+  - In goal 0 at 70% the backward run stalls among collapses of short arcs.
+  - So these answers lie on another component of the solution set. Reaching them takes
+    another path in the offsets, or a structure that differs away from the pair.
+- **Used by.** The diagnosis of the entry swaps; R44.
 
 ### K. A forced exit is a corner, and its rate row is the margin — proved, relative to S1
 
