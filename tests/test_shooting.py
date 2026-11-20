@@ -241,3 +241,32 @@ def test_a_segment_of_rounding_width_samples_without_raising():
     assert list(t) == [a] and z.tolist() == [[1.0]]
     t, z = sample_segment(decay, 0.0, 1.0, [1.0], 5, method="DOP853", rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(z[:, 0], np.exp(-t), rtol=1e-9)
+
+
+def test_rule_R55_accepts_a_step_that_contracts_newton_but_not_the_residual():
+    # Lemma AC: on R = D G(v) with G(x) = (x0 + x1^2, x1) and D = diag(1e3, 1), Newton's
+    # first step from (0, 0.01) contracts its correction a hundredfold, but the residual
+    # stays at 0.1: the residual test backtracks where the natural one goes on.
+    from types import SimpleNamespace
+
+    from auto_optimal_control.shooting import SingleShooting
+
+    D = np.diag([1e3, 1.0])
+
+    class Stub(SingleShooting):
+        def __init__(self, natural):
+            self.natural_monotonicity = natural
+
+        def _safe_residual(self, v):
+            return D @ np.array([v[0] + v[1] ** 2, v[1]])
+
+        def _try(self, v):
+            return self._safe_residual(v), D @ np.array([[1.0, 2 * v[1]], [0.0, 1.0]])
+
+        def _chord_result(self, v, err, nfev, tol=0.0):
+            return SimpleNamespace(v=v, residual_norm=err, success=err < tol, nfev=nfev)
+
+    natural = Stub(True).solve_chord(np.array([0.0, 0.01]), tol=1e-12)
+    residual = Stub(False).solve_chord(np.array([0.0, 0.01]), tol=1e-12)
+    assert natural.success and np.allclose(natural.v, 0.0, atol=1e-12)
+    assert natural.nfev < residual.nfev
