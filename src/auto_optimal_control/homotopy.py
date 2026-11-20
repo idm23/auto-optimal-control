@@ -405,6 +405,16 @@ class Homotopy:
         #: Rule R45: "corner" tightens the limits at R24's larger weight and then lowers the
         #: weight; "diagonal" lowers it together with the offsets.
         self.weight_path = "corner"
+        #: Rule R47: when R24's walk of the weight stalls within ``walk_exact_gap`` decades
+        #: of the policy's weight, the exact problem is solved from where it stalled.
+        self.walk_exact = False
+        self.walk_exact_gap = 0.3
+        #: Rule R48: a quadratic predictor through the last three solutions of one
+        #: structure, tried before the secant.
+        self.quadratic_predictor = False
+        #: Rule R46 (Lemma S): after a failed step, the steps grow to at most 0.9 of it
+        #: for three successes before probing larger again.
+        self.step_memory = False
         #: Rule R41: an exact solution rejected because junctions of different limits
         #: crossed is solved again with the events in the order of their times (E5).
         self.exact_reorders = False
@@ -3241,6 +3251,8 @@ class Homotopy:
             le0, off_start = state["le"], state["off"].copy()
             frac, ds = 0.0, 0.25
             prev = None                    # (frac, v, structure) of the solution before
+            fail_ds, since_fail = None, 0  # Rule R46: the last failed step, successes since
+            prev2 = None                   # Rule R48: the solution before prev
             leg_dir = (target_le - le0, np.asarray(target_off, dtype=float) - off_start)
             state["leg_dir"] = leg_dir
             while frac < 1.0:
@@ -3257,6 +3269,18 @@ class Homotopy:
                 if prev is not None and prev[2] == arcs and frac > prev[0]:
                     # Secant predictor along the path, while the structure holds.
                     guesses.insert(0, v0 + (v0 - prev[1]) * (f - frac) / (frac - prev[0]))
+                    if (getattr(self, "quadratic_predictor", False) and prev2 is not None
+                            and prev2[2] == arcs and prev[0] > prev2[0]
+                            and target_le != le0):
+                        # (Only on legs that move the weight, where Newton's radius shrinks
+                        # along the path: Lemma S (2) with W (2).)
+                        # Rule R48: the quadratic through the last three solutions; its
+                        # error is O(h^3) where the secant's is O(h^2).
+                        x0_, x1_, x2_ = prev2[0], prev[0], frac
+                        l0 = (f - x1_) * (f - x2_) / ((x0_ - x1_) * (x0_ - x2_))
+                        l1 = (f - x0_) * (f - x2_) / ((x1_ - x0_) * (x1_ - x2_))
+                        l2 = (f - x0_) * (f - x1_) / ((x2_ - x0_) * (x2_ - x1_))
+                        guesses.insert(0, l0 * prev2[1] + l1 * prev[1] + l2 * v0)
                 done = None
                 outcome, attempt = None, None
                 # Below the floor, and within three halvings of the leg's ds_min, a
@@ -3410,8 +3434,11 @@ class Homotopy:
                             (self.contraction_target / theta_far[0]) ** (1.0 / theta_far[1]),
                             0.1, 0.5))
                     else:
+                        if getattr(self, "step_memory", False):
+                            fail_ds, since_fail = f - frac, 0
                         ds *= 0.5
                     continue
+                prev2 = prev if prev is not None and prev[2] == arcs else None
                 prev = (frac, v0, arcs)
                 changed = self._arcs_of(done[0], done[1].v)[0] != arcs
                 if changed:
@@ -3432,8 +3459,20 @@ class Homotopy:
                         self.diagnostics.oracle("check failed")
                 if changed:
                     prev = None            # the structure changed: no secant across it
+                    prev2 = None
                     state["progress_at"] = time.perf_counter()     # progress, for R15
                 nxt = ds * 1.5
+                if getattr(self, "step_memory", False):
+                    # Rule R46 (Lemma S): grow to at most 0.9 of the last failed step for
+                    # three successes, then probe again; a new structure forgets it.
+                    if changed:
+                        fail_ds = None
+                    elif fail_ds is not None:
+                        since_fail += 1
+                        if since_fail <= 3:
+                            nxt = min(nxt, 0.9 * fail_ds)
+                        else:
+                            fail_ds = None
                 if (not changed and theta_done is not None and theta_done[0] is not None
                         and f - frac > floor):
                     # Rule R37: the step that gives the target contraction next.
@@ -3607,8 +3646,16 @@ class Homotopy:
             self._say(f"active set: secondary weight from {10.0 ** state['le']:.3g} "
                       f"to {self.weight_value:.3g}")
             if not advance(le_target, np.zeros(self.nc), ds_min=1e-4):
-                self._say("active set: lowering the secondary weight stalled")
-                return None
+                gap = state["le"] - le_target
+                if not (getattr(self, "walk_exact", False) and gap < self.walk_exact_gap):
+                    self._say("active set: lowering the secondary weight stalled")
+                    return None
+                # Rule R47 (Lemma W (1)): the walk stalled close to the policy's weight;
+                # the exact problem there is the same family's, so its Newton solve is
+                # tried from the walk's last solution, and acceptance judges it.
+                self.diagnostics.fired("R47")
+                self._say(f"active set: the walk stalled {gap:.2f} decades above the weight; "
+                          f"the exact solve from there")
             state["le"] = le_target
         if try_exact():
             return found[0]

@@ -998,6 +998,42 @@ route stalls.
   only: no answer is accepted on (2)'s account, which only explains why the route is
   shorter.
 
+### S. The route's step: the controller's failures and the predictor's order — proved (elementary)
+
+- **Statement.** Along a stretch of the route with one structure, let Newton converge
+  from a predictor $p(h)$ exactly when its error $\|p(h) - v(s + h)\| \le \rho$, Newton's
+  radius. For a predictor of order $q$ the error is $C h^q$, the secant has $q = 2$ and
+  the quadratic through three solutions $q = 3$. Write $h^* = (\rho / C)^{1/q}$ for the
+  largest convergent step.
+  1. A controller that multiplies the step by $g > 1$ after a success and by $1/2$ after
+     a failure, on a stretch where $h^*$ is constant, fails a fraction
+     $\ln g / \ln(2g)$ of its attempts in the long run: 37% for $g = 1.5$.
+  2. If $\rho$ shrinks like the weight $w$ (W (2)), then $h^* \propto w^{1/q}$. So a
+     higher-order predictor's steps shrink more slowly as $w \to w_*$, and the number of
+     steps over a walk of the weight falls.
+- **Proof.**
+  1. $\log h$ moves by $+\ln g$ or $-\ln 2$ and stays within a bounded band about
+     $\log h^*$, since it fails above and succeeds below. Over $N$ attempts with $F$
+     failures, the net change $(N - F)\ln g - F\ln 2$ is bounded, so
+     $F / N \to \ln g / \ln(2g)$.
+  2. Solve $C h^q = \rho$ for $h$.
+- **Seen (2026-11-20).**
+  - On the weight's walk the failures are spread evenly along it, about 40% of the
+    solves on goal 3 at 80%: (1)'s equilibrium, not a property of particular points.
+  - The walk's steps average about 0.006 decades of $w$, as (2) with a small $\rho$
+    predicts.
+  - With the quadratic predictor (R48), rest 12 at $k = 100$ takes 33.3 s instead of
+    42.3 s, and goal 3 at 80% 76.4 s instead of 84.3 s, with 201 steps instead of 244 and
+    73 failures instead of 100.
+  - Remembering the last failed step (R46) cuts goal 3 at 80%'s failures from 100 to 82,
+    but not its time.
+  - *On the census page.*
+    - With R48 on every leg: 84 of 90. Rest 12 is gained, and goal 4 at 70% (torques
+      only, 14.2 s before, on a route that never moves the weight) is lost.
+    - With R48 only on the legs that move the weight, where (2) applies: 85 of 90,
+      with nothing lost and the common solves 7% faster.
+- **Used by.** R46, R48.
+
 ### V1–V5. The route as a one-parameter family
 
 The arguments are in `route_family.md`. A *leg* is a segment
