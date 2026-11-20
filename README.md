@@ -983,8 +983,8 @@ always shows what `main` does:
    ```bash
    python benchmarks/arm_census.py census.jsonl --workers 1 --parallel-routes \
        --cap 60 --rule R1=on --rule R2=on --rule R15=on --rule R16=on \
-       --rule R20=on --rule R25=on --rule R26=on --rule R32=on --rule R41=on \
-       --rule R43=on --export /tmp/census_data
+       --rule R20=on --rule R25=on --rule R26=on --rule R29=on --rule R32=on \
+       --rule R41=on --rule R43=on --export /tmp/census_data
    rm -r docs/_static/census/data && mv /tmp/census_data docs/_static/census/data
    ```
 

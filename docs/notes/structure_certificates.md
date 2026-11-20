@@ -2127,9 +2127,23 @@ walk meets its own events. On goal 4 at 70% it meets a turning point: an arc's w
 shrinking with the route's parameter decreasing. *Rule R45* (`Homotopy.weight_path =
 "diagonal"`) lowers the weight together with the offsets. It only steers, by W (3).
 
-*The portfolio.* The six routes keep the base route, the second draw, sequential births
-and the route at $k = 10$. The two other routes at $k = 10$ (with the second draw, and
-with sequential births) become $k = 30$ on the corner path and $k = 100$ on the diagonal.
+*The portfolio.* Six routes, as before (the census machine has eight cores):
+- the base route and the second draw, each also at $k = 10$;
+- the base route at $k = 100$, on the corner path and on the diagonal.
+
+Sequential births at $k = 1$ and at $k = 10$ drop out. A first try that also dropped
+$k = 10$ with the second draw lost rest 4, which only that route solves (26.9 s).
+
+*R29 on.* On the weight's walk, Lemma U's events recur as the jerks grow, and R29's
+widened detection exits before them. Rest 12 at $k = 100$ goes from 92 splits and 67.4 s
+to 2 splits and 50.5 s. R29 joins the release configuration.
+
+*Census page (release configuration with R29, the new portfolio, 60 s cap): 83 of 90,
+against 80.* Rests 1 (53.9 s on the page without R29), 5 (46.1 s) and 12 (55.4 s) are
+new. None is lost, and the 81 common solves take 913 s instead of 1000 s. Still
+unsolved: goals 0, 3 and 4 at 70%, goal 3 at 80% (113 s on its own at $k = 100$), and
+rests 4, 6 and 10. Those reach zero offsets at $k = 100$, and then stall on the weight's
+walk.
 
 ## Rules these license
 

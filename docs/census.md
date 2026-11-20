@@ -18,23 +18,25 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-19, on the branch that merges arcs of one
-limit across other limits' arcs (Lemma E4). Rules R1, R2, R15, R16, R20, R25, R26, R32, R41 and R43 are turned on (the release's
+The data shown is from the census of 2026-11-20, on the branch that adds routes at a
+larger jerk weight (Lemmas W and L2) and Lemma U's exits at any change of the held set. Rules R1, R2, R15, R16, R20, R25, R26, R29, R32, R41 and R43 are turned on (the release's
 configuration), with held-set events (R22) and closed-form free arcs (R23) on by default.
-R15's portfolio has six routes: two draws of the offsets and sequential births, each
-also at ten times the secondary weight (R24). The routes run in parallel, one case at a
+R15's portfolio has six routes: two draws of the offsets, each also at ten times the
+secondary weight (R24), and the first draw at a hundred times it, once lowering the
+weight after the limits and once with them (R45). The routes run in parallel, one case at a
 time, on 8 physical cores. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-80 of the 90 cases solve, all under 60 s: the median is 10.1 s and the slowest 51.0 s.
-Nine are new with R43, which takes the junction rows of the rate arcs from Lemma H2:
-goals 5 and 9 at 70%, rest 13, goal 2 at 70%, rest 3, goal 9 at 80%, goal 1 at 70%, rest 11
-and goal 4 at 80%, all under 46 s.
+83 of the 90 cases solve, all under 60 s: the median is 9.4 s and the slowest 55.4 s.
+Rests 1, 5 and 12 are new, from the routes at a hundred times the weight. In rest 5 a rate
+limit is born where its own jerk is at its bound, which Newton cannot follow at the
+policy's weight (Lemma L2). In rest 12 the walk of the weight back down meets Lemma U's
+changes of held set, which R29 now meets with an exit.
 
 - **`goal` and `rest`:** all 45 solve.
 - **`vgoal`:** 26 of 30: all ten at 90%, nine at 80% (all but goal 3) and seven at 70%
   (all but goals 0, 3 and 4).
-- **`vrest`:** 9 of 15: rests 0, 2, 3, 7, 8, 9, 11, 13 and 14.
+- **`vrest`:** 12 of 15: all but rests 4, 6 and 10.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit
 on another joint at the same instant (the nine new ones are not yet read for this): goals 3 and 4 at 90%, goals 0 and 1 at 80%, rest 2 and rest 9.
