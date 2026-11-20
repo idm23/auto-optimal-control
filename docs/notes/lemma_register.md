@@ -702,7 +702,7 @@ route stalls.
 - **Used by.** Diagnosis of rest 12 (O2). R33: a rise one limit's held window
   induces in another arc's multiplier.
 
-### U. An arc leaves before its own control saturates — proved relative to P and J
+### U. An arc leaves before a change of its held set that turns its density negative — proved relative to P and J
 
 - **Statement.** Assume C1 and C2, and a single order-1 limit $c$ ridden on
   an arc. Let $t_s$ be a time on the arc where a control $k$ with
@@ -735,6 +735,24 @@ route stalls.
     an exit at 0.34525, with no rise and no violation.
   - Trimmed to leave exactly at the saturation, it converges back to the
     solution that rises.
+- **Any control, either direction (2026-11-19).** The proof uses neither that $k$ is
+  the limit's own control nor that it joins $B$:
+  - step 1 needs only $\eta(t_s^+) < 0$;
+  - step 2 needs only control continuity at an exit (J).
+
+  So U holds at any change of the held set, joining or leaving, by a control with
+  $a_k \ne 0$, after which the density is negative. P's jump is symmetric: the leaving
+  control's terms re-enter the numerator and the denominator.
+- **Seen with R43 and E4.**
+  - Goal 3 at 80%: `tau4_min`'s rise (η < 0 on [0.5287, 0.5356]) sits in the window
+    where joint 2's jerk is held, [0.5274, 0.5423]. Joint 4's own jerk is held only
+    near the entry.
+  - Goal 3 at 70%: the rise starts where joint 3's jerk leaves its bound (0.571).
+  - R29's detection, widened to any such change, then fires at every split (136 in
+    goal 3 at 70%, 52 in rest 12). The trimmed pieces settle, but the route still cycles:
+    the trim, a closing gap, a merge (E4), a rise again.
+  - So U fixes where a piece leaves, but not what continues after it. That is E3's open
+    question, with the held set changing at the gap's ends.
 - **Used by.** R29. Settles O2's conjecture for this case.
 
 ### Q. An order-1 touch carries no jump unless the controls absorb it — proved, relative to S1

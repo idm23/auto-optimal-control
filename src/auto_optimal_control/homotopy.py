@@ -2793,8 +2793,10 @@ class Homotopy:
 
     def _own_saturation(self, shoot, tr, idx, c, t_rise, samples=3):
         """Lemma U: the time near ``t_rise`` (within ``samples`` samples of ``tr``) at
-        which a control of limit ``c``'s own (the largest ``|a_k|``) joins the held
-        set on the arc, or None. ``idx`` are the arc's samples in ``tr``."""
+        which the held set on the arc changes in a control that moves limit ``c``'s
+        rate (``a_k != 0``), joining or leaving, or None. ``idx`` are the arc's samples
+        in ``tr``. (Lemma U holds at any such change after which the density is
+        negative, not only at the limit's own control joining.)"""
         from .lemmas import LimitObjects
         try:
             obj = LimitObjects(shoot.kernels, shoot.params)
@@ -2803,16 +2805,17 @@ class Homotopy:
         k, p = shoot.kernels, shoot.params
         idx = np.asarray(idx)
         j = int(np.argmin(np.abs(tr["t"][idx] - t_rise)))
-        a_vec = obj.rate_parts(c, tr["t"][idx[j]], tr["z"][idx[j]])[0]
-        own = int(np.argmax(np.abs(a_vec)))
+        a_vec = np.abs(np.asarray(obj.rate_parts(c, tr["t"][idx[j]], tr["z"][idx[j]])[0], float))
+        moving = [kk for kk in range(len(a_vec)) if a_vec[kk] > 1e-6 * max(a_vec.max(), 1e-300)]
 
         def held(q):
             lo, hi = (np.asarray(x, float) for x in k.control_bounds(tr["t"][q], tr["z"][q], p))
-            u = float(tr["u"][q][own])
-            return min(u - lo[own], hi[own] - u) <= 1e-6 * (hi[own] - lo[own])
+            u = np.asarray(tr["u"][q], float)
+            return tuple(kk for kk in moving
+                         if min(u[kk] - lo[kk], hi[kk] - u[kk]) <= 1e-6 * (hi[kk] - lo[kk]))
 
         for q in range(max(j - samples, 1), min(j + samples + 1, len(idx))):
-            if held(idx[q]) and not held(idx[q - 1]):
+            if held(idx[q]) != held(idx[q - 1]):
                 return float(tr["t"][idx[q]])
         return None
 

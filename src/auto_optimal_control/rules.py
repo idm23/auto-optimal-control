@@ -122,7 +122,7 @@ RULES = (
          "take it only if the limit's multiplier no longer rises and no piece or gap has zero width", ("H", "V"),
          "V4 (a transition continues the event only if it restores the event's monitor)",
          "rejected: mu rises (Lemma H)", "split_must_resolve"),
-    Rule("R29", "consistent step", "an order-1 arc's multiplier starts to rise where the limit's own control joins the held set",
+    Rule("R29", "consistent step", "an order-1 arc's multiplier starts to rise where the held set changes in a control that moves the limit's rate (joining or leaving)",
          "offer first the piece leaving just before that moment (a gap to the rise's end, or a trim)", ("U", "P", "J"),
          "Lemma U (riding through violates H; an exit there needs mu = 0)",
          "rejected: mu rises (Lemma H)", "exit_before_saturation"),
