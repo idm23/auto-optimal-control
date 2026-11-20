@@ -2156,6 +2156,20 @@ seven routes are then the only other processes, eight in all.
 1043 s instead of 959 s: seven routes share the cores. Weights of 1000, on either path,
 solve none of the rest.
 
+### An order-2 arc's death: Rule R50
+
+An order-2 arc that shrinks does not vanish: its width is linear in the route's parameter
+(Lemma E″) and at zero width it is a touch with the entry's first jump (Lemma Z), since H2
+bounds the second jump by the density times the width. Without a rule, the route steps
+past the death with the arc's structure, which still solves there with a negative width.
+The touch is then guessed at the midpoint of a negative-width arc, and that guess is poor.
+*Rule R50* (`Homotopy.order2_deaths`) compares a step's solution with its base. If an
+order-2 arc's width has crossed zero, the death is at the secant's zero; the solution
+interpolated there is turned into the touch, which is solved a quarter of the way further
+on and judged by the usual settle. On goal 3 at 70% at a hundred times the weight, the
+`w2_min` arc near 0.588 dies at $s = 0.883073$, and the touch solves at the first try,
+where before it took three failed tries and about 7 s.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
