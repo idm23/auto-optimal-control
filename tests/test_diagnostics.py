@@ -29,7 +29,7 @@ def test_a_solve_reports_what_it_ran_into(axis):
     _, r = axis
     assert r.exact
     d = r.diagnostics
-    assert set(d) == {"evaluations", "steps", "rejected", "rules", "oracles", "snapshots"}
+    assert set(d) == {"evaluations", "steps", "rejected", "rules", "oracles", "snapshots", "routes"}
     assert d["steps"].get("converged", 0) > 0
     assert set(d["evaluations"]) <= CLASSES
 
