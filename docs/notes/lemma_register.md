@@ -963,8 +963,25 @@ route stalls.
 - **To formalize.** (1) is routine. (2) needs the transversality of the band
   crossings, which holds away from a measure-zero set of $v$ (a double root,
   as in Lemma T's gap).
-- **Used by.** R24. Soundness rests on (1) only: no answer is accepted on (2)'s
-  account, which only explains why the route is shorter.
+- **(3) Any path in the plane.** By (1), every point of the plane $(\log w, o)$ with
+  $w \in [w_*, k w_*]$ and offsets $o \ge 0$ is a real problem of the family. So the
+  route may take any path from $(\log(k w_*), o_0)$ to $(\log w_*, 0)$:
+  - R24's corner path tightens the limits at $k w_*$, then lowers $w$ with every limit
+    exact;
+  - R45's diagonal path lowers $w$ together with the offsets.
+- **Seen with L2 (2026-11-19).** The births at a rate peak where the rate's own jerk
+  is saturated (L2) pass at a larger weight. On the first route with R43, the ten
+  failures of the census page all reach zero offsets at $k = 100$ except goal 3 at 70%,
+  against none at $k = 1$. What remains is the path in $w$:
+  - on the corner path at $k = 100$, rests 5 and 12 solve;
+  - at $k = 30$, goal 3 at 80% solves;
+  - on the diagonal at $k = 100$, rests 1, 5 and 12 solve, in 69 to 110 s.
+
+  The corner path's walk in $w$ meets turning points: on goal 4 at 70%, an arc dying
+  with the route's parameter decreasing (R2's width steps).
+- **Used by.** R24, R45, and the portfolio's weight routes. Soundness rests on (1)
+  only: no answer is accepted on (2)'s account, which only explains why the route is
+  shorter.
 
 ### V1–V5. The route as a one-parameter family
 
