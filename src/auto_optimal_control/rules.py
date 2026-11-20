@@ -166,6 +166,10 @@ RULES = (
          "turn back on the other order's branch at the last accepted point, follow it backward until the structure changes, then go on to the target", ("X",),
          "steers only: Lemma X (iii), a fold, where the solution curve continues with the step decreasing; arclength continuation (Allgower and Georg)",
          "settle failed: structure changes did not settle", "fold_turns"),
+    Rule("R45", "route start", "R24 starts the route at a larger secondary weight",
+         "lower the weight together with the offsets (the diagonal of the plane), not after them", ("W",),
+         "steers only: Lemma W (3), every point of the plane is a real problem of the family",
+         "not exact", "weight_path=diagonal"),
     Rule("R38", "consistent step", "junctions of different limits cross by less than coincide_tol (1e-8) of T",
          "read them as coincident, in order: no reorder (R30), no re-sorting (retire), and acceptance takes them", ("D", "V"),
          "below the junction times' own resolution the two orders give the same motion; symmetry makes such coincidences exact (Lemma D's genericity does not hold there)",
@@ -220,7 +224,7 @@ def set_rule(h, name, on):
             raise ValueError(f"rule {name} is part of the generated code and cannot be turned off")
         return
     attr, _, value = BY_NAME[name].switch.partition("=")
-    off_values = {"offset_start": "together", "offset_order": "joint"}
+    off_values = {"offset_start": "together", "offset_order": "joint", "weight_path": "corner"}
     new = (value if on else off_values.get(attr, None)) if value else bool(on)
     if attr == "portfolio":
         new = list(DEFAULT_PORTFOLIO) if on else []
