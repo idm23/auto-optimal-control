@@ -192,9 +192,9 @@ BY_NAME = {r.name: r for r in RULES}
 #: The portfolio rule R15 turns on: another draw of the offsets and sequential births,
 #: and (Rule R24, for a policy with a numeric secondary weight) the first route and these
 #: two again, started at 10 w.
-DEFAULT_PORTFOLIO = ({"offset_seed": 1}, {"weight_start": 10},
-                     {"weight_start": 10, "offset_seed": 1}, {"weight_start": 100},
-                     {"weight_start": 100, "weight_path": "diagonal"})
+DEFAULT_PORTFOLIO = ({"weight_start": 10}, {"weight_start": 10, "offset_seed": 1},
+                     {"weight_start": 100}, {"weight_start": 100, "weight_path": "diagonal"},
+                     {"weight_start": 300, "weight_path": "diagonal"})
 
 
 def enabled(h):
