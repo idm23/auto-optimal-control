@@ -1196,6 +1196,19 @@ jump, density, gap, order, bound, end, held sign).
 
 - **V1. Acceptance is the monitors — proved, relative to S1.** At $s = 1$,
   `_verdict` accepts exactly when every monitor is $\ge 0$. Depends on H.
+  - *The resolution of the sampled monitors (update, 2026-11-20).* The peak and density
+    monitors are functionals of one extremal, read at the samples of one integration
+    of it (801 points over $[0, T]$, by length on each segment). Between samples spaced
+    $h$, a limit with $|\ddot g| \le M$ exceeds its larger sampled value by at most
+    $M h^2/8$. With the rate $\dot g_i$ at a sample, the bound
+    $g \le g_i + \max(\dot g_i, 0)^2/(2M)$ holds up to the next sample.
+    - For a rate limit on the jerk chain, $\ddot g = u_j$, so $M$ is the jerk bound
+      itself (30 on the census).
+    - With $T \approx 1.3$ and 801 samples, $M h^2/8 \approx 10^{-5}$. The check's
+      floor is $10^{-6}$ of a rate limit of 0.3 to 2. So the sampled check resolves
+      violations to about 5 to 30 times its floor, not to the floor.
+    - This bounds what V1 can claim from samples. Using the second bound would
+      certify the floor without more samples; it is not done yet.
 - **V2. Continuation with a fixed structure — proved.** With $D_v\Psi_S$
   nonsingular and the implicit events transversal, there is a unique $C^1$
   branch; the monitors are continuous along it, and wherever they are all

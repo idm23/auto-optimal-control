@@ -18,9 +18,9 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-20, on the branch where the riding sensitivity
-skips the costates its law does not see (Lemma SP) and residuals skip their junctions'
-gradients. Rules R1, R2, R15, R16, R20, R25, R26,
+The data shown is from the census of 2026-11-20, on the branch where each accepted
+solution is sampled once for both of its checks (the densities and the violations off the
+arcs). Rules R1, R2, R15, R16, R20, R25, R26,
 R29, R32, R41, R43, R48, R50, R54 and R55 are turned on (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
@@ -30,21 +30,18 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-84 of the 90 cases solve, all under 60 s: the median is 7.0 s and the slowest 47.6 s.
-The same 84 cases solve as before Lemma SP, in 815 s against 859 s (5% faster): those
-changes compute the same numbers with less work.
-R55 makes the 84 cases solved on both pages 19% faster (1065 s to 859 s), and loses rest
-10. There, near the route's last birth, two branches of solutions with one structure lie
-close together. With R55, Newton reaches the one where a multiplier rises inside an arc,
-which acceptance rejects. Without it, the residual test happened to keep the route on the
-other.
+85 of the 90 cases solve, all under 60 s: the median is 6.5 s and the slowest 59.4 s
+(goal 3 at 80%, new). The 84 cases solved before take 727 s against 815 s (11% faster). Rest
+10 is still lost to R55 (Lemma AC): near its last birth, two branches of solutions with one
+structure lie close together, and Newton reaches the one where a multiplier rises inside
+an arc.
 
 When all seven routes are busy they run at about half speed (Observation O4). On most
 cases all seven run until one wins, and the winners are spread over every route.
 
 - **`goal` and `rest`:** all 45 solve.
-- **`vgoal`:** 26 of 30: all ten at 90%, nine at 80% (all but goal 3) and seven at 70%
-  (all but goals 0, 3 and 4).
+- **`vgoal`:** 27 of 30: all ten at 90%, all ten at 80% and seven at 70% (all but goals
+  0, 3 and 4).
 - **`vrest`:** 13 of 15: all but rests 4 and 10.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit

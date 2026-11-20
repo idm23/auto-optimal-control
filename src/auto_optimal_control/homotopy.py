@@ -426,6 +426,10 @@ class Homotopy:
         #: Rule R55 (Lemma AC): path solves judge Newton's steps by the natural
         #: monotonicity test, not by the residual's norm.
         self.natural_monotonicity = False
+        #: The free-violation checks read the densities' trajectory instead of sampling
+        #: the solution again: one integration of each accepted solution for both
+        #: (Lemma V1's monitors are functionals of one sampled extremal).
+        self.one_sampling = True
         #: Rule R50: an order-2 arc whose width crosses zero inside a step dies there
         #: into a touch (Lemmas E'' and Z): the death is located by the secant and the
         #: touch solved just past it.
@@ -1321,9 +1325,25 @@ class Homotopy:
             tr = k.trajectory(shoot.t0, np.concatenate([x0, lam0]), tf, shoot.params,
                               n_points=n_points, constraint_events=False, **self.options)
             return [(tr["t"], tr["g"], ())]
+        if getattr(self, "one_sampling", False):
+            # The trajectory that R25's densities sample (memoized), split where the arc
+            # changes: one integration of the solution serves both checks.
+            return self._samples_of(shoot.trajectory(v, n_points))
         key = shoot.memo_key(v, n_points, tuple(sorted(self.options.items())))
         return list(shoot.memoized("free_samples", key,
                                    lambda: self._sample_segments(shoot, v, n_points)))
+
+    @staticmethod
+    def _samples_of(tr):
+        """``_free_samples`` from a trajectory: its runs of one arc, each with the limits
+        it rides (none on a free arc)."""
+        A, act = tr["arc"], tr["active"]
+        cuts = [0] + [i for i in range(1, len(A)) if A[i] != A[i - 1]] + [len(A)]
+        out = []
+        for a, b in zip(cuts[:-1], cuts[1:]):
+            active = tuple(int(c) for c in np.flatnonzero(act[a])) if A[a] >= 0 else ()
+            out.append((tr["t"][a:b], tr["g"][a:b], active))
+        return out
 
     def _sample_segments(self, shoot, v, n_points):
         """``_free_samples`` for a multi-arc structure, without reuse."""
