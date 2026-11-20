@@ -1470,8 +1470,10 @@ class Homotopy:
         merged = self.merge_touching
         while merged:
             merged = False
+            # Consecutive arcs of the same limit, whatever other limits' arcs start between
+            # them (Lemma E4: a gap of width <= 0 is the merged arc).
             order = sorted((i for i, (kind, _) in enumerate(arcs) if kind == "boundary"),
-                           key=lambda i: float(values[i][0]))
+                           key=lambda i: (arcs[i][1], float(values[i][0])))
             for i, j in zip(order, order[1:]):
                 if arcs[i][1] != arcs[j][1]:
                     continue
