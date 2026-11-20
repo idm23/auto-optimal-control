@@ -598,12 +598,57 @@ margin is zero exactly when the corner is the only control that holds $g$.
     $-1.6\times 10^{-6} \le g \le -1.2\times 10^{-7}$, and the rise of $\mu$
     falls from $1.8\times 10^{-4}$ to $10^{-12}$. R5's own seed there
     solves to a gap of zero width.
-- **Merge (E4).** E3 read backwards.
+- **Merge (E4).** E3 read backwards; proved below.
 - **Gap.** The held set must not change at the gap's ends in a way the
   released motion does not share. Rest 12 (O2), where a ridden limit's own
   jerk saturates, still cycles: it splits, the gap closes, it splits again.
 - **Used by.** R27, and R21 through it (the held-set window of goal 8 at 70%);
   R34 (the gap contains the window; wider seeds, goal 3 at 70%).
+
+### E4. A closed gap is the merged arc — proved (order 1), sketch (order 2)
+
+- **Statement.** Let two arcs of one order-1 limit $c$ meet at $t_m$: the first leaves
+  at $t_m$ with $\mu(t_m^-) = 0$ (its exit row), the second enters at $t_m$ with jump
+  $\pi_2$ and $\mu(t_m^+) = \pi_2$ (its multiplier row). Then the motion and the controls
+  are those of one arc on the union, entered with jump $\pi_1 + \pi_2$, whose multiplier
+  is $\mu + \pi_2$ on the first piece and $\mu$ on the second, continuous at $t_m$. The
+  two-arc parametrization has a one-dimensional kernel there (where the split point
+  sits, with the first piece's jump moving with it), so its Jacobian is singular at a
+  closed gap.
+- **Proof.** On the first piece put $\delta\lambda = -\pi_2 \nabla g$ and
+  $\delta\mu = \pi_2$.
+  - *Riding law.* $G^\top \delta\lambda = -\pi_2 a$ and $\delta\mu\, a = \pi_2 a$, so the
+    riding control's stationarity $R u + r_0 + G^\top\lambda + \mu a = 0$ is unchanged,
+    and so is $u$.
+  - *Costate equation* $\dot\lambda = -\partial_x(\lambda^\top f + \mu \dot g)$.
+    - The change on the right is
+      $-\delta\lambda^\top f_x - \delta\mu\, \partial_x \dot g
+      = \pi_2 f_x^\top \nabla g - \pi_2 (\nabla^2 g\, f + f_x^\top \nabla g) = -\pi_2 \nabla^2 g\, f$.
+    - The change on the left is $\tfrac{d}{dt}(-\pi_2 \nabla g) = -\pi_2 \nabla^2 g\, f$.
+    - They agree, so the shifted pair solves the arc's equations.
+  - *Jumps.* At $t_m$ the shifted costate meets the second piece's without a jump. At
+    $t_{\rm in}$ the first piece's jump grows by $\pi_2$.
+  - *Continuity of $\mu$.* $\mu(t_m^-) + \pi_2 = \pi_2 = \mu(t_m^+)$.
+
+  The same extremal is described with any split point inside the union, by the same
+  shift. That is the kernel. $\square$
+- **Order 2 (sketch).** The interior jump is $-\pi_1 \nabla g - \pi_2 \nabla \dot g$. By
+  H2's representation $\lambda_{\rm ind} = \lambda_{\rm dir} + \dot\mu \nabla g - \mu \nabla \dot g$,
+  the shift $\delta\mu(t) = \pi_2 + \pi_1 (t_m - t)$ on the first piece produces it.
+  Checking the costate equation is the computation of H2's proof, not written out.
+- **Consequence.** A gap of width $\le 0$ between two arcs of one limit is the merged arc
+  (R11), wherever other limits' arcs start between them. Kept as two arcs, the shooting
+  is singular in the split point's direction. A predictor that carries the second arc
+  into the first gives a structure with the limit entered twice.
+- **Seen.** Goal 3 at 80% with R43 (2026-11-19).
+  - Two `tau4_min` arcs met at 0.538538 to six digits, with the second's entry jump
+    0.043. The equilibrated Jacobian's smallest singular value was $8 \times 10^{-16}$,
+    in the direction of the shared time and the first jump.
+  - R11 compared only consecutive boundary arcs of any limit. A `w3_min` arc starting
+    between the two (at 0.537) hid them from each other, so they were never merged.
+  - The route then failed 1,976 steps with `'tau4_min' is entered twice without an exit`.
+- **Depends on.** The indirect form of S1; H2 for order 2.
+- **Used by.** R11.
 
 ### Observation O1 — answers stay off the edge
 
