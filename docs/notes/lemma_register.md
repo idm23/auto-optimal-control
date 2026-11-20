@@ -1027,6 +1027,11 @@ route stalls.
     73 failures instead of 100.
   - Remembering the last failed step (R46) cuts goal 3 at 80%'s failures from 100 to 82,
     but not its time.
+  - *On the census page.*
+    - With R48 on every leg: 84 of 90. Rest 12 is gained, and goal 4 at 70% (torques
+      only, 14.2 s before, on a route that never moves the weight) is lost.
+    - With R48 only on the legs that move the weight, where (2) applies: 85 of 90,
+      with nothing lost and the common solves 7% faster.
 - **Used by.** R46, R48.
 
 ### V1–V5. The route as a one-parameter family
