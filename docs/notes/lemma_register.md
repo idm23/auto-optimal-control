@@ -469,6 +469,44 @@ margin is zero exactly when the corner is the only control that holds $g$.
 
 ## Entries in progress
 
+### L2. A touch of an order-2 limit at its own control's bound is ill-conditioned — sketch, with evidence
+
+- **Statement (sketch).** Let an order-2 limit $g$ (rate $w_j$, $\ddot g = u_j$ on the
+  jerk chain) touch at $t_c$, with its own control $u_j$ held at a bound on a
+  neighbourhood of $t_c$. Then $\ddot g(t_c) = \pm J$, and the touch is concave (E″) when
+  the bound brakes the rate.
+  - Under the clipped free law, or a riding law holding $u_j$, the costate directions
+    that act on the motion only through $u_j$ reach it only through the times where
+    $u_j$ enters and leaves the bound.
+  - The touch's jump $-\nu \nabla g$ lies in such a direction: $\lambda_{\dot q_j}$, and
+    through the chain $\lambda_{\ddot q_j}$.
+  - So the shooting Jacobian has a near-null direction combining $\nu$ with those
+    costates. With the jerk cost $\varepsilon$, its smallest singular value goes to 0
+    with $\varepsilon$. At $\varepsilon = 0$ it is exactly null, the order-2 analogue of
+    L's degeneracy at order 1.
+- **Why it is only a sketch.** The rate at which $\sigma_{\min}$ goes to 0, and whether
+  the switching times' sensitivity keeps the system regular for every $\varepsilon > 0$,
+  are not derived.
+- **Seen (2026-11-19).**
+  - *The births.* With R43, three rest cases stall at the birth of a rate limit whose
+    peak has $\ddot g = -30.000$, the jerk bound: rest 10 (`w6_max`, ridden there
+    `tau1_max` and `w3_max`), rest 4 (`w1_max`, free) and rest 5 (`w3_max`, over
+    `w1_min`).
+  - *The touch solves at rest 10's located birth.* From the seed (excess $2 \times
+    10^{-4}$ of scale, residual $1.6 \times 10^{-2}$), the Newton step takes the residual
+    to 52, with the Jacobian correct to within 6% of central differences. The
+    equilibrated $\sigma_{\min}$ is $6 \times 10^{-8}$. Its direction is the initial
+    costates of joints 1 and 6 with the touch's $\nu$, against joint 1's terminal rows.
+  - *The direct comparison.* In rest 10's answer, `w6_max` is ridden on
+    $[0.748, 0.840]$, and joint 6's jerk is held only on $[0, 0.098]$ and
+    $[1.451, 1.576]$. The corner touch is a stage of the route, not the answer: the
+    jerk leaves its bound before the arc forms (E″'s touch turning into an arc).
+- **What it asks of the route.** The weight of the jerk cost is a route parameter whose
+  growth widens Newton's radius (W). A route that meets this birth at a larger weight,
+  and lowers the weight after the arc has formed, crosses it where $\sigma_{\min}$ is
+  not small.
+- **Depends on.** E″, L (the order-1 case), W.
+
 ### M. A corner entry is where the margin crosses zero — proved, relative to J
 
 - **Statement.** Assume J and $a_k \ne 0$ for all $k$. Let an order-1 arc
