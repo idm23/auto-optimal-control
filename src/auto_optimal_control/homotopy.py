@@ -1445,11 +1445,11 @@ class Homotopy:
             eta0 = float(np.interp(t_star, t, eta))
             if not eta0 > 0.0:
                 return None                # the step starts past the event: R5 splits
-            T = shoot1.unpack(v1)[3] - shoot1.t0
             memo = getattr(self, "_split_memo", None)
             self._split_memo = (c, t_star, eta1)
             if (getattr(self, "density_jumps", False) and memo is not None and memo[0] == c
-                    and abs(memo[1] - t_star) < 1e-3 * T and eta1 < 0.5 * memo[2]):
+                    and abs(memo[1] - t_star) < 1e-3 * (shoot1.unpack(v1)[3] - shoot1.t0)
+                    and eta1 < 0.5 * memo[2]):
                 # Rule R54: the last location put the step where eta(t*) is a tenth of its
                 # end value, if eta(t*) is continuous in s. It is not smaller by half: eta
                 # jumps at t* where a held-set change sweeps through it (Lemma P), at the
