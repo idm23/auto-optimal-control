@@ -791,6 +791,9 @@ route stalls.
     the trim, a closing gap, a merge (E4), a rise again.
   - So U fixes where a piece leaves, but not what continues after it. That is E3's open
     question, with the held set changing at the gap's ends.
+  - On the weight's walk (W (3)) the same event recurs as the jerks grow. On rest 12 at
+    $k = 100$, R5 split `tau1_max` 92 times on the walk without R29, and 2 times with
+    R29's widened detection. The route takes 50.5 s instead of 67.4 s, and both solve.
 - **Used by.** R29. Settles O2's conjecture for this case.
 
 ### Q. An order-1 touch carries no jump unless the controls absorb it — proved, relative to S1
