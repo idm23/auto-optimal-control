@@ -661,3 +661,40 @@ def test_arcs_of_one_limit_merge_across_another_limits_arc():
     # A gap that is still open is left alone.
     values[2] = (0.540, 0.749, np.array([0.043]))
     assert len(h._merge_touching(arcs, values)[0]) == 3
+
+
+def test_order2_arc_death_is_located_by_the_secant_in_its_width():
+    """Lemmas E'' and Z, rule R50: an order-2 arc whose width is positive at the base and
+    negative one step on dies at the secant's zero of the width (linear in s); order-1
+    arcs and arcs that keep a positive width are left alone."""
+    import types
+
+    import numpy as np
+
+    from auto_optimal_control.shooting import MultiArcShooting
+
+    def shoot(arcs, values):
+        sh = MultiArcShooting.__new__(MultiArcShooting)
+        sh.t0, sh._open, sh._started = 0.0, set(), set()
+        sh.unpack = lambda v: (None, None, None, 2.0)
+        sh._test_arcs = (arcs, values)
+        return sh
+
+    h = Homotopy.__new__(Homotopy)
+    h.kr = types.SimpleNamespace(CONSTRAINT_ORDERS=[1, 2])
+    h._arcs_of = lambda sh, v: sh._test_arcs
+    arcs = [("boundary", 0), ("boundary", 1)]
+    # The slopes of the w2_min arc of goal 3 at 70% (Lemma E''): 0.00032 at the base, and
+    # 0.00032 - 21 * 4.6e-5 one step on.
+    s0 = shoot(arcs, [(0.20, 0.30, np.array([0.1])), (0.58834, 0.58866, np.array([0.3, 0.0]))])
+    s1 = shoot(arcs, [(0.20, 0.29, np.array([0.1])), (0.58930, 0.58866, np.array([0.3, 0.0]))])
+    i, th = h._order2_death(s0, None, s1, None)
+    assert i == 1
+    np.testing.assert_allclose(th, 0.00032 / (0.00032 + 0.00064))
+    # An order-1 arc's death is R17's (w^2 linear), not this rule's.
+    h.kr.CONSTRAINT_ORDERS = [2, 1]
+    assert h._order2_death(s0, None, s1, None) is None
+    # Still positive: no death.
+    h.kr.CONSTRAINT_ORDERS = [1, 2]
+    s2 = shoot(arcs, [(0.20, 0.29, np.array([0.1])), (0.58840, 0.58866, np.array([0.3, 0.0]))])
+    assert h._order2_death(s0, None, s2, None) is None

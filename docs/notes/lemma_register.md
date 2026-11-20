@@ -584,7 +584,51 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Evidence.** Goal 0 at 80% with rate limits: a touch with $\ddot g = +9.1$ becomes
   the arc [0.57798, 0.58219] from any width tried; the alternative, two touches at
   its ends, has $\ddot g = +0.05$ at both.
-- **Used by.** R35.
+- **Evidence of the linear law (2026-11-20).** Goal 3 at 70% at $k = 100$, the arc of
+  `w2_min` near 0.588 dying: over four accepted points at
+  $s = 0.882528, 0.882674, 0.882893, 0.883058$ its width falls through
+  $0.01150, 0.00846, 0.00384, 0.00032$. The slopes are $20.8$, $21.1$ and $21.3$: linear
+  to 2%, where Lemma E's order-1 law would make $w^2$ linear instead.
+- **Used by.** R35, R50.
+
+### Z. An order-2 arc dies into a touch with the entry's first jump — proved, relative to H2
+
+- **Statement.** Take an order-2 arc $[t_\mathrm{in}, t_\mathrm{out}]$ of limit $g$ on a
+  family of extremals of one structure, with entry jump $(\pi_1, \pi_2)$ and with its
+  multiplier's density $\eta = -\dot\mu$ bounded by $\bar\eta$ on the arc. As the
+  width $\delta = t_\mathrm{out} - t_\mathrm{in} \to 0$:
+  1. $0 \le \pi_2 \le \bar\eta\,\delta \to 0$;
+  2. the arc's conditions at its ends tend to those of a touch at
+     $t_c = t_\mathrm{in} = t_\mathrm{out}$, namely $g(t_c) = \dot g(t_c) = 0$ and the
+     costate jump $\nu\,\nabla g$ with $\nu = \pi_1$.
+
+  So at $\delta = 0$ the arc's solution is the touch's, with jump $\pi_1$. With E″'s
+  linear law ($\delta$ linear in $s$), two solutions of the arc's structure that bracket
+  the death locate it by the secant in $\delta$ to $O(\Delta s^2)$, and the solution
+  interpolated there is a touch's solution to the same order.
+- **Proof.**
+  1. By H2, $\mu(t_\mathrm{in}^+) = \pi_2$ and $\mu(t_\mathrm{out}^-) = 0$, and $\mu$
+     falls on the arc. So $\pi_2 = \int_{t_\mathrm{in}}^{t_\mathrm{out}} \eta\,dt
+     \le \bar\eta\,\delta$.
+  2. The arc's state conditions are $g = \dot g = 0$ at entry. On the arc the motion
+     rides the limit for a time $\delta$, so the state at exit differs from the state at
+     entry by $O(\delta)$. The costate's change across $[t_\mathrm{in}, t_\mathrm{out}]$
+     is the entry jump $\pi_1 \nabla g + \pi_2 \nabla \dot g$, plus the integral of
+     $\mu$ times the riding terms over a length $\delta$, which is $O(\delta)$. By (1)
+     everything except $\pi_1 \nabla g$ is $O(\delta)$: the touch's jump.
+- **Why it matters.** Before R50 the route stepped past the death with the arc's
+  structure, to a solution of negative width (the equations hold there, by continuation),
+  and turned that into a touch at the arc's midpoint. From $\delta = -10^{-3}$ that guess
+  is poor. The touch solve then fails after 2.3 s, and the step halves toward the death
+  (Lemma S's controller), failing again on each try.
+- **Evidence (2026-11-20).**
+  - Goal 3 at 70%, $k = 100$, the arc of `w2_min` above:
+    - without R50, three failed tries and about 7 s pass between $s = 0.88306$ and the
+      touch's acceptance at $0.883096$;
+    - the touch tried from width $-10^{-5}$ (at $0.883073$) solves at once.
+  - With R50, the secant puts the death at $0.883073$, and the touch solves at
+    $0.883076$ on the first try.
+- **Used by.** R50.
 
 ### E3. The split's gap (moment conditions) — leading order derived; sketch
 

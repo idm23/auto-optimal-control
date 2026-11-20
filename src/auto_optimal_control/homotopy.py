@@ -421,6 +421,10 @@ class Homotopy:
         #: Rule R17: when a step fails while an arc shrinks, extrapolate w^2 (linear
         #: in s by Lemma E) to the arc's death and step past it without the arc.
         self.locate_deaths = False
+        #: Rule R50: an order-2 arc whose width crosses zero inside a step dies there
+        #: into a touch (Lemmas E'' and Z): the death is located by the secant and the
+        #: touch solved just past it.
+        self.order2_deaths = False
         #: Rule R18: an arc whose multiplier rises from its entry (to its exit) is
         #: trimmed to where the rise ends (starts), before any split is tried.
         self.trim_rising = False
@@ -2545,6 +2549,32 @@ class Homotopy:
                      f"{frac:.6f} -> {x[-1]:.6f}")
         return x[:-1], float(x[-1]), i, w, target
 
+    def _order2_death(self, shoot0, v0, shoot1, v1):
+        """Rule R50: ``(arc index, theta)`` for the order-2 arc of ``v0``'s structure whose
+        width is positive at ``v0`` and has crossed zero at ``v1`` (the same structure, one
+        step on), earliest first; ``theta`` is the secant's zero in the step (Lemma E'':
+        the width is linear in the route parameter). None if no arc died."""
+        if not (isinstance(shoot0, MultiArcShooting) and isinstance(shoot1, MultiArcShooting)):
+            return None
+        a0, val0 = self._arcs_of(shoot0, v0)
+        a1, val1 = self._arcs_of(shoot1, v1)
+        if a0 != a1:
+            return None
+        T = shoot1.unpack(v1)[3] - shoot1.t0
+        best = None
+        for i, ((kind, c), x0, x1) in enumerate(zip(a0, val0, val1)):
+            if kind != "boundary" or self.kr.CONSTRAINT_ORDERS[c] < 2:
+                continue
+            if i in shoot0._open or i in shoot0._started:
+                continue
+            w0, w1 = float(x0[1] - x0[0]), float(x1[1] - x1[0])
+            if not (w0 > 1e-6 * T and w1 < 1e-6 * T):
+                continue
+            th = w0 / (w0 - w1)
+            if 0.0 < th < 1.0 and (best is None or th < best[1]):
+                best = (i, th)
+        return best
+
     def _death_points(self, shoot, v1, v0, s1, s0, s_fail):
         """Rule R17: ``[(arc index, s*)]`` for finite order-1 arcs that shrink from ``v1``
         (at ``s1``) to ``v0`` (at ``s0``) and, by a secant in ``w^2``, die before
@@ -3313,6 +3343,44 @@ class Homotopy:
                         self._detail(f"  step to {f:.6f} (ds {ds:.1e}): residual "
                                      f"{r.residual_norm:.1e}; junctions "
                                      f"{self._junction_text(sh, r.v)}")
+                        death = (self._order2_death(sh0, v0, sh, r.v)
+                                 if r.success and getattr(self, "order2_deaths", False)
+                                 and arcs else None)
+                        if death is not None:
+                            # Rule R50: an order-2 arc's width crossed zero inside the step.
+                            # It is linear in s (Lemma E''), so the death is at the secant's
+                            # zero; there the arc is the touch with jump pi_1 (Lemma Z).
+                            # The touch is solved just past the death, from the solution
+                            # interpolated to it.
+                            i_d, th_d = death
+                            fd = frac + th_d * (f - frac)
+                            fd = min(fd + 0.25 * (fd - frac), f)
+                            le_d = le0 + fd * (target_le - le0)
+                            off_d = off_start + fd * (target_off - off_start)
+                            v_d = np.asarray(v0) + th_d * (np.asarray(r.v) - np.asarray(v0))
+                            arcs_d, vals_d = self._arcs_of(sh, v_d)
+                            val_i = vals_d[i_d]
+                            arcs_d = list(arcs_d)
+                            vals_d = list(vals_d)
+                            arcs_d[i_d] = ("touch", arcs_d[i_d][1])
+                            vals_d[i_d] = (0.5 * (val_i[0] + val_i[1]),
+                                           float(np.atleast_1d(val_i[2])[0]))
+                            try:
+                                sh_d, r_d = solve_structure(arcs_d, vals_d,
+                                                            v_d[:sh0.n_base], le_d, off_d)
+                                done_d = settle(sh_d, r_d, le_d, off_d) if r_d.success else None
+                            except _FAILURES:
+                                done_d = None
+                            self._detail(f"    arc {i_d} dies at {frac + th_d * (f - frac):.6f}"
+                                         f" (R50): touch at {fd:.6f} "
+                                         + ("solved" if done_d is not None else "not solved"))
+                            if done_d is not None:
+                                self.diagnostics.fired("R50")
+                                done, f, le, off = done_d, fd, le_d, off_d
+                                ds = f - frac
+                                outcome = "converged"
+                                theta_done = (theta, order)
+                                break
                         done = settle(sh, r, le, off) if r.success else None
                         if done is not None:
                             theta_done = (theta, order)
