@@ -18,10 +18,9 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-20, on the branch where each accepted
-solution is sampled once for both of its checks (the densities and the violations off the
-arcs). Rules R1, R2, R15, R16, R20, R25, R26,
-R29, R32, R41, R43, R48, R50, R54 and R55 are turned on (the release's configuration), with
+The data shown is from the census of 2026-11-20, on the branch where arcs that ride only
+rate limits are evaluated in closed form (Lemma T'', Rule R60). Rules R1, R2, R15, R16, R20, R25, R26,
+R29, R32, R41, R43, R48, R50, R54, R55 and R60 are turned on (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
 secondary weight (R24); the first draw at a hundred times it, once lowering the weight
@@ -30,11 +29,11 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-85 of the 90 cases solve, all under 60 s: the median is 6.5 s and the slowest 59.4 s
-(goal 3 at 80%, new). The 84 cases solved before take 727 s against 815 s (11% faster). Rest
-10 is still lost to R55 (Lemma AC): near its last birth, two branches of solutions with one
-structure lie close together, and Newton reaches the one where a multiplier rises inside
-an arc.
+85 of the 90 cases solve, all under 60 s: the median is 6.4 s and the slowest 54.0 s. R60
+makes the 85 cases 4% faster (786 s to 752 s); only the rate-limited ones have such arcs.
+Rest 10 is still lost to R55 (Lemma AC): near its last birth, two branches of solutions
+with one structure lie close together, and Newton reaches the one where a multiplier rises
+inside an arc.
 
 When all seven routes are busy they run at about half speed (Observation O4). On most
 cases all seven run until one wins, and the winners are spread over every route.

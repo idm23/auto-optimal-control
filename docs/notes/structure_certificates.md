@@ -2325,6 +2325,25 @@ three samples. Lemma V1's update records what such samples can resolve.
 (59.4 s), and nothing is lost. The 84 common cases take 727 s against 815 s (11% faster),
 and the median falls from 7.0 s to 6.5 s.
 
+### Arcs on chain states in closed form: Rule R60
+
+By Lemma T'', a boundary arc whose ridden limits each bound one state of an integrator
+chain is the free arc with those chains' controls held at 0: their bounds become [0, 0] in
+T's closed form. *Rule R60* (`MultiArcShooting.pinned_riding`) evaluates such arcs, their
+STMs and their costs that way. The certificate reads each limit's expression (`a s - b` on
+one chain state, `a` a nonzero constant) when the chains are certified (R23). On the arm,
+rate limits qualify and torque limits do not. Position limits (order 3) would qualify too.
+
+*Checks.*
+- The closed form and the integrated riding agree on single rate limits from random
+  states: end states to $2 \times 10^{-14}$, STMs to the integrated STM's own tolerance.
+- The two-link arm's rate and position limits pass the same check in the tests.
+
+*Goal 3 at 80%* ($k = 100$, alone): 38.6 s to 34.8 s, in two runs each.
+
+*Census page (release configuration plus R60, 60 s cap): 85 of 90, the same cases*, in
+752 s against 786 s (4% faster). The slowest case is now 54.0 s. R60 joins the release.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

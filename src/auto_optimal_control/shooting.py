@@ -1071,6 +1071,22 @@ class MultiArcShooting(SingleShooting):
                     Hz = Hz + Sz[c] * du
         return H, Ht, Hz
 
+    #: Rule R60 (Lemma T''): boundary arcs whose limits all bound one chain state each
+    #: are integrated in closed form (needs the closed-form free arcs, R23).
+    pinned_riding = False
+
+    def _pins_of(self, c):
+        """The chains pinned by riding arc ``c`` (Lemma T''), or None if the arc is not
+        of that kind or R60 is off."""
+        if not self.pinned_riding or self._chains is None or not self._chains.pinned_of:
+            return None
+        cache = self.__dict__.setdefault("_pins_cache", {})
+        if c not in cache:
+            of = self._chains.pinned_of
+            pins = [of[cc] for cc in self.kernels.arc_constraints(c)]
+            cache[c] = None if any(j is None for j in pins) else tuple(sorted(set(pins)))
+        return cache[c]
+
     def _segment(self, kind, c, ta, dta, z, D, tb, dtb, jac, cost=False, flags=None):
         """Propagate a free (``kind is None``), boundary or singular arc; chain ``D = dz/dv``."""
         k, p = self.kernels, self.params
@@ -1106,6 +1122,12 @@ class MultiArcShooting(SingleShooting):
                                 arc=arc, frozen=sorted(flags), max_nfev=self.max_nfev,
                                 **tolerance, **self.options)
                 Fa = k.rhs_arc(ta, z, p, r["arc0"] if k.N_MODES else None)
+            elif kind == "boundary" and self._pins_of(c) is not None:
+                # Rule R60 (Lemma T''): every limit ridden bounds one chain state, so the
+                # arc is the closed-form free flow with those chains' controls at 0.
+                pins = self._pins_of(c)
+                r = self._chains.propagate(ta, z, tb, p, stm=jac, cost=cost, pinned=pins)
+                Fa = self._chains.rhs(z, p, pins)
             elif kind == "boundary":
                 cap = ((self.boundary_stm_max_nfev if jac else None) or self.boundary_max_nfev
                        or self.max_nfev)
