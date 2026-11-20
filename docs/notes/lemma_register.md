@@ -982,6 +982,18 @@ route stalls.
 
   The corner path's walk in $w$ meets turning points: on goal 4 at 70%, an arc dying
   with the route's parameter decreasing (R2's width steps).
+- **Seen with R29 on (2026-11-20).**
+  - Larger $k$ on the diagonal reach more answers: at $k = 300$ rests 10 and 6 solve on the
+    first route (14.5 s and 33.9 s), where every other path stalls on the walk.
+  - The same path loses rest 1, which only the diagonal at $k = 100$ solves, and rest 5.
+  - No path in the plane serves every case. Each route of the portfolio is the only
+    solver of some case: the second draw at $k = 1$ (goal 5 at 90%, and goal 4 at 70% with
+    torques only), $k = 10$ with the second draw (rest 4 with torques only), $k = 100$ on
+    the diagonal (rest 1) and $k = 300$ on the diagonal (rests 6 and 10).
+  - The walk's failures are spread evenly along it in $\log w$: about 40% of its solves
+    at every weight on goal 3 at 80%. So it is eventful throughout, not only near
+    $w_*$. Where it stalls varies by case: goal 0 at 70% at $\log_{10} w = -1.86$ of
+    $-2$, rest 4 at $-0.56$.
 - **Used by.** R24, R45, and the portfolio's weight routes. Soundness rests on (1)
   only: no answer is accepted on (2)'s account, which only explains why the route is
   shorter.
