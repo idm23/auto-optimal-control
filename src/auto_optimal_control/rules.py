@@ -194,7 +194,8 @@ BY_NAME = {r.name: r for r in RULES}
 #: two again, started at 10 w.
 DEFAULT_PORTFOLIO = ({"offset_seed": 1}, {"weight_start": 10},
                      {"weight_start": 10, "offset_seed": 1}, {"weight_start": 100},
-                     {"weight_start": 100, "weight_path": "diagonal"})
+                     {"weight_start": 100, "weight_path": "diagonal"},
+                     {"weight_start": 300, "weight_path": "diagonal"})
 
 
 def enabled(h):

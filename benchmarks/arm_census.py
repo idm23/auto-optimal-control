@@ -211,13 +211,23 @@ def main(argv=None):
     # Workers that may start processes of their own (Homotopy.parallel_routes): a
     # ProcessPoolExecutor's are not daemonic, unlike a Pool's.
     from concurrent.futures import ProcessPoolExecutor, as_completed
-    with ProcessPoolExecutor(args.workers, mp_context=mp.get_context("fork")) as pool, \
-            open(args.out, "w") as fo:
-        for fut in as_completed([pool.submit(run, n) for n in names]):
-            row = fut.result()
-            rows.append(row)
-            fo.write(json.dumps(row) + "\n")
-            fo.flush()
+    if args.workers == 1:
+        # One worker reuses one process for every case anyway: run them here, so that
+        # the routes R15 forks (one per core) are the only other processes.
+        with open(args.out, "w") as fo:
+            for n in names:
+                row = run(n)
+                rows.append(row)
+                fo.write(json.dumps(row) + "\n")
+                fo.flush()
+    else:
+        with ProcessPoolExecutor(args.workers, mp_context=mp.get_context("fork")) as pool, \
+                open(args.out, "w") as fo:
+            for fut in as_completed([pool.submit(run, n) for n in names]):
+                row = fut.result()
+                rows.append(row)
+                fo.write(json.dumps(row) + "\n")
+                fo.flush()
     summary(rows)
     if args.export:
         print(f"exported {write_manifest(args.export)} cases to {args.export}")
