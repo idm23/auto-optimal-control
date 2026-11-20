@@ -1107,10 +1107,45 @@ jump, density, gap, order, bound, end, held sign).
   start, if every event met has a proved continuation and the curve stays
   bounded, it reaches $s = 1$ after finitely many events. Depends on V2 to
   V4, S8. *Gaps:* the table (V4) and boundedness, which must be detected.
-- **Used by.** R25 (V2: the density at a fixed time is $C^1$ in the route
-  parameter). Phase 2's follower (planned). Today, R1 (V3), R2, R10, R16,
+- **V2′. Correction: a monitor at a fixed time is continuous only away from held-set
+  sweeps — proved, relative to P.** V2's monitors are continuous along the branch as
+  functionals: the density as a function on the arc, not at one instant. Fix a time
+  $t^*$ in an order-1 arc. Its held set at $t^*$ changes at the value $s_h$ where a
+  control's saturation boundary $\tau(s)$ passes $t^*$, and $\tau$ is $C^1$ with
+  $\dot\tau \ne 0$ by V2's transversal events. By P, $\eta(t^*; s)$ jumps at $s_h$
+  by P's jump. So $\eta(t^*; \cdot)$ is $C^1$ on each side of $s_h$, and not across it.
+  - *Consequence for R25.* R25 places the step where the secant puts
+    $\eta(t^*) = 0.1\,\eta_1(t^*)$. Where $\eta(t^*)$ is continuous, the shorter
+    step's end value is about a tenth of the last. Where it jumps at the base
+    ($s_h = s_0$), the end value does not shrink, so no shorter step reaches a zero,
+    and the locations go on shortening the step forever.
+  - *Seen (2026-11-20).* Goal 3 at 80%, $k = 100$, with R51 on: at $s = 0.9398$ of
+    the weight's walk, the `tau5_max` arc's density at $t = 0.78501$ "falls from
+    3.83 to $-0.95$" in each of 15 consecutive steps, as the step falls by 0.82 each
+    time from $1.4 \times 10^{-3}$ to $10^{-4}$. The route then stalls.
+  - *Rule R54.* A second location at the same limit and time whose end value is not
+    smaller by half is a jump at the base: no more locations, and R5 splits from
+    there. With it, the same route solves (63 s).
+- **Used by.** R25 (V2, with V2′: the density at a fixed time is $C^1$ in the route
+  parameter away from held-set sweeps), R54 (V2′). Phase 2's follower (planned). Today, R1 (V3), R2, R10, R16,
   R17 (E1, E2), R5, R18, R21, R25 (E3) and R11 (E4) are pieces of it, and
   R30 and R31 watch V1's order and jump monitors on the route.
+
+### Observation O4: what the parallel portfolio costs (2026-11-20)
+
+- **Speed per process.** On homebox (8 cores, a laptop i9-11980HK), a CPU-bound process
+  runs at 1.0, 1.0, 0.74, 0.56 and 0.51 of its single speed with 1, 2, 4, 7 and 8 busy.
+  Seven copies of goal 3 at 80% at $k = 100$ take 106 s each, against 56 s alone. The
+  cause is the hardware: with OpenBLAS held to one thread the times are the same.
+- **The page's routes.** From the route record (`Diagnostics.routes`), on page 96:
+  - Almost no route ends before the winner: on most cases all seven run until one finds
+    the answer, at about half speed.
+  - The winners are spread over all seven routes: 18, 16, 9, 9, 16, 10 and 7 cases.
+  - So no route can be dropped without losing cases.
+  - A case that a route solves in $T$ alone takes about $1.9\,T$ on the page: the 60 s
+    cap is about 32 s of one core.
+- **Consequence.** Goal 3 at 80% (56 s alone on its one solving route) needs a route
+  about 1.8 times faster, not a different schedule.
 
 ### Observation O3: what the direct comparison shows for the unsolved cases
 
