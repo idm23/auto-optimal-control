@@ -34,6 +34,9 @@ class Diagnostics:
         self.rules = {}
         self.oracles = {}
         self.snapshots = []
+        #: The parallel portfolio's routes (R15): ``[route, seconds, outcome]`` as each
+        #: ended, or was stopped when another found the answer.
+        self.routes = []
         self._per_class = {}
 
     @staticmethod
@@ -69,7 +72,8 @@ class Diagnostics:
     def as_dict(self):
         return {"evaluations": dict(self.evaluations), "steps": dict(self.steps),
                 "rejected": dict(self.rejected), "rules": dict(self.rules),
-                "oracles": dict(self.oracles), "snapshots": list(self.snapshots)}
+                "oracles": dict(self.oracles), "snapshots": list(self.snapshots),
+                "routes": [list(r) for r in getattr(self, "routes", [])]}
 
 
 def load_snapshot(path):

@@ -1944,6 +1944,7 @@ class Homotopy:
             conn.close()
 
         running = []
+        started = time.perf_counter()
         for n_, member in enumerate(members):
             parent, kid = ctx.Pipe(duplex=False)
             p = ctx.Process(target=child, args=(kid, member), daemon=True)
@@ -1968,6 +1969,9 @@ class Homotopy:
                     out, diag = None, {}
                 running.remove(item)
                 p.join(timeout=1)
+                self.diagnostics.routes.append(
+                    [n_ + 1, round(time.perf_counter() - started, 2),
+                     "exact" if out is not None else "ended"])
                 for part in ("evaluations", "steps", "rejected", "rules", "oracles"):
                     for key_, cnt in diag.get(part, {}).items():
                         table = getattr(self.diagnostics, part)
@@ -1981,7 +1985,9 @@ class Homotopy:
                         self._say(f"active set: route {n_ + 1} of {len(members)} found it")
                         found = hit
                         break
-        for _, p, conn in running:
+        for n_, p, conn in running:
+            self.diagnostics.routes.append(
+                [n_ + 1, round(time.perf_counter() - started, 2), "stopped"])
             p.kill()
             p.join(timeout=1)
             conn.close()
