@@ -18,10 +18,10 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-20, on the branch where R25 stops locating a
-split at a density that jumps at the step's base (Lemma V2′). Rules R1, R2, R15, R16, R20,
-R25, R26, R29, R32, R41, R43, R48, R50 and R54 are turned on (the release's
-configuration), with held-set events (R22) and closed-form free arcs (R23) on by default.
+The data shown is from the census of 2026-11-20, on the branch where the chord judges
+Newton's steps in its own norm (Lemma AC, Rule R55). Rules R1, R2, R15, R16, R20, R25, R26,
+R29, R32, R41, R43, R48, R50, R54 and R55 are turned on (the release's configuration), with
+held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
 secondary weight (R24); the first draw at a hundred times it, once lowering the weight
 after the limits and once with them (R45); and at three hundred times it with them. The
@@ -29,10 +29,12 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-85 of the 90 cases solve, all under 60 s: the median is 9.4 s and the slowest 51.7 s.
-R54 changes no case on the page: the common solves take within 0.1% of the time without
-it. It matters on routes that meet such a jump. On goal 3 at 80% at a hundred times the
-weight, with R51 on, the route stalls without it and solves with it.
+84 of the 90 cases solve, all under 60 s: the median is 7.4 s and the slowest 49.9 s.
+R55 makes the 84 cases solved on both pages 19% faster (1065 s to 859 s), and loses rest
+10. There, near the route's last birth, two branches of solutions with one structure lie
+close together. With R55, Newton reaches the one where a multiplier rises inside an arc,
+which acceptance rejects. Without it, the residual test happened to keep the route on the
+other.
 
 When all seven routes are busy they run at about half speed (Observation O4). On most
 cases all seven run until one wins, and the winners are spread over every route.
@@ -40,7 +42,7 @@ cases all seven run until one wins, and the winners are spread over every route.
 - **`goal` and `rest`:** all 45 solve.
 - **`vgoal`:** 26 of 30: all ten at 90%, nine at 80% (all but goal 3) and seven at 70%
   (all but goals 0, 3 and 4).
-- **`vrest`:** 14 of 15: all but rest 4.
+- **`vrest`:** 13 of 15: all but rests 4 and 10.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit
 on another joint at the same instant (the nine new ones are not yet read for this): goals 3 and 4 at 90%, goals 0 and 1 at 80%, rest 2 and rest 9.

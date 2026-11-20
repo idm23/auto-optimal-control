@@ -423,6 +423,9 @@ class Homotopy:
         self.locate_deaths = False
         #: Rule R54: R25's location is not repeated at a density that jumps (Lemma P).
         self.density_jumps = False
+        #: Rule R55 (Lemma AC): path solves judge Newton's steps by the natural
+        #: monotonicity test, not by the residual's norm.
+        self.natural_monotonicity = False
         #: Rule R50: an order-2 arc whose width crosses zero inside a step dies there
         #: into a touch (Lemmas E'' and Z): the death is located by the secant and the
         #: touch solved just past it.
@@ -1304,6 +1307,7 @@ class Homotopy:
         shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
         shoot.fast_residuals = True
         shoot.tangent_junctions = self.kr.system.riding is not None
+        shoot.natural_monotonicity = getattr(self, "natural_monotonicity", False)
         return shoot
 
     def _free_samples(self, shoot, v, n_points=801):

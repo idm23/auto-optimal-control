@@ -388,6 +388,11 @@ class SingleShooting:
     #: How :meth:`solve_chord` treats its Jacobian between fresh evaluations: ``None``
     #: keeps it (the chord method), ``"broyden"`` updates it after each accepted step.
     chord_updates = None
+    #: Rule R55 (Lemma AC): :meth:`solve_chord` judges a step by Newton's natural
+    #: monotonicity, the simplified correction ``||J^-1 R(v + dv)||`` against
+    #: ``||dv||``, instead of the residual's norm, which is not invariant under a
+    #: rescaling of the equations and can grow by up to ``cond(J)`` times the contraction.
+    natural_monotonicity = False
 
     def solve_chord(self, guess, tol=1e-10, max_iterations=12, contraction=0.5,
                     reject_theta=None):
@@ -440,7 +445,24 @@ class SingleShooting:
                     sol = self._chord_result(v, err, nfev)
                     sol.contraction, sol.too_far = theta, True
                     return sol
-            if np.isfinite(trial) and trial < contraction * err:
+            ratio = self._natural_ratio(lu, Rt, dv) if self.natural_monotonicity else None
+            if np.isfinite(trial) and (trial < tol or (
+                    ratio < contraction if self.natural_monotonicity
+                    else trial < contraction * err)):
+                if (self.natural_monotonicity and trial >= tol and ratio > 0.25
+                        and not self.chord_updates):
+                    # Lemma AC (3): the chord contracts linearly, by about the ratio, so
+                    # above 1/4 it would not reach the tolerance in its iterations: a
+                    # fresh Jacobian at the accepted point, for Newton's quadratic rate.
+                    fresh_RJ = self._try(v + dv)
+                    nfev += 1
+                    if fresh_RJ is None:
+                        break
+                    v, fresh = v + dv, True
+                    R, J = fresh_RJ
+                    err = float(np.linalg.norm(R))
+                    lu = lu_factor(J)
+                    continue
                 if self.chord_updates == "broyden":
                     # Broyden's update: the secant condition J dv = dR at the cost of one
                     # rank-one correction and a small LU, where a fresh Jacobian costs a
@@ -456,7 +478,11 @@ class SingleShooting:
                     Rt = self._safe_residual(v + step * dv)
                     nfev += 1
                     trial = float(np.linalg.norm(Rt))
-                    if np.isfinite(trial) and trial < (1 - 0.25 * step) * err:
+                    # Deuflhard's restricted monotonicity test, in the natural norm with
+                    # R55 (the simplified correction against the full Newton correction)
+                    if np.isfinite(trial) and (
+                            self._natural_ratio(lu, Rt, dv) < 1 - 0.25 * step
+                            if self.natural_monotonicity else trial < (1 - 0.25 * step) * err):
                         v, R, err, moved = v + step * dv, Rt, trial, True
                         break
                     step *= 0.5
@@ -478,6 +504,17 @@ class SingleShooting:
         sol = self._chord_result(v, err, nfev, tol)
         sol.contraction, sol.too_far = theta, False
         return sol
+
+    @staticmethod
+    def _natural_ratio(lu, R, dv):
+        """``||J^-1 R|| / ||dv||`` with ``J`` factored in ``lu`` (Lemma AC): the simplified
+        Newton correction at a trial point against the correction that led there."""
+        from scipy.linalg import lu_solve
+        bar = lu_solve(lu, -R)
+        size = float(np.linalg.norm(dv))
+        if not (np.all(np.isfinite(bar)) and size > 0):
+            return float("inf")
+        return float(np.linalg.norm(bar)) / size
 
     def _chord_result(self, v, err, nfev, tol=0.0):
         """:meth:`solve_chord`'s result at ``v`` (``max_violation`` is not computed)."""

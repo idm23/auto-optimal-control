@@ -2198,6 +2198,99 @@ hundred times the weight, alone:
   raises the residual thirtyfold, and no step along it decreases it by more than 0.6%.
   The LM steps did not make the fallbacks fewer (46 against 41).
 
+### Where the path solves' time goes, and Newton's own norm: Rule R55
+
+*The split (2026-11-20).* Goal 3 at 80%, at a hundred times the weight, alone (56.7 s
+on main):
+- `perf` puts 65% of the solve in the generated kernel. The run-time riding solver is
+  53% of the solve, FNI's own stepping 5.7%, and Python and NumPy about 27%.
+- Counting by caller, the path solves take 42.5 s:
+  - 187 converged with one Jacobian (5.7 s);
+  - 35 went to MINPACK (17.9 s, about 120 residuals each);
+  - 111 failed without the fallback (9.6 s);
+  - the rest needed 2 to 6 Jacobians.
+
+*Three mechanisms.* For each chord solve, compare the predictor's segments with the
+first Newton iterate's: does the iterate propagate, and does any riding arc's count of
+held-set events change?
+- *The domain.* Of the 105 solves with $\Theta \ge 2$, 76 have a first iterate that
+  does not propagate. Some riding arc's limits cannot be ridden there within the
+  bounds (Lemma I's holdable set), so the residual is not defined. Most of the cheap
+  failures are these.
+- *Kinks.* 23 change a held set. Inside the domain the residual is only piecewise
+  smooth (Lemma AC's last part, and R37's failure above).
+- *Scaling.* Of the 35 MINPACK solves, 27 had no such change and propagated, with
+  median $\Theta$ 0.04. Newton was contracting well, and the chord rejected the step
+  because the residual's norm did not halve. By Lemma AC (1), the residual can grow
+  by up to $\kappa(J)\,\Theta$, and L2's Jacobians have $\kappa$ of $10^3$ to $10^4$.
+
+*Rule R55* (`Homotopy.natural_monotonicity`). The chord accepts a step when the
+simplified correction $\|J^{-1}R(v + \Delta v)\|$ is below half of $\|\Delta v\|$
+(Deuflhard's natural monotonicity test), instead of when the residual halves. Its
+backtracking uses the restricted test $\|J^{-1}R(v + \lambda\Delta v)\| \le
+(1 - \lambda/4)\,\|\Delta v\|$. A step that reaches the path tolerance is accepted as
+before. Every solve still ends at the path tolerance in the residual, so R55 changes
+only which iterates are tried.
+
+*Result, the same case.* 48.1 s against 56.7 s:
+- MINPACK solves fall from 35 to 6, and their cost from 17.9 s to 3.2 s;
+- path solves take 33.0 s against 42.5 s;
+- the failed steps rise from 111 to 133, the route's other path.
+
+With R55 the chord also takes a fresh Jacobian after an accepted step that contracts by
+less than a quarter (Lemma AC (3)). Without that, a settle solve on rest 10 ran out of its
+twelve iterations at $\Theta \approx 0.4$.
+
+*Census page (release configuration plus R55, 60 s cap): 84 of 90, against 85.* The 84
+cases solved on both pages take 859 s against 1065 s (19% faster), and the median falls
+from 9.4 s to 7.4 s. Rest 10 is lost:
+- Near the route's last birth, two branches of solutions with one structure lie close
+  together. Route 7's second `tau1_max` arc enters at 1.339 on one and 1.286 on the
+  other.
+- With R55, Newton reaches the second, where the multiplier rises on [1.305, 1.335].
+  Acceptance rejects it, and the split does not converge.
+- These did not recover it: a stop on the natural norm, a guard on Kantorovich's ball
+  (the first correction is already as large as the gap), R18, and asking the residual
+  not to rise as well. The last brought the MINPACK solves back (goal 3 at 80%: 60.5 s).
+
+Goal 4 at 70% failed on the first page with R55, and also fails without it on a rerun:
+its route turns on wall-clock rules. R55 joins the release.
+
+Tried on the same case and not kept (2026-11-20):
+- *Lemma B′'s reduced riding system* (null space of the ridden limits instead of LU
+  of the whole KKT matrix). It is more accurate where the jerk cost is small: on the
+  arm's six-limit set, the Jacobian's error against central differences is 0.11 of
+  the test's tolerance, against 0.18 for LU. The range-space (Schur) form, tried
+  first, reached 1.75 and failed the test. But it is not faster. Replaying 3,000
+  recorded riding propagations takes 0.78 s either way. At six controls the explicit
+  $Q$ costs what LU saves, and the whole KKT solve is about 6% of the kernel's time.
+- *Stopping a solve whose first step has $\Theta$ above 1 or 2* (R56, Lemma AC (2):
+  Kantorovich's condition fails), with the step halved as after a failure. Without a
+  floor it stalls, because a kink at the base is crossed by every shorter step. With
+  R37's floor ($8\,\mathrm{d}s_{\min}$) it solves, in 65 s at 2 and 78 s at 1, against
+  48 s. A crossed kink is better worked through than avoided.
+- *R37 on the weight's walk*: 62 s.
+- *Deuflhard's QNERR in the chord* (R57, with R55). It reuses the first Jacobian's LU
+  through good Broyden updates in the natural norm, which converge superlinearly
+  while each contraction stays below 1/2. It takes 50.7 s against R55's 46.9 s, with
+  as many multi-Jacobian solves. Their fresh Jacobians follow rejected steps (the
+  domain's edge and kinks),
+  not slow contractions, so there is nothing for the updates to save.
+- *R8's pull-in on a Newton iterate that leaves the domain.* Of 87 such iterates, 9
+  could be pulled in. Their natural ratios were 30 to 3500: the riding fails inside
+  arcs (41 on backward segments), not only past an exit, and the step is simply far
+  outside Newton's region.
+- *Deuflhard's $\lambda_{\min}$* (R58). A predictor's solve that backtracks to
+  $\lambda \le 1/4$ (or $1/8$) stops, and the step is halved. Without R37's floor it
+  stalls. With it, it takes 49.5 s (47.8 s at $1/8$) against 46.9 s.
+- *A bracketed step controller* (R59). It bisects geometrically between the last
+  success and the least failure since, relaxing the failure bound by 1.1 (or 1.2) per
+  success. Under Lemma S's model (Newton converges below a radius $h^*$ that is
+  constant on a stretch), it fails about 12% of its attempts against 37%. It took
+  133 s (119 s at 1.2), with 1,033 solves. The model does not hold: most failures
+  are the domain's edge or a kink at a particular point of the route, not a uniform
+  radius, and the bracket keeps the steps short long after passing one.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |

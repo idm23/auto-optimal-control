@@ -1076,7 +1076,86 @@ route stalls.
       only, 14.2 s before, on a route that never moves the weight) is lost.
     - With R48 only on the legs that move the weight, where (2) applies: 85 of 90,
       with nothing lost and the common solves 7% faster.
+  - *Where the hypothesis fails (2026-11-20).* (1) assumes Newton converges exactly
+    below a radius. On goal 3 at 80%, most steps with $\Theta \ge 2$ have a first
+    iterate outside the residual's domain, or across a held-set kink (Lemma AC), at
+    particular points of the route. A controller built on (1), bisecting between the
+    last success and the least failure (R59), took 133 s against 47 s: after such a
+    point its bracket keeps the steps short. So (1) describes the controller's
+    equilibrium, not where the steps are limited.
 - **Used by.** R46, R48.
+
+### AC. Newton's progress is measured in its own norm, not the residual's — proved
+
+- **Statement.** Let $\Psi : \mathbb{R}^n \to \mathbb{R}^n$ be $C^1$ near $v_0$ with
+  $J = D\Psi(v_0)$ nonsingular. Let $\Delta v = -J^{-1}\Psi(v_0)$,
+  $v_1 = v_0 + \Delta v$, and let $\bar\Delta v = -J^{-1}\Psi(v_1)$ be the simplified
+  correction. Write $\Theta = \|\bar\Delta v\| / \|\Delta v\|$ for the contraction.
+  1. *(Invariance.)* For every nonsingular $A$, the system $A\Psi = 0$ has the same
+     Newton iterates, the same $\Delta v$, $\bar\Delta v$ and $\Theta$. The residual
+     ratio $\|A\Psi(v_1)\| / \|A\Psi(v_0)\|$ can take any value in
+     $[\Theta/\kappa,\ \kappa\,\Theta]$ with $\kappa = \operatorname{cond}(J)$.
+     That is, $$\frac{\|\Psi(v_1)\|}{\|\Psi(v_0)\|} \le \kappa(J)\,\Theta .$$
+  2. *(Convergence.)* If $\|J^{-1}(D\Psi(v) - D\Psi(w))\| \le \omega\|v - w\|$ near
+     $v_0$ (affine-covariant Lipschitz), then $\Theta \le \tfrac12\omega\|\Delta v\|$.
+     If $h_0 = \omega\|\Delta v\| < 2$, the chord (simplified Newton) iteration from
+     $v_0$ converges to the solution, with each simplified correction contracted by at
+     least $\Theta$ to first order. So $\Theta < \tfrac12$ is a sufficient local test
+     of progress, and a test on $\|\Psi\|$ is not: by (1) it can reject a step with
+     $\Theta$ small whenever $\kappa(J)\Theta \ge \tfrac12$.
+  3. *(Budget.)* The chord iteration keeps $J$, so it contracts linearly, by about
+     $\Theta_k$ at step $k$. To go from a residual $e_0$ to the tolerance $\tau$
+     within $N$ iterations it needs $\Theta_k \lesssim (\tau/e_0)^{1/N}$. With
+     $N = 12$, $e_0 = 10^{-2}$ and $\tau = 10^{-10}$, that is about $0.2$. So a step
+     accepted with $\Theta_k > \tfrac14$ is followed by a fresh Jacobian (Newton's
+     quadratic rate), as Deuflhard's $\Theta_{\max} = \tfrac14$ prescribes.
+- **Proof.**
+  - (1) $D(A\Psi) = AJ$, so $(AJ)^{-1}A\Psi = J^{-1}\Psi$ at every point. The
+    corrections and $\Theta$ do not depend on $A$.
+  - $\|\Psi(v_1)\| = \|J\bar\Delta v\| \le \|J\|\,\Theta\,\|\Delta v\|$ and
+    $\|\Delta v\| \le \|J^{-1}\|\,\|\Psi(v_0)\|$, which gives the bound. Choosing $A$ to
+    rotate $\Psi(v_0)$ and $\Psi(v_1)$ onto $J$'s extreme singular directions attains
+    the ends of the range.
+  - (2) $\Psi(v_1) = \int_0^1 (D\Psi(v_0 + \tau\Delta v) - J)\,\Delta v\,d\tau$, so
+    $\|J^{-1}\Psi(v_1)\| \le \int_0^1 \omega\tau\|\Delta v\|^2 d\tau =
+    \tfrac12\omega\|\Delta v\|^2$.
+  - The convergence statement is the affine-covariant Newton–Mysovskikh theorem for
+    the simplified iteration (Deuflhard 2004, Thms 2.5 and 2.10).
+  - (3): $N$ linear contractions by at most $\Theta$ take $e_0$ to $\Theta^N e_0$ in
+    the natural norm. ∎
+- **What it means for the route.** Near an L2 touch the path Jacobian is
+  ill-conditioned: equilibrated $\sigma_{\min}$ of about $5 \times 10^{-4}$, so
+  $\kappa$ is $10^3$ to $10^4$. The chord's old test, $\|\Psi(v_1)\| < \tfrac12
+  \|\Psi(v_0)\|$, then rejects steps that Newton takes well.
+- **Seen (2026-11-20).** Goal 3 at 80%, $k = 100$, main at 30d6b32:
+  - Of the 35 path solves handed to MINPACK, 27 had no held-set change between the
+    predictor and the first iterate. Their median $\Theta$ was 0.04 (range
+    $4 \times 10^{-4}$ to 2.7), yet the chord's residual did not halve. A typical
+    case ended its first step with the residual unchanged at $5 \times 10^{-3}$, then
+    backtracked four times, then took 150 to 490 MINPACK residuals.
+  - Those 35 solves cost 17.9 s of the route's 42.5 s of path solves.
+- **The other causes of failed steps: the domain, and kinks.** The path residual is
+  defined only where every riding arc's limits can be ridden within the control
+  bounds (the holdable set, Lemma I). Inside that set it is only piecewise smooth: a
+  riding arc's held set changes at events, and Lemma R keeps the STM continuous but
+  not its derivative in $v$. On goal 3 at 80% (main), 105 chord solves had
+  $\Theta \ge 2$:
+  - in 76, the first Newton iterate is outside the domain, so the residual is not
+    defined there (a riding fails to propagate);
+  - in 23, it changes a riding arc's count of held-set events;
+  - in 6, neither.
+  (2)'s hypothesis fails in both of the first two cases, and AC claims nothing there.
+  A large $\Theta$ there is the domain's edge or a kink crossed, not distance
+  (R37's failure, `structure_certificates.md`).
+- **Seen: (3).** In R55's first version, without the fresh Jacobian, a settle solve
+  on rest 10 (route 7) used its twelve iterations at $\Theta \approx 0.4$ and stopped
+  at $6 \times 10^{-7}$. The residual test had refreshed $J$ there and reached
+  $6 \times 10^{-10}$.
+- **Depends on.** Nothing of the problem's; the standard affine-covariant Newton
+  theory (Deuflhard 2004, ch. 2).
+- **To formalize.** (1) is linear algebra. (2) needs the integral form of the mean
+  value theorem, which Mathlib has, and the Newton–Mysovskikh argument.
+- **Used by.** R55; R37's $\Theta$ (sec. 5.1 of the same reference).
 
 ### V1–V5. The route as a one-parameter family
 
