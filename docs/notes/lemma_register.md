@@ -279,6 +279,163 @@ margin is zero exactly when the corner is the only control that holds $g$.
   hypothesis.
 - **Used by.** R7.
 
+### J′. Coincident junctions are tangential too — proved, relative to S1
+
+- **Statement.** Assume C1, C2 and a convex $U$. At an instant $t^*$ where several
+  limits of order 1 or 2 enter, leave or are touched at once, the control is
+  continuous.
+- **Proof.** S1 gives $\lambda^+ - \lambda^- = -\sum_c \nu_c \nabla g_c$, with atoms
+  $\nu_c \ge 0$. For a limit of order 2, $\dot g_c = \nabla g_c F$ is free of $u$, so
+  $G^\top \nabla g_c = 0$. Hence $G^\top(\lambda^+ - \lambda^-) = -\sum_{q_c = 1} \nu_c a_c$:
+  only the order-1 atoms reach the control. The pointwise minimisation on each side
+  gives (S5) $(R u^\pm + G^\top \lambda^\pm)^\top (v - u^\pm) \ge 0$ for all $v \in U$.
+  Taking $v = u^\mp$ and adding gives
+  $$\|\Delta u\|_R^2 \le \sum_{q_c = 1} \nu_c\, a_c^\top \Delta u, \qquad \Delta u = u^+ - u^-.$$
+  For an order-1 limit, each case gives $a_c^\top \Delta u \le 0$:
+  - entering: $\dot g_c(t^{*-}) = d_c + a_c^\top u^- \ge 0$, since $g_c$ rises to 0,
+    and $\dot g_c = d_c + a_c^\top u^+ = 0$ on the arc;
+  - leaving: the same with the sides exchanged;
+  - touched: $\dot g_c(t^{*-}) \ge 0 \ge \dot g_c(t^{*+})$;
+  - ridden through $t^*$: $\dot g_c = 0$ on both sides.
+
+  So the right-hand side is $\le 0$, and $\Delta u = 0$. $\square$
+- **Consequence.** Every junction row that encodes the control's continuity (rate rows,
+  multiplier rows, R43's rows) is necessary at a coincidence too.
+- **Depends on.** S1, S5.
+- **Used by.** X.
+
+### X. Two entries at one instant: where the orders meet, and when they continue each other — proved, relative to J′ and B (regularity assumed)
+
+- **Setting.** Limit $A$ has order 1, with $a_A = (\nabla g_A G)^\top$. Limit $B$ has
+  order 1 or 2, with $b_B$ the gradient in $u$ of its first rate that depends on $u$.
+  The two are on distinct joints, so $a_A$ and $b_B$ are independent (B).
+  - Structure $\mathcal A$ enters $A$ first: free, then $\{A\}$, then $\{A, B\}$.
+  - Structure $\mathcal B$ enters $B$ first: free, then $\{B\}$, then $\{A, B\}$.
+
+  Each is a square system $R_{\mathcal A}(s, w, t_A, t_B) = 0$ or
+  $R_{\mathcal B}(s, w, t_A, t_B) = 0$, with the same unknowns and the route's
+  parameter $s$. Write $\delta = t_B - t_A$. $\mathcal A$'s solution is valid where
+  $\delta \ge 0$, and $\mathcal B$'s where $\delta \le 0$.
+- **(i) The joint junction.** At a solution with $t_A = t_B = t^*$ and the control
+  interior to $U$ there, J′ and B give the conditions of a joint entry:
+  - the states: $g_A = 0$, plus $g_B = \dot g_B = 0$ (order 2) or $g_B = 0$ (order 1);
+  - the multipliers: $\mu_A(t^{*+}) = \pi_A$ and $\mu_B(t^{*+}) = \pi_B$, with
+    $\pi_B$ the coefficient that reaches the control (the second, $\pi_2$, at order 2).
+
+  For the multipliers, subtract the stationarity of the free law from that of the
+  joint riding law, at the same $u$: $(\mu_A - \pi_A) a_A + (\mu_B - \pi_B) b_B = 0$.
+  Counting, the joint entry has one fewer unknown than two separate entries and the
+  same number of conditions. So it is overdetermined by one, and occurs only at
+  isolated values of $s$ (a hypersurface $\Sigma$ in the space of route parameters).
+- **(ii) Both orders meet there.** The joint point solves $R_{\mathcal A}$ and
+  $R_{\mathcal B}$ at $\delta = 0$. In $\mathcal A$ at zero width, the arc $\{A\}$
+  starts from $\lambda' = \lambda^- - \pi_A \nabla g_A$. The free control $u$
+  (interior, so stationary for $\lambda^-$) satisfies the riding law there:
+  - its stationarity, since
+    $R u + r_0 + G^\top \lambda' + \mu_A a_A = (\mu_A - \pi_A) a_A = 0$, where $r_0$ is the
+    cost's linear term in $u$;
+  - and $\dot g_A = 0$, which holds at the joint point.
+
+  So $\mathcal A$'s entry row for $A$ holds, and $B$'s entry rows are the joint ones.
+  $\mathcal B$ is the same with the roles exchanged.
+- **(iii) Crossing or fold.** Let both Jacobians in $(w, t_A, t_B)$ be nonsingular at
+  the joint point. By the implicit function theorem each order has a unique smooth
+  branch through it, and the gaps along them are
+  $\delta_{\mathcal A}(s) = \alpha (s - s^*) + O(|s - s^*|^2)$ and
+  $\delta_{\mathcal B}(s) = \beta (s - s^*) + O(|s - s^*|^2)$. Take the crossing
+  transversal: $\alpha, \beta \ne 0$.
+  - If $\alpha\beta > 0$, exactly one order is valid on each side of $s^*$, and it
+    continues the other: E5.
+  - If $\alpha\beta < 0$, both orders are valid on one side, and neither has a
+    solution near the joint point on the other. The coincidence is a fold of the
+    route's solution curve, which turns back in $s$ there.
+
+  Both $\delta_{\mathcal A}$ and $\delta_{\mathcal B}$ vanish exactly on $\Sigma$, so
+  their gradients in the route's parameters are both normal to it. The sign of
+  $\alpha\beta$ is therefore a property of the point of $\Sigma$, not of the
+  direction the route crosses it in. $\square$
+- **Consequence.** A route that reaches a fold with $s$ increasing finds each order's
+  solution on its invalid side (the churn of goal 1 at 70%). No reorder, tie or drop
+  of an arc can continue it there. The solution curve continues on the other order's
+  branch with $s$ decreasing, which is a turning point. Following it needs arclength
+  continuation (Allgower and Georg), not steps in $s$.
+- **To check where it is used.**
+  - $\alpha$ and $\beta$ come from each order's Jacobian and $\partial_s R$ at a
+    converged point near the coincidence: the tangent of the branch, at no extra
+    integration.
+  - The hypotheses are the control interior at $t^*$ (the box margins), B's rank for
+    the pair, and both Jacobians nonsingular.
+  - Where any of these fails, the lemma is silent. The cases are Lemma K's corner, a
+    singular riding set, or a degenerate junction.
+- **Gap.** The $O(|s - s^*|^2)$ terms are uniform only while the Jacobians stay
+  nonsingular. This is a standard implicit-function-theorem estimate, but not yet
+  written out.
+- **Seen.** Where the route solves both orders of a crossed pair at one step and both
+  come out crossed (the churn), $\alpha$ and $\beta$ come from each order's tangent
+  $-J^{-1}\partial_s R$ along the route's direction.
+  - *Goal 1 at 70%, before R43 (2026-11-19).* At the entries of `tau5_min` and `w3_max`,
+    $\alpha\beta < 0$ every time. But the Jacobians were near-singular: equilibrated
+    condition about $10^{10}$, $\sigma_{\min} \approx 10^{-9}$. The weak direction was
+    an order-2 entry's $(t_{\rm in}, \pi_2)$ against its tangency and $H$-continuity
+    rows, elsewhere in the structure. At a tangential order-2 entry $g$, $\dot g$ and
+    (by J′) $\ddot g$ vanish, so no row fixes $t_{\rm in}$ to first order: the double
+    root R43 removes. The fold reading there is not reliable, and the case solves with
+    R43.
+  - *With R43.* Most churn points are well conditioned: equilibrated condition about
+    $10^5$. Goal 0 at 70% has two exits, `w5_max` and `tau5_max`: $\alpha = -0.011$,
+    $\beta = +0.062$. Goal 4 at 70% has the exit of `w5_max` and the entry of
+    `tau4_max`: $\alpha = -1.1$, $\beta = +2.1$. Both show the fold signature.
+  - The free law evaluated at $t^*$ has jerks at their bounds in both cases, but the
+    motion is not on the free law there. It rides other limits through $t^*$: `w2_min`,
+    `w3_min` and `w4_min` in goal 0 at 70%, `w4_max` in goal 4 at 70%. The riding
+    controls of all four arcs around $t^*$ hold no jerk at a bound. The pair's control
+    gradients are independent: normalized $\sigma_{\min}$ 0.37 and 0.99.
+- **(iv) Held controls.** "Control interior" can be relaxed to "the same held set
+  $\mathcal H$ on all four arcs at $t^*$". The held controls sit at their bounds, with
+  strictly positive bound multipliers, so $\mathcal H$ is locally constant. Write $F$
+  for the free controls. Then:
+  - J′ holds as it is, since it needs only a convex $U$.
+  - The free law and every riding law are stationary in $u_F$ only, with $u_{\mathcal H}$
+    fixed: $\big(R u + r_0 + G^\top \lambda + \sum_c \mu_c a_c\big)_F = 0$.
+  - The proof of (i) runs over the components in $F$:
+    $(\mu_A - \pi_A)(a_A)_F + (\mu_B - \pi_B)(b_B)_F = 0$. So $\mu_A = \pi_A$ and
+    $\mu_B = \pi_B$ follow whenever $(a_A)_F$ and $(b_B)_F$ are independent.
+  - (ii) and (iii) are unchanged.
+  - The independence is B's rank condition for the pair restricted to $F$. It holds when
+    the pair's own controls are free and distinct, since a positive definite mass matrix
+    makes the $2 \times 2$ minor on those components nonsingular. It can also hold for two
+    limits of one joint.
+  - Exits follow from entries by exchanging the sides, and a hand-over by combining the
+    two.
+- **(v) A background riding set.** Limits ridden through $t^*$ (a set $S_0$ on every
+  arc) change nothing in (i) to (iii). "Free" becomes "riding $S_0$", and the rank
+  condition is B's for all of $S_0 \cup \{A, B\}$. For a hand-over (one exit, one entry)
+  the rows of both orders hold at the joint point:
+  - the control and $\lambda^+$ are the same on the joint arc and on the arc after the
+    exit;
+  - subtracting the two stationarities leaves
+    $\sum_c (\mu_c - \mu_c')\, a_c + \mu_{\rm exit}\, a_{\rm exit} = 0$ over $S_0$ and the
+    entering limit;
+  - independence then gives $\mu_{\rm exit} = 0$, the exit row, in both orders.
+- **Applied, with R43.** Goal 0 at 70% (two exits of joint 5's limits, over riding
+  `w2_min`, `w3_min`, `w4_min`) and goal 4 at 70% (`w5_max` leaving where `tau4_max`
+  enters, over riding `w4_max`) satisfy the hypotheses:
+  - interior riding controls;
+  - B's rank, checked on the pair;
+  - nonsingular Jacobians, raw condition 1.7e11 and 4.5e11 against about 1e15 before
+    R43.
+
+  And $\alpha\beta < 0$. Under X they are genuine folds: no structure with the pair
+  adjacent continues the route forward there.
+- **What a genuine fold asks of the route.** The solution curve continues on the other
+  order's branch with $s$ decreasing, until another event changes the structure. Steps
+  in $s$ cannot follow it, but arclength continuation can (Allgower and Georg): take the
+  other order, and step back along its branch. This only steers. Whether the turned
+  curve reaches $s = 1$ is the global question of homotopy path-following: it does when
+  the solution set is a bounded regular one-manifold through the start. That is not
+  shown here.
+- **Used by.** The diagnosis of the entry swaps.
+
 ### K. A forced exit is a corner, and its rate row is the margin — proved, relative to S1
 
 - **Statement.** Under J, with $a_k \ne 0$ for all $k$: an exit on the edge
