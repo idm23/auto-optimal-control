@@ -448,6 +448,9 @@ class Homotopy:
         self.births_ahead = False
         #: Rule R65 (Lemma S): after a step cut for an event, resume half the step before.
         self.resume_steps = False
+        #: Rule R66 (Lemma IT): a touch point of a limit inside (or at an end of) an arc
+        #: of that limit is absorbed into the arc, its jump carried to the arc's entry.
+        self.absorb_touches = False
         #: The free-violation checks read the densities' trajectory instead of sampling
         #: the solution again: one integration of each accepted solution for both
         #: (Lemma V1's monitors are functionals of one sampled extremal).
@@ -1586,7 +1589,41 @@ class Homotopy:
                     self.diagnostics.fired("R11")
                     merged = True
                     break
+        if getattr(self, "absorb_touches", False):
+            arcs, values = self._absorb_touches(arcs, values)
         return arcs, values
+
+    def _absorb_touches(self, arcs, values):
+        """Rule R66 (Lemma IT): a touch point of a limit that lies on an arc of that limit
+        (its closure) is no event of its own: its two conditions hold identically there
+        and its jump only shifts the arc's multiplier. It joins the arc, its jump ``nu``
+        carried to the entry: ``pi_1 += nu`` and, at order 2, ``pi_2 += nu (t_c - t_in)``
+        (E4's shift). An arc ridden from the start has no entry jump and keeps it."""
+        spans = [(i, c, float(val[0]), float(val[1])) for i, ((kind, c), val)
+                 in enumerate(zip(arcs, values)) if kind == "boundary"]
+        drop = {}
+        for i, ((kind, c), val) in enumerate(zip(arcs, values)):
+            if kind != "touch":
+                continue
+            t = float(val[0])
+            for j, cj, a, b in spans:
+                if cj == c and np.isfinite(a) and a <= t <= b:
+                    drop[i] = j
+                    break
+        if not drop:
+            return arcs, values
+        self.diagnostics.fired("R66")
+        values = list(values)
+        for i, j in drop.items():
+            a, b, pi = values[j]
+            pi = np.atleast_1d(np.array(pi, dtype=float, copy=True))
+            nu = float(np.ravel(values[i][1])[0])
+            pi[0] += nu
+            if pi.size > 1:
+                pi[1] += nu * (float(values[i][0]) - a)
+            values[j] = (a, b, pi)
+        keep = [i for i in range(len(arcs)) if i not in drop]
+        return [arcs[i] for i in keep], [values[i] for i in keep]
 
     def _mas_entries(self, arcs, values, names=False):
         """MultiArcShooting entries for arcs that may overlap: ``(entries, values)``.

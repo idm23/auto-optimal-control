@@ -789,6 +789,81 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Depends on.** The indirect form of S1; H2 for order 2.
 - **Used by.** R11.
 
+### IT. A touch on its own limit's arc is no event — proved (order 1), sketch with a numerical check (order 2)
+
+- **Statement.** Let a structure carry a touch point of limit $c$ at $\tau$, with jump
+  $\nu$ ($\lambda^+ = \lambda^- - \nu \nabla g$), and an arc of $c$ on
+  $[t_{\rm in}, t_{\rm out}] \ni \tau$, entered with jump $\pi$. Assume a time-invariant
+  limit.
+  1. *(Any order.)* The touch's condition rows ($g = \dot g = 0$ at $\tau$, under the
+     control arriving there) vanish identically for $\tau$ in the arc. So the Jacobian
+     has two zero rows and at least two dependent columns: it is singular, and a Newton
+     step's $\tau$ is not determined.
+  2. *(Order 1.)* For every $\tau$ in the arc, the structure has the same residual as
+     the arc alone, entered with jump $\pi + \nu$. Its multiplier is $\mu + \nu$ on
+     $[t_{\rm in}, \tau]$ and $\mu$ after $\tau$, and $(\pi, \nu, \tau)$ enter the
+     residual only through $\pi + \nu$.
+- **Proof.**
+  1. On the arc, $g \equiv 0$, and the riding control makes $\dot g \equiv 0$. The
+     touch's rows are these functions at $\tau$. The riding control is a state feedback,
+     so the costate jump does not change the arriving control, and the rows stay zero.
+  2. This is E4's shift with the second piece's entry jump replaced by the touch's.
+     - On $[t_{\rm in}, \tau]$, put $\delta\lambda = -\nu \nabla g$ and $\delta\mu = \nu$.
+       E4's computation shows that the riding control, the costate equation, and so the
+       motion are unchanged.
+     - At $\tau$ the shifted costate equals the touch's $\lambda^+$, so after $\tau$
+       nothing changes.
+     - At $t_{\rm in}$ the jump becomes $\pi + \nu$. The entry's rows are $N = g = 0$,
+       which does not involve $\lambda$, and $H$ continuity, where $H_b$ changes by
+       $-\nu \nabla g^\top f(u_b) = -\nu \dot g(u_b) = 0$.
+
+     Every row is therefore the same for every $\tau$ and every split of $\pi + \nu$.
+     $\square$
+- **Order 2 (sketch).** Part 1 holds. For part 2, use E4's order-2 shift with
+  $\pi_1 = \nu$ and $\pi_2 = 0$ at $\tau$: $\delta\mu(t) = \nu (\tau - t)$ on
+  $[t_{\rm in}, \tau]$. It carries the jump to the entry as
+  $\pi \mathrel{+}= \nu\,(1, \tau - t_{\rm in})$, and R43's entry row
+  $\mu(t_{\rm in}^+) = \pi_2$ moves with it. As in E4, the costate equation is not
+  written out. Order 3 or more has no arcs.
+- **An arc ridden from the start** has no entry jump to carry the jump. The shift would
+  move the initial costate instead, so R66 leaves such a touch alone.
+- **Consequence.** A touch on an arc of its own limit (its closure included) should be
+  absorbed into the arc, its jump carried to the arc's entry jump. That is R66. At order
+  1 it is the convention of `_activate` and R11. The answer is unchanged, the system has two
+  unknowns and two rows fewer, and it is no longer singular.
+- **Seen.** Vrest 12, route 4 (`weight_start` 10, `offset_seed` 1), on 2026-11-21.
+  - A split of a `tau1_max` arc left an R20 collapsed touch in the gap, and R11 then
+    merged the two pieces with the touch inside.
+  - In 2,787 of 3,853 structures the route read, a `tau1_max` touch lay on a `tau1_max`
+    arc, with $|\nu|$ of median 0.28 and largest 7.1.
+  - Newton moved the touch anywhere from $-0.12$ to $1.30$ while the residual stayed
+    near $10^{-8}$. When it landed off the arc, the next evaluation left the riding
+    domain (residual $7 \times 10^6$).
+  - The two parts, checked at twelve of the route's solutions with such a touch:
+    - *Part 1.* The Jacobian's two smallest singular values were $10^{-21}$ to
+      $10^{-19}$ and $10^{-20}$ to $10^{-17}$ of the largest. With the touch absorbed,
+      the smallest was $10^{-14}$ to $10^{-8}$.
+    - *Part 2.* The absorbed structure's residual equalled the touch structure's to
+      the integration's noise, for example $2.7527 \times 10^{-6}$ against
+      $2.7526 \times 10^{-6}$. Moving the touch anywhere in its arc, or any part of
+      $\nu$ into $\pi$, changed no digit of the residual's norm.
+  - In three of the twelve, both residuals were about 9.6, against $5 \times 10^{-7}$
+    for the solve that produced them. Newton had moved the touch past the next arc's
+    entry, and a structure's events keep their order through a solve. So the "solution"
+    integrated backward through part of an arc, and sorting its events by time
+    changes it. The lemma is not involved: the riding flow extends past the arc, so
+    the shift argument holds there too. That is why the touch could roam so far.
+  - With R66 the route solves in 11.8 s. Without it, it failed after 69 s.
+- **Seen (order 2).** Vrest 5's base route: 2,415 of 3,702 structures had a `w` touch on
+  its own `w` arc.
+  - At twelve solutions, the absorbed structure's residual equalled the touch
+    structure's to $10^{-12}$ with $\pi_2 \mathrel{+}= \nu(\tau - t_{\rm in})$.
+  - With $-\nu(\tau - t_{\rm in})$ it was off by up to 13, and with $\pi_1$ alone by up
+    to 7.7.
+  - With R66 the case solves in 12.1 s, against 45.8 s.
+- **Depends on.** E4 (its shift), S1.
+- **Used by.** R66.
+
 ### Observation O1 — answers stay off the edge
 
 On every solved census case, and on the toy's direct comparisons, the margin
