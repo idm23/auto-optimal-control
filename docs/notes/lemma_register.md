@@ -1498,6 +1498,27 @@ jump, density, gap, order, bound, end, held sign).
 - **Consequence.** Goal 3 at 80% (56 s alone on its one solving route) needs a route
   about 1.8 times faster, not a different schedule.
 
+### Observation O7: each route alone on every case, and staged starts (2026-11-21)
+
+- **Measured.** Each of R15's seven routes ran alone over all 90 cases (release rules
+  with R28, 60 s each), seven processes at once on homebox, as on the page.
+  - The best route per case is spread over the portfolio: routes 1 to 7 are best on 19,
+    25, 5, 8, 10, 12 and 8 cases. No route solves vgoal 0 at 70%, vgoal 3 at 70% or
+    vrest 4.
+  - Even each case's best route takes over 5 s on 23 cases at that load.
+- **Simulated schedules.** The model converts each route's time to its own speed (a
+  factor 0.6 for the run's load) and runs a schedule under O4's speed curve: 1.0 with up
+  to two busy cores, then 0.87, 0.74, 0.67, 0.6, 0.56 and 0.51 for three to eight.
+  - It reproduces the page: all seven at once gives 60 cases under 5 s and 87 solved
+    (page 113: 60 and 87).
+  - The best route alone at full speed would give 79 under 5 s. That is the bound for
+    any schedule of these routes.
+  - Starting four routes and the other three after 6 s (or when one of the four ends)
+    gives 68 under 5 s, still 87 solved, and 404 s in total against 434 s. Two at a time
+    gives 65, and one at a time 48.
+- **Consequence.** The schedule is worth about eight cases under 5 s (R72). The rest
+  must come from faster routes.
+
 ### Observation O5: where the path rules act (2026-11-21)
 
 The path-level rules now sit behind one interface (`pipeline.py`): a rule names the hook

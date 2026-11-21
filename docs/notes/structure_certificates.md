@@ -2656,3 +2656,78 @@ violation was not solved again.
 were not of this kind. Vgoal 4 at 70% fails, after 36.4 s against 25.6 s. Where the rule
 fires, the step is located from another solve's overshoot and the route takes another
 path. The patch is not kept.
+
+### R54's verdict kept for every retry from one base: Rule R69, tried
+
+*What it was.* On vgoal 4 at 70%'s fourth route (with R28), R25 locates a `tau6_min`
+split at 0.9 of the step. On the shorter step, R54 finds the density at $t^*$ jumping at
+the base (Lemma P), and the violation monitor rejects the step. The next guess then
+locates at 0.9 again, because R54 cleared its memo. So the step shrinks by 10% per two
+solves, eleven times over, from one base.
+
+*Rule R69* (tried, not kept). R54's finding depends only on the base and $t^*$, so it
+was kept for every retry from that base.
+
+*Result: dropped.* The birth is then located directly (at 0.07 of the step), and the
+route reaches the event from farther away. There R28 refuses every split of
+`tau6_min`, the route goes on with its multiplier rising, and it stalls while lowering
+the secondary weight. It fails after 32.6 s, where it solved in 24.7 s. Vgoal 3 at 80%
+is unchanged. R68 broke the same route the same way. The slow approach is what brings
+this route close enough to the event for a split that stays open. What continues after
+`tau6_min`'s piece (E3's question at a change of held set) is the open problem.
+
+### R63's test after a carried Jacobian is refreshed: Rule R70, tried
+
+*What it was.* On vgoal 3 at 80%'s fourth route, 76 of the 90 path solves that fail
+start from a carried Jacobian (R61). When the carried Jacobian's first step is refused,
+the chord takes a fresh Jacobian at the guess. Newton's contraction is not measured
+again, so R63's test (Lemma AC 5: at $\theta > 12$ no damping passes) never sees that
+fresh step.
+
+*Rule R70* (tried, not kept). After such a refresh at the guess, $\theta$ is measured
+on the fresh step and R63 applies to it.
+
+*Result: dropped.*
+
+| route 4 | Jacobians before | Jacobians with R70 |
+|---|---|---|
+| vgoal 3 at 80% | 626 | 595 (18.7 s against 20.1 s) |
+| vrest 12 | 387 | 427 |
+| vgoal 4 at 70% | 635 | failed after 180 s |
+
+R68, R69 and R70 each change how vgoal 4 at 70%'s fourth route reaches the `tau6_min`
+event, and each loses it. That route is fragile, and a rule that shortens its failed
+solves has to be judged against it.
+
+### Routes started in stages: Rule R72
+
+*What it was.* The seven routes of R15's portfolio started at once. With seven busy
+cores, each runs at about 0.56 of its own speed (Observation O4), and on most cases one
+of the first four routes wins.
+
+*Rule R72* (`Homotopy.staged_routes`, from O4 and O7). The first four routes start at
+once. The other three start after 6 s, or as soon as one of the four ends. Observation
+O7's simulation, built from each route's own time on every case, chose this among
+widths 2 to 5 and delays 2 to 10 s.
+
+*Census page 114 (release plus R72): 87 of 90, the same cases.* 68 are under 5 s,
+against 57. The mean solve time is 4.649 s against 5.078 s, and the 87 take 404.5 s
+against 441.8 s. The simulation predicted 68 and 404 s. Cases that only routes 5 to 7
+solve wait for them: rest 4 takes 24.8 s against 18.8 s, vrest 1 27.6 s against 21.9 s,
+and vrest 10 14.2 s against 10.1 s. R72 joins the release.
+
+### No MINPACK fallback after a hopeless chord: Rule R71, tried
+
+*What it was.* On vgoal 9 at 70%'s winning route, R63 ends a path solve's chord at
+$\theta \approx 3000$ (Lemma AC 5). The solve's residual is below `path_fallback`
+($10^{-2}$), so MINPACK still runs, twice per failed step: 27 of its 28 calls failed,
+about 1.5 s of the route's 5.7 s.
+
+*Rule R71* (tried, not kept). A chord that R63 ends gets no fallback, and the step is
+shortened. Lemma AC 5 says no damping passes there, and a shorter step lowers $\theta$
+with the predictor's error.
+
+*Census page 115 (release, R72 and R71): neutral.* The same 87 cases solve, in
+406.7 s against 404.5 s. 67 are under 5 s, against 68. Some cases gain (vgoal 3 at
+80%: 33.7 s against 37.2 s; vrest 5: 16.8 s against 19.7 s), and others lose (vgoal 4 at
+70%: 48.0 s against 40.6 s). Not adopted.
