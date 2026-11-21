@@ -943,8 +943,8 @@ class Homotopy:
         controls = list(kr.system.controls)
         for u in self.bang_bang:
             j = controls.index(u)
-            bounds = np.array([kr.control_bounds(ti, zi, p) for ti, zi in zip(t, Z)])
-            lo, hi = bounds[:, 0, j], bounds[:, 1, j]
+            LO, HI = kr.control_bounds_batch(t, Z, p)
+            lo, hi = LO[:, j], HI[:, j]
             tol = 1e-9 * np.maximum(hi - lo, 1e-300)
             lab = np.zeros(len(t), dtype=int)
             lab[U[:, j] >= hi - tol] = 1
@@ -1927,8 +1927,7 @@ class Homotopy:
         arcs, values = self._arcs_of(shoot, v)
         tr = shoot.trajectory(v, 801)
         k, p = shoot.kernels, shoot.params
-        lo, hi = (np.array(b, dtype=float) for b in zip(*[k.control_bounds(t, z, p)
-                                                          for t, z in zip(tr["t"], tr["z"])]))
+        lo, hi = k.control_bounds_batch(tr["t"], tr["z"], p)
         over = np.maximum(tr["u"] - hi, lo - tr["u"]).max(axis=1)
         bad = (over > 1e-6 * np.maximum(hi - lo, 1e-12).max(axis=1)) & (tr["active"].sum(axis=1) >= 2)
         if not bad.any():

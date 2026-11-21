@@ -92,19 +92,22 @@ class EdgeReached(ShootingError):
         self.t_edge, self.ta, self.tb = t_edge, ta, tb
 
 
-def sample_segment(dynamics, ta, tb, za, m, **options):
+def sample_segment(dynamics, ta, tb, za, m, sampler=None, **options):
     """``(t, z)``: the flow of ``dynamics`` from ``(ta, za)`` sampled at ``m`` times from
     ``ta`` to ``tb`` (either direction). A segment narrower than ``m`` distinct floats (two
     junctions at one instant, to rounding) is sampled at its two ends, and at zero
-    width it is the one point: an integrator takes only strictly monotone times."""
-    from fast_numerical_integration.integrators import solve_ivp
-
+    width it is the one point: an integrator takes only strictly monotone times.
+    ``sampler(t_eval)``, if given, integrates in place of FNI's ``solve_ivp``."""
     te = np.linspace(ta, tb, m)
     steps = np.diff(te)
     if not (np.all(steps > 0) or np.all(steps < 0)):
         if ta == tb:
             return np.array([float(ta)]), np.asarray(za, dtype=float)[None, :].copy()
         te = np.array([ta, tb], dtype=float)
+    if sampler is not None:
+        return sampler(te)
+    from fast_numerical_integration.integrators import solve_ivp
+
     sol = solve_ivp(dynamics, (ta, tb), za, t_eval=te, **options)
     return sol.t, sol.y.T
 
@@ -1272,21 +1275,11 @@ class MultiArcShooting(SingleShooting):
             return False
         if self.junction_rows == "rate":
             return True
-        k, p = self.kernels, self.params
         G = self._control_matrix()
         if G is None:
             return False
-        try:
-            u = np.asarray(k.boundary_control(ride_id, t, z, p), dtype=float)
-        except RuntimeError:
-            return False
-        lo, hi = (np.asarray(b, dtype=float) for b in k.control_bounds(t, z, p))
-        _, Nx, _, _ = k.tangency_gradient(c, t, z, p)
-        a = G.T @ np.asarray(Nx[0], dtype=float)[:k.N_STATES]
-        moves = np.abs(a) > 1e-9 * max(np.abs(a).max(), 1e-300)
-        tight = 1e-9 * np.maximum(1.0, np.abs(u))
-        held = (u - lo <= tight) | (hi - u <= tight)
-        return bool(np.all(held[moves]))
+        # In C: a = G^T dN_c/dx moves dg/dt; every such control must hold a bound.
+        return self.kernels.rate_corner(ride_id, c, t, z, self.params, G)
 
     def _multiplier_row_here(self, kind, q):
         """Rule R7, off the corner: whether an order-1 junction takes a multiplier row
@@ -1325,7 +1318,8 @@ class MultiArcShooting(SingleShooting):
                 self._G = None
             else:
                 fn, shape = k._control_matrix_fn
-                self._G = np.array(fn(*self.params), dtype=float).reshape(shape)
+                self._G = np.ascontiguousarray(np.array(fn(*self.params), dtype=float)
+                                               .reshape(shape))
         return self._G
 
     def _regular_junction(self, kind, q, side, t, z):
@@ -1346,11 +1340,7 @@ class MultiArcShooting(SingleShooting):
         k, p = self.kernels, self.params
         if not k.system.problem.control_sets or self.tangent_junctions:
             return True
-        u = k.control(t, z, p) if side is None else k.boundary_control(side, t, z, p)
-        lo, hi = k.control_bounds(t, z, p)
-        u, lo, hi = (np.asarray(a, dtype=float) for a in (u, lo, hi))
-        margin = 1e-12 * np.maximum(1.0, np.abs(u))
-        return bool(np.all((u - lo > margin) & (hi - u > margin)))
+        return k.interior_controls(side, t, z, p)
 
     def _rate_of(self, c, arc_id, t, z, flags, grad=True):
         """``(dg_c/dt, its t-derivative, its z-gradient)`` along the free arc
@@ -1358,7 +1348,10 @@ class MultiArcShooting(SingleShooting):
         ``grad`` (a residual alone) the derivatives are None."""
         k, p = self.kernels, self.params
         n = k.N_STATES
-        _, Nx, Nxx, _ = k.tangency_gradient(c, t, z, p)
+        if grad:
+            _, Nx, Nxx, _ = k.tangency_gradient(c, t, z, p)
+        else:
+            _, Nx = k.tangency_first(c, t, z, p)
 
         def flow(tt):
             if arc_id is None:
@@ -1541,8 +1534,7 @@ class MultiArcShooting(SingleShooting):
                     val, gt, gz = self._rate_of(c, after, t, z, flags, grad=jac)
                     rows.append(val)
                     grads.append(gt * d_ev + gz @ D if jac else None)
-                elif (self._regular_junction(kind, q, after, t, z)
-                      or self._multiplier_row_here(kind, q)):
+                elif mult_here:
                     # mu_c vanishes at the exit of an order-1 limit: when H is regular,
                     # and, under C2, at every exit off the corner, where a control that
                     # moves dg/dt is interior on the arc and continuity of the control
@@ -1552,7 +1544,6 @@ class MultiArcShooting(SingleShooting):
                     rows.append(val)
                     grads.append(Mt * d_ev + Mz @ D if jac else None)
                 else:
-                    after = self._arc_id(active - {c})
                     H1, H1t, H1z = self._set_hamiltonian(aid, t, z, flags, grad=jac)
                     H2, H2t, H2z = self._set_hamiltonian(after, t, z, flags, grad=jac)
                     rows.append(H1 - H2)
@@ -1560,7 +1551,10 @@ class MultiArcShooting(SingleShooting):
                 active.discard(c)
                 continue
             Nv = k.tangency(c, t, z, p)
-            Nt, Nx, Nxx, Nxt = k.tangency_gradient(c, t, z, p)
+            if jac:
+                Nt, Nx, Nxx, Nxt = k.tangency_gradient(c, t, z, p)
+            else:
+                Nt, Nx = k.tangency_first(c, t, z, p)
             for r_ in range(1 if kind == "touch" and q == 1 else 2 if kind == "touch" else q):
                 rows.append(Nv[r_])
                 grads.append(Nt[r_] * d_ev + Nx[r_] @ D[:n] if jac else None)
@@ -1601,7 +1595,7 @@ class MultiArcShooting(SingleShooting):
                     val, gt, gz = self._rate_of(c, aid, t, z, flags, grad=jac)
                     rows.append(val)
                     grads.append(gt * d_ev + gz @ D if jac else None)
-                elif self._multiplier_row_here(kind, q):
+                elif mult_here:
                     # Off the corner, under C2, the entry carries mu_c(t_in+) = pi: a
                     # control that moves dg/dt is interior on the arc, and continuity of
                     # the control at the junction forces (mu_c - pi) a_k = 0 (Lemma J).
@@ -1641,6 +1635,10 @@ class MultiArcShooting(SingleShooting):
             fix = (Hbt - Hft, Hbz - Hfz) if jac else None
         R = np.concatenate([base_rows, rows])
         if not jac:
+            if not record and self._filling is None:
+                # The checks sample the extremal at the iterate Newton stopped at, whose
+                # residual was the last evaluated: they reuse its segments.
+                self._last_segments = (self.memo_key(v), segments)
             return R, None, segments
         Jb = k.residual_jacobian(z0, zf, nu, tf, p)
         Jbase = Jb["z0"][self._rows] @ D0 + Jb["zf"][self._rows] @ D
@@ -1949,7 +1947,12 @@ class MultiArcShooting(SingleShooting):
         from fast_numerical_integration.integrators import solve_ivp
 
         k, p = self.kernels, self.params
-        _, _, segs = self._evaluate(np.asarray(v, dtype=float), jac=False)
+        v = np.asarray(v, dtype=float)
+        last = self.__dict__.get("_last_segments")
+        if last is not None and not self._legacy and last[0] == self.memo_key(v):
+            segs = last[1]
+        else:
+            _, _, segs = self._evaluate(v, jac=False)
         span = segs[-1][3] - self.t0
         T, Z, U, A, Sg, Hd = [], [], [], [], [], []
         for kind, c, ta, tb, za, flags, _ in segs:
@@ -1975,31 +1978,37 @@ class MultiArcShooting(SingleShooting):
                     for cc, flag in flags.items():
                         sw = k.system.switching_functions[cc]
                         j = list(k.system.controls).index(sw.control)
-                        lo, hi = zip(*[k.control_bounds(ti, zi, p) for ti, zi in zip(ts, zs)])
-                        us[:, j] = np.array(hi)[:, j] if flag else np.array(lo)[:, j]
+                        lo, hi = k.control_bounds_batch(ts, zs, p)
+                        us[:, j] = hi[:, j] if flag else lo[:, j]
             else:
                 Dyn = k.BoundaryDynamics if kind == "boundary" else k.SingularDynamics
                 ctl = k.boundary_control if kind == "boundary" else k.singular_control
-                ts, zs = sample_segment(Dyn(c, p), ta, tb, za, npts, method=self.options["method"],
-                                        rtol=self.options["rtol"], atol=self.options["atol"])
+                opts = dict(method=self.options["method"], rtol=self.options["rtol"],
+                            atol=self.options["atol"])
+                # A boundary arc's samples in one compiled call (the same steps).
+                sampler = ((lambda te: k.sample_boundary(c, ta, tb, za, te, p, **opts))
+                           if kind == "boundary" else None)
+                ts, zs = sample_segment(Dyn(c, p), ta, tb, za, npts, sampler=sampler, **opts)
                 us = (k.boundary_control_batch(c, ts, zs, p) if kind == "boundary"
                       else [ctl(c, ti, zi, p) for ti, zi in zip(ts, zs)])
-            for ti, zi, ui in zip(ts, zs, us):
-                T.append(ti)
-                Z.append(zi)
-                U.append(ui)
-                A.append(c if kind == "boundary" else -1)
-                Sg.append(c if kind == "singular" else -1)
-                Hd.append(held)
-        T, Z = np.array(T), np.array(Z)
+            npt = len(ts)
+            T.append(np.asarray(ts, dtype=float).reshape(npt))
+            Z.append(np.asarray(zs, dtype=float).reshape(npt, -1))
+            U.append(np.asarray(us, dtype=float).reshape(npt, -1) if np.size(us)
+                     else np.zeros((npt, 0)))
+            A.append(np.full(npt, c if kind == "boundary" else -1))
+            Sg.append(np.full(npt, c if kind == "singular" else -1))
+            Hd.append(np.broadcast_to(held, (npt, len(held))))
+        T, Z, U = np.concatenate(T), np.concatenate(Z), np.concatenate(U)
         G = k.constraint_batch(T, Z, p).reshape(len(T), -1)
-        A = np.array(A)
+        A = np.concatenate(A)
+        Sg, Hd = np.concatenate(Sg), np.concatenate(Hd)
         active = np.zeros((len(T), k.N_CONSTRAINTS), dtype=bool)
         for aid in set(A.tolist()) - {-1}:
             active[np.ix_(A == aid, list(k.arc_constraints(aid)))] = True
-        return {"t": T, "z": Z, "u": np.array(U).reshape(len(T), -1), "g": G,
-                "arc": A, "active": active, "singular": np.array(Sg),
-                "held": np.array(Hd).reshape(len(T), k.N_SWITCHING),
+        return {"t": T, "z": Z, "u": U.reshape(len(T), -1), "g": G,
+                "arc": A, "active": active, "singular": Sg,
+                "held": Hd.reshape(len(T), k.N_SWITCHING),
                 "junctions": np.array([s[2] for s in segs[1:]])}
 
     def constraint_violation(self, v, n_points=2001):
@@ -2017,12 +2026,12 @@ class MultiArcShooting(SingleShooting):
 
     def _bound_violation(self, tr, on):
         k, p = self.kernels, self.params
-        worst = 0.0
-        for i in np.flatnonzero(on):
-            lo, hi = k.control_bounds(tr["t"][i], tr["z"][i], p)
-            u = tr["u"][i]
-            worst = max(worst, float(np.max(np.maximum(lo - u, u - hi), initial=0.0)))
-        return worst
+        idx = np.flatnonzero(on)
+        if not len(idx):
+            return 0.0
+        lo, hi = k.control_bounds_batch(tr["t"][idx], tr["z"][idx], p)
+        u = tr["u"][idx]
+        return max(float(np.max(np.maximum(lo - u, u - hi), initial=0.0)), 0.0)
 
     def _singular_bound_violation(self, tr):
         return [self._bound_violation(tr, tr["singular"] == c)

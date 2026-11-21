@@ -157,3 +157,65 @@ def sample(const double[::1] taus, const double[::1] z0, const long[:, ::1] ch, 
     cdef Py_ssize_t j
     for j in range(taus.shape[0]):
         flow(taus[j], z0, ch, n, lo, hi, r, c, cl, cq, gx, gw, Z[j], phi, False, False)
+
+
+cpdef void rhs(const double[::1] z, const long[:, ::1] ch, int n, const double[::1] lo,
+               const double[::1] hi, const double[::1] r, const double[::1] c,
+               double[::1] f) noexcept:
+    """``f = F(z)`` on the free arc: each chain's states shift down, its top control is the
+    clipped law ``-(lam_top + c) / r`` and its costates shift up with a sign."""
+    cdef int nc = ch.shape[0], L = ch.shape[1], i, m
+    cdef double u
+    for i in range(f.shape[0]):
+        f[i] = 0.0
+    for i in range(nc):
+        for m in range(L - 1):
+            f[ch[i, m]] = z[ch[i, m + 1]]
+            f[n + ch[i, m + 1]] = -z[n + ch[i, m]]
+        u = -(z[n + ch[i, L - 1]] + c[i]) / r[i]
+        f[ch[i, L - 1]] = lo[i] if u < lo[i] else (hi[i] if u > hi[i] else u)
+
+
+cdef class Law:
+    """The chains with one law's constants (``lo, hi, r, c`` and the cost's ``cl, cq``),
+    held compiled: a flow, a right-hand side or a sampling is then one call."""
+    cdef long[:, ::1] ch
+    cdef int n
+    cdef double[::1] lo, hi, r, c, cl, cq, gx, gw
+    cdef public double L0
+
+    def __init__(self, ch, int n, lo, hi, r, c, cl, cq, gx, gw, double L0):
+        self.ch = np.array(ch, dtype=np.int_, order="C")
+        self.n = n
+        self.lo, self.hi = np.array(lo, dtype=float), np.array(hi, dtype=float)
+        self.r, self.c = np.array(r, dtype=float), np.array(c, dtype=float)
+        self.cl, self.cq = np.array(cl, dtype=float), np.array(cq, dtype=float)
+        self.gx, self.gw = np.array(gx, dtype=float), np.array(gw, dtype=float)
+        self.L0 = L0
+
+    def propagate(self, double tau, z0, bint stm, bint cost):
+        """``(z, Phi or None, int (L(u) - L(0)) dt, z')`` after ``tau`` from ``z0``."""
+        cdef double[::1] zv = np.ascontiguousarray(z0, dtype=float)
+        z = np.empty(zv.shape[0])
+        f = np.empty(zv.shape[0])
+        Phi = np.zeros((2 * self.n, 2 * self.n)) if stm else np.zeros((1, 1))
+        cdef double total = flow(tau, zv, self.ch, self.n, self.lo, self.hi, self.r, self.c,
+                                 self.cl, self.cq, self.gx, self.gw, z, Phi, stm, cost)
+        rhs(z, self.ch, self.n, self.lo, self.hi, self.r, self.c, f)
+        return z, (Phi if stm else None), total, f
+
+    def rhs(self, z):
+        """``z' = F(z)``."""
+        cdef double[::1] zv = np.ascontiguousarray(z, dtype=float)
+        f = np.empty(zv.shape[0])
+        rhs(zv, self.ch, self.n, self.lo, self.hi, self.r, self.c, f)
+        return f
+
+    def sample(self, taus, z0):
+        """``Z[j]``: the state after ``taus[j]`` from ``z0``."""
+        cdef double[::1] tv = np.ascontiguousarray(taus, dtype=float)
+        cdef double[::1] zv = np.ascontiguousarray(z0, dtype=float)
+        Z = np.empty((tv.shape[0], zv.shape[0]))
+        sample(tv, zv, self.ch, self.n, self.lo, self.hi, self.r, self.c, self.cl, self.cq,
+               self.gx, self.gw, Z)
+        return Z
