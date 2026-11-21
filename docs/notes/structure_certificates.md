@@ -2592,3 +2592,67 @@ against 45.8 s, and vrest 12's fourth 11.8 s against a failure at 69 s.
 458 s, median 2.7 s. R66 fired 65 times. Neither rescued route is the one that wins its
 case on the page: another route finishes each first, as before. R66 joins the release: it
 changes no answer, and it makes the structures it touches regular.
+
+### Stopping a solve whose junctions cross: Rule R67, tried
+
+*What it was.* 12–31% of the Jacobians on the slow routes go to path solves that end
+with two junctions out of the structure's order. The route then sorts them and solves
+again. By Lemma X (E5), the sorted order continues the solution at a transversal
+crossing ($\alpha\beta > 0$), and neither order does at a fold.
+
+*Rule R67* (tried, not kept). The chord stops at the first iterate whose junctions
+cross, the structure is sorted, and the solve goes on in the sorted order. It was
+tried first on every solve, then only on the step's own solve, and then only when the
+crossing exceeds $4\|dv\|$ (Lemma AC's ball, so that the solution itself is crossed).
+
+*Result: dropped.* Goal 2 at 70% and vgoal 4 at 70% on route 4 fail with it. The
+first loops in the settle; the second reaches a neighbouring branch. Neither margin
+saved them. Sorting mid-solve puts the route on another branch than letting the
+crossed solve finish, so sorting has to wait until the solve has converged.
+
+### A split whose gap closes: Rule R28 again
+
+*What it was.* On vgoal 3 at 80%'s fourth route (the route that wins the case),
+`tau5_max`'s multiplier rises by $6.9 \times 10^{-3}$ at 0.7833. There joint 2's jerk
+joins the held set and joint 4's leaves it, which is Lemma U's case. R5 split the arc
+30 times. Each split solved to a gap of width at most $4 \times 10^{-10}$, at points
+anywhere from 0.7721 to 0.7855. R11 merged it on the next step, and R5 split it again.
+The cycle took 9.0 s and 183 of the route's 734 Jacobians.
+
+*Why (Lemma E4, its width direction).* A closed gap is the merged arc, with the rise
+still in it. In the two-arc chart, the Jacobian is singular in the gap's position and,
+to first order, in its width. The two smallest singular values were $10^{-24}$ and
+$7 \times 10^{-13}$ of the largest, against $2 \times 10^{-8}$ for an ordinary solve.
+
+*Rule R28* (`Homotopy.split_must_resolve`, unchanged since it was tried). A split is
+taken only if the limit's multiplier no longer rises and no piece or gap has zero
+width. Otherwise the settle tries the next option, or keeps the unsplit solution. With
+it, the route splits once, to a gap that stays open, and solves in 19.2 s against
+24.6 s.
+
+When R28 was first tried, under the old six routes, it lost goal 4 at 70%. That route
+progressed only through a degenerate split of `tau6_min`.
+
+*Census page 113 (release plus R28): 87 of 90, the same cases.* The 87 take 442 s
+against 456 s, median 2.7 s. The slowest case takes 39.4 s against 44.4 s. Vgoal 3 at 80%
+takes 38.1 s against 44.4 s, and vgoal 4 at 80% 6.2 s against 9.7 s. No case is lost,
+goal 4 at 70% included (R28 fired 22 times). Alone, vgoal 4 at 70%'s fourth route is
+neutral: it splits 18 times instead of 34, and takes 24.5 s against 23.4 s. R28 joins the
+release.
+
+### Skipping guesses inside Newton's ball: Rule R68, tried
+
+*What it was.* On vgoal 4 at 70%'s fourth route, a step whose solution violates a limit
+too much is often solved again at the same point from the next predictor's guess. It
+fails the same way: 17 such retries, none rescued.
+
+*Rule R68* (tried, not kept). A converged solve gives Newton's first correction
+$\|dv_0\|$ and its contraction $\theta \approx \omega \|dv_0\| / 2$ (Lemma AC). The
+solution is unique in the ball of radius $2/\omega \approx \|dv_0\|/\theta$ (Deuflhard
+2004, Thm. 2.2). A guess within a quarter of that radius of a solution rejected for its
+violation was not solved again.
+
+*Result: dropped.* Vgoal 3 at 80% is unchanged: the same 626 Jacobians, so its retries
+were not of this kind. Vgoal 4 at 70% fails, after 36.4 s against 25.6 s. Where the rule
+fires, the step is located from another solve's overshoot and the route takes another
+path. The patch is not kept.
