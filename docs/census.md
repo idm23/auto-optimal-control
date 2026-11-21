@@ -29,10 +29,9 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-85 of the 90 cases solve, all under 60 s: the median is 3.4 s and the slowest 40.7 s. A
-path solve now starts from the last Jacobian of its structure (R61, Lemma AC (4)). The 84
-cases solved before and after take 429 s against 457 s (6% faster). Goal 4 at 70%, lost on
-the last pages (its route turns on wall-clock rules), is solved again.
+86 of the 90 cases solve, all under 60 s: the median is 2.9 s and the slowest 45.1 s. A
+path solve whose first Newton step no damping can save ends at once (R63, Lemma AC (5)).
+The 85 cases solved before and after take 423 s against 434 s; vrest 10 is solved.
 
 When all seven routes are busy they run at about half speed (Observation O4). On most
 cases all seven run until one wins, and the winners are spread over every route.
@@ -40,7 +39,7 @@ cases all seven run until one wins, and the winners are spread over every route.
 - **`goal` and `rest`:** all 45.
 - **`vgoal`:** 27 of 30: all ten at 90%, all ten at 80% and seven at 70% (all but goals
   0, 3 and 4).
-- **`vrest`:** 13 of 15: all but rests 4 and 10.
+- **`vrest`:** 14 of 15: all but rest 4.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit
 on another joint at the same instant (the nine new ones are not yet read for this): goals 3 and 4 at 90%, goals 0 and 1 at 80%, rest 2 and rest 9.

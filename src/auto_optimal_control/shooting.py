@@ -405,6 +405,9 @@ class SingleShooting:
     #: How :meth:`solve_chord` treats its Jacobian between fresh evaluations: ``None``
     #: keeps it (the chord method), ``"broyden"`` updates it after each accepted step.
     chord_updates = None
+    #: Rule R63 (Lemma AC 5): a fresh Newton step from the start that contracts by more
+    #: than this ends the chord at once (None: never). Its backtracking could not pass.
+    theta_abort = None
     #: Rule R55 (Lemma AC): :meth:`solve_chord` judges a step by Newton's natural
     #: monotonicity, the simplified correction ``||J^-1 R(v + dv)||`` against
     #: ``||dv||``, instead of the residual's norm, which is not invariant under a
@@ -476,6 +479,14 @@ class SingleShooting:
                 if reject_theta is not None and theta is not None and not theta <= reject_theta:
                     sol = self._chord_result(v, err, nfev)
                     sol.contraction, sol.too_far, sol.jacobian = theta, True, J
+                    return sol
+                if (self.theta_abort is not None and fresh and theta is not None
+                        and not theta <= self.theta_abort):
+                    # Rule R63 (Lemma AC 5): no damping the chord tries (down to 1/16) can
+                    # pass its monotonicity test at this contraction: the solve ends here.
+                    sol = self._chord_result(v, err, nfev)
+                    sol.contraction, sol.too_far, sol.jacobian = theta, False, J
+                    sol.hopeless = True
                     return sol
             ratio = self._natural_ratio(lu, Rt, dv) if self.natural_monotonicity else None
             if np.isfinite(trial) and (trial < tol or (

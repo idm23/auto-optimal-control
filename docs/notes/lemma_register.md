@@ -1221,6 +1221,15 @@ route stalls.
      $\omega\|v - \tilde v\| + \tilde\omega\,ds \lesssim \tfrac14$, and (3)'s test,
      applied to the measured $\Theta$, refreshes it exactly when it no longer does.
      The answer is unchanged: the chord still stops at the tolerance in the residual.
+  5. *(No admissible damping.)* Under (2)'s model, the damped step $v_0 + \lambda\Delta v$
+     has simplified correction at most $(1 - \lambda + \tfrac12\lambda^2 h_0)\|\Delta v\|$,
+     $h_0 = \omega\|\Delta v\|$, and the full step's contraction is
+     $\Theta \le \tfrac12 h_0$. Deuflhard's restricted monotonicity test
+     $\Theta(\lambda) \le 1 - \lambda/4$ can then hold only for
+     $\lambda \le 3/(2h_0) \le 3/(4\Theta)$. The chord's dampings are $1/2, \dots, 1/16$,
+     so for $\Theta > 12$ none of them is admissible: its backtracking cannot make
+     progress that the model certifies, and the solve fails as it would, with fewer
+     Jacobians.
 - **Proof.**
   - (1) $D(A\Psi) = AJ$, so $(AJ)^{-1}A\Psi = J^{-1}\Psi$ at every point. The
     corrections and $\Theta$ do not depend on $A$.
@@ -1238,7 +1247,14 @@ route stalls.
   - (4): the chord's error map is $e \mapsto e - \tilde J^{-1}(\Psi(v^* + e) - \Psi(v^*))
     = \tilde J^{-1}\int_0^1 (\tilde J - D\Psi(v^* + \tau e))\,d\tau\; e$, whose norm is at
     most $\sup \|\tilde J^{-1}(D\Psi - \tilde J)\|$ on the segment; split
-    $D\Psi(v; s) - D\tilde\Psi(\tilde v; \tilde s)$ through $(\tilde v; s)$. ∎
+    $D\Psi(v; s) - D\tilde\Psi(\tilde v; \tilde s)$ through $(\tilde v; s)$.
+  - (5): $\Psi(v_0 + \lambda\Delta v) = (1 - \lambda)\Psi(v_0)
+    + \int_0^1 (D\Psi(v_0 + \tau\lambda\Delta v) - J)\,\lambda\Delta v\,d\tau$, so the
+    simplified correction $-J^{-1}\Psi(v_0 + \lambda\Delta v)$ has norm at most
+    $(1 - \lambda)\|\Delta v\| + \tfrac12\omega\lambda^2\|\Delta v\|^2$. The bound meets the
+    test exactly when $\lambda \le 3/(2h_0)$, and $h_0 \ge 2\Theta$ by (2). The model
+    certifies no damping beyond that; a test passed there is passed by an iterate the
+    model does not vouch for. ∎
 - **What it means for the route.** Near an L2 touch the path Jacobian is
   ill-conditioned: equilibrated $\sigma_{\min}$ of about $5 \times 10^{-4}$, so
   $\kappa$ is $10^3$ to $10^4$. The chord's old test, $\|\Psi(v_1)\| < \tfrac12
@@ -1271,7 +1287,7 @@ route stalls.
   theory (Deuflhard 2004, ch. 2).
 - **To formalize.** (1) is linear algebra. (2) needs the integral form of the mean
   value theorem, which Mathlib has, and the Newton–Mysovskikh argument.
-- **Used by.** R55; R61, through (4); R37's $\Theta$ (sec. 5.1 of the same reference).
+- **Used by.** R55; R61, through (4); R63, through (5); R37's $\Theta$ (sec. 5.1 of the same reference).
 
 ### V1–V5. The route as a one-parameter family
 

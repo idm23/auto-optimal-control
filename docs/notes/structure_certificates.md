@@ -2505,3 +2505,27 @@ refresh only if the chord at that rate would need more than six residuals, or mo
 its remaining iterations, to reach the path tolerance (AC (3) with the solve's own
 residual). It saves one to seven Jacobians per route and no time: the refreshes it
 skips are few, and they come where the contraction is near 1/2 anyway.
+
+### A Newton step no damping can save: Rule R63
+
+*What failed solves cost.* With R61, on goal 9 at 70% the nine path solves of
+structures that settle tried and that failed took 1.08 s of the route's 3.28 s, three
+Jacobians each. Their first Newton step contracted by $\Theta \approx 10^{10}$: the
+structures are nearly singular at their seeds, the correction is huge, and against so
+large a correction the backtracking's monotonicity test passes points it should not,
+each followed by a fresh Jacobian. On three cases (goal 9 at 70%, vgoal 1 at 80%,
+vgoal 3 at 80%) no solve that succeeded had a first contraction above 4.5.
+
+*Rule R63* (`Homotopy.hopeless_newton`). A path solve whose first Newton step, with a
+fresh Jacobian, contracts by more than 12 ends there. By Lemma AC (5), the chord's
+dampings ($1/2$ to $1/16$) are admissible under the affine-covariant model only for
+$\Theta \le 12$. R56 (tried earlier) stopped at $\Theta > 1$ or 2 and shortened the step
+as after a failure; R63 only ends a solve the model says cannot be rescued, and treats
+it as the failure it was. On one route: goal 9 at 70%, 3.23 → 2.36 s (Jacobians 112 →
+93); vgoal 1 at 80%, unchanged.
+
+*Census page 109 (release plus R61 and R63): 86 of 90, against 85.* Vrest 10 is solved.
+The 85 cases solved on both pages take 423 s against 434 s (2.6% faster), median 2.9 s.
+Goal 2 at 70% (15.7 → 5.7 s) and vrest 1 (30.0 → 23.1 s) gain most; rest 4 (14.1 → 22.6 s)
+and vgoal 3 at 80% (40.7 → 45.1 s) lose time to routes that go another way. R63 joins the
+release.
