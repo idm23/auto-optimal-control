@@ -35,7 +35,7 @@ included); a case that takes longer counts as unsolved.
 of the solved cases is 4.182 s, and the slowest is 36.859 s. Times are wall-clock seconds
 per case, to the millisecond.
 
-Two changes made this. First, four routes start at once and the other three after 6 s
+Three changes made this. First, four routes start at once and the other three after 6 s
 (R72, Observation O7): fewer busy cores run faster (O4), and most cases are won by one of
 the first four. Second, the route integrates its path problems to 1e-10 instead of the
 exact problem's 1e-12 (R74, Lemma TB). Its solves stop at 1e-6 and its monitors judge at
