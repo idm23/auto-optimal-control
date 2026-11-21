@@ -89,6 +89,12 @@ from auto_optimal_control.policy import (Lexicographic, SecondaryCost, _effort, 
 from auto_optimal_control.pontryagin import OUTLINE_ABOVE_OPS, bang_bang_controls, derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
 from auto_optimal_control.diagnostics import Diagnostics
+from auto_optimal_control.pipeline import (PREDICT, SETTLE, SETTLE_START, STEP_ACCEPTED_SIZE,
+                                           STEP_FAILED_RESCUE, STEP_FAILED_SIZE,
+                                           STEP_FAILED_SPLIT, Accept, Reject, Rescued, Retry,
+                                           SettleContext, StepContext, Turn, default_pipelines,
+                                           failure_pipelines, settle_pipelines, EXACT_REJECTED,
+                                           ExactContext, exact_pipelines)
 from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting, sample_segment
 
 # The path of the continuation is followed to 1e-6: a rough Jacobian steers Newton as well.
@@ -310,6 +316,10 @@ class Homotopy:
         #: gets an equal share of the time left); empty for one route.
         self.portfolio = []
         self.stall_seconds = 60.0
+        #: The path step's rules at each hook (``pipeline.py``): a hook's behaviour is
+        #: the composition of its pipeline's rules that are on.
+        self.pipelines = {**default_pipelines(), **settle_pipelines(), **failure_pipelines(),
+                          **exact_pipelines()}
         #: Run the portfolio's routes at once in forked processes (one core each).
         self.parallel_routes = False
         self.corner_touches = False         # rule R12: refuted by Lemma L (see the note)
@@ -3187,93 +3197,22 @@ class Homotopy:
             """Bring in violated limits and retire dead arcs until the solution at
             (le, off) is consistent; ``(shoot, sol)`` or None. ``changed``: the
             structure was just changed, so a large violation is that change's doing."""
-            last = None
-            reorders = 0
-            history = []                   # Rule R44: this settle's solutions, at (le, off)
-            if self.locate_splits and not changed:
-                # Rule R25: the step crossed a split (an arc's density turned negative
-                # inside it): a shorter step, to the event, before any repair.
-                theta = self._split_fraction(state["shoot"], state["v"], sh, r.v,
-                                             too_far=self.locate_tol)
-                if theta is not None:
-                    state["why"] = "density negative"
-                    state["split_at"] = theta
-                    return None
+            # hook: settle (pipeline.py): the step's monitors, each passing, rejecting the
+            # step with a reason, accepting it, or proposing structures to repair it.
+            ctx = SettleContext(self, state, sh, r, le, off, changed, scale, tried_splits, key)
+            verdict = self.pipelines[SETTLE_START].first(ctx)
+            if isinstance(verdict, Reject):
+                state["why"] = verdict.why
+                return None
             for _ in range(2 * self.nc + 4):
-                optional = False
-                back = self._order_crossing(sh, r.v) if self.watch_order else 0.0
-                if 0.0 < back <= self._coincide():
-                    self.diagnostics.fired("R38")
-                    back = 0.0             # coincident junctions, in either order
-                crossed = back > 0.0
-                if crossed:
-                    # Rule R30: the order monitor (V1) is negative.
-                    self.diagnostics.fired("R30")
-                    if back > self.locate_tol and not changed:
-                        self._detail(f"    junctions crossed by {back:.1e} of T: a shorter step")
-                        state["why"] = "junctions crossed"
-                        return None
-                    reorders += 1
-                    if reorders > 2:
-                        self._detail("    the reorder crosses back: not settled")
-                        state["why"] = "reorder did not settle"
-                        if getattr(self, "handover_ties", False):
-                            # Rule R39: the pair is one junction; the step is taken again
-                            # with the tie.
-                            self._tie_crossing(sh, r.v)
-                        return None
-                if (getattr(self, "fold_turns", False) and not state.get("backward")
-                        and isinstance(sh, MultiArcShooting)
-                        and not sh.in_order(r.v, self._coincide())):
-                    fold = self._fold_check(history, sh, r, le, off, state.get("leg_dir"))
-                    if fold is not None and fold["key"] not in state.setdefault("folds_seen", set()):
-                        self.diagnostics.fired("R44")
-                        state["fold"] = fold
-                        state["why"] = "fold (Lemma X)"
-                        return None
-                history.append((sh, r))
-                viol = None if crossed else self._free_violations(sh, r.v, scale)
-                if viol:
-                    worst = max(peak / scale[c] for c, _, _, peak in viol)
-                    if worst > self.locate_tol and not changed:
-                        self._detail("    violation too large: a shorter step ("
-                                     + ", ".join(f"{self.kr.CONSTRAINT_NAMES[c]} {peak / scale[c]:.1e}"
-                                                 f" at [{a:.5f}, {b:.5f}]"
-                                                 for c, a, b, peak in viol) + ")")
-                        state["why"] = "violation too large"
-                        over = {}
-                        for c, _, _, peak in viol:
-                            over[c] = max(over.get(c, -np.inf), peak / scale[c])
-                        state["overshoot"] = over
-                        return None        # too far in: take a shorter step
-                    # After a structure change a large violation is that change's doing
-                    # (new arcs move the motion), which no shorter step undoes: it is
-                    # brought in as it is.
-                    if last is not None and last[0] == self._arcs_of(sh, r.v)[0] \
-                            and worst < 1e-4 and worst > 0.5 * last[1]:
-                        # The same structure again, and the violation did not
-                        # shrink: it is the path tolerance at a tangential
-                        # junction, not a missing arc. The exact solve judges it.
-                        return sh, r
-                    last = (self._arcs_of(sh, r.v)[0], worst)
-                    options = self._activate(sh, r.v, viol)
-                else:
-                    dead = self._retire(sh, r.v)
-                    if dead is None and self.split_rising:
-                        dead = self._split_rising(sh, r.v)
-                        # A split that does not solve leaves the step as it was: the
-                        # exact solve's acceptance still judges the structure.
-                        optional = dead is not None
-                        if optional and tried_splits.get(key(*dead[0]), 0) >= 3:
-                            dead, optional = None, False
-                        elif optional:
-                            tried_splits[key(*dead[0])] = tried_splits.get(key(*dead[0]), 0) + 1
-                    if dead is not None:
-                        options = dead if optional else [dead]
-                    else:
-                        options = self._bound_options(sh, r.v)
-                        if options is None:
-                            return sh, r
+                ctx.sh, ctx.r, ctx.changed = sh, r, changed
+                verdict = self.pipelines[SETTLE].first(ctx)
+                if isinstance(verdict, Reject):
+                    state["why"] = verdict.why
+                    return None
+                if isinstance(verdict, Accept):
+                    return sh, r
+                options, optional = verdict.options, verdict.optional
                 base = r.v[:sh.n_base] if isinstance(sh, MultiArcShooting) else r.v
                 options = [o for o in options if key(*o) not in banned]
                 if self.parallel > 1 and options and not optional:
@@ -3327,8 +3266,8 @@ class Homotopy:
             le0, off_start = state["le"], state["off"].copy()
             frac, ds = 0.0, 0.25
             prev = None                    # (frac, v, structure) of the solution before
-            fail_ds, since_fail = None, 0  # Rule R46: the last failed step, successes since
             prev2 = None                   # Rule R48: the solution before prev
+            memory = {}                    # the leg's own state for path rules (R46)
             leg_dir = (target_le - le0, np.asarray(target_off, dtype=float) - off_start)
             state["leg_dir"] = leg_dir
             while frac < 1.0:
@@ -3341,22 +3280,9 @@ class Homotopy:
                 off = off_start + f * (target_off - off_start)
                 sh0, v0 = state["shoot"], state["v"]
                 arcs, values = self._arcs_of(sh0, v0)
-                guesses = [v0]
-                if prev is not None and prev[2] == arcs and frac > prev[0]:
-                    # Secant predictor along the path, while the structure holds.
-                    guesses.insert(0, v0 + (v0 - prev[1]) * (f - frac) / (frac - prev[0]))
-                    if (getattr(self, "quadratic_predictor", False) and prev2 is not None
-                            and prev2[2] == arcs and prev[0] > prev2[0]
-                            and target_le != le0):
-                        # (Only on legs that move the weight, where Newton's radius shrinks
-                        # along the path: Lemma S (2) with W (2).)
-                        # Rule R48: the quadratic through the last three solutions; its
-                        # error is O(h^3) where the secant's is O(h^2).
-                        x0_, x1_, x2_ = prev2[0], prev[0], frac
-                        l0 = (f - x1_) * (f - x2_) / ((x0_ - x1_) * (x0_ - x2_))
-                        l1 = (f - x0_) * (f - x2_) / ((x1_ - x0_) * (x1_ - x2_))
-                        l2 = (f - x0_) * (f - x1_) / ((x2_ - x0_) * (x2_ - x1_))
-                        guesses.insert(0, l0 * prev2[1] + l1 * prev[1] + l2 * v0)
+                ctx = StepContext(self, frac, f, ds, ds_min, v0, arcs, prev, prev2,
+                                  moves_weight=target_le != le0, memory=memory)
+                guesses = self.pipelines[PREDICT].collect(ctx)    # hook: predict
                 done = None
                 outcome, attempt = None, None
                 # Below the floor, and within three halvings of the leg's ds_min, a
@@ -3452,11 +3378,16 @@ class Homotopy:
                         and outcome == "settle failed: violation too large"):
                     located = self._birth_fraction(sh0, v0, state.get("overshoot"), scale,
                                                    target=0.2 * self.locate_tol)
-                if done is None and outcome == "settle failed: density negative":
-                    self.diagnostics.fired("R25")
-                    self._detail(f"    split located at {state['split_at']:.2f} of the step")
-                    ds = (f - frac) * state["split_at"]
-                    continue
+                if done is None:
+                    ctx.f, ctx.ds, ctx.outcome, ctx.located = f, ds, outcome, located
+                    ctx.theta_far, ctx.sh0, ctx.state = theta_far, sh0, state
+                    ctx.leg = (le0, off_start, target_le, target_off)
+                    ctx.path_tol, ctx.ended = path_tol, ended
+                    ctx.solve_structure, ctx.settle = solve_structure, settle
+                    split = self.pipelines[STEP_FAILED_SPLIT].first(ctx)   # hook: R25
+                    if split is not None:
+                        ds = split.ds
+                        continue
                 if done is None and attempt is not None and self.snapshot_dir is not None:
                     cur_arcs, cur_vals = self._arcs_of(sh0, v0)
                     self.diagnostics.snapshot(self.snapshot_dir, self.snapshot_tag, outcome, {
@@ -3467,90 +3398,26 @@ class Homotopy:
                                    else v0, "le": state["le"], "off": state["off"].copy()},
                         "attempt": {"arcs": attempt[0], "values": attempt[1], "base": attempt[2],
                                     "le": le, "off": np.array(off, dtype=float)}})
-                if done is None and f >= 1.0 and not np.any(target_off) and tuple(map(tuple, arcs)) not in ended:
-                    ended.add(tuple(map(tuple, arcs)))
-                    converted = self._end_structure(sh0, v0)
-                    if converted is not None:
-                        try:
-                            sh, r = solve_structure(*converted, v0[:sh0.n_base], le, off)
-                            self._detail(f"  arcs run out to the ends: residual {r.residual_norm:.1e}")
-                            done = settle(sh, r, le, off) if r.success else None
-                        except _FAILURES as exc:
-                            self._detail(f"  arcs run out to the ends: {exc}")
-                if (done is None and self.locate_deaths and prev is not None and prev[2] == arcs
-                        and theta_far is None):
-                    for drop, s_star in self._death_points(sh0, prev[1], v0, prev[0], frac, f):
-                        fd = min(s_star + 0.25 * (s_star - frac), f)
-                        le_d = le0 + fd * (target_le - le0)
-                        off_d = off_start + fd * (target_off - off_start)
-                        arcs_d, vals_d = self._arcs_of(sh0, v0)
-                        arcs_d = arcs_d[:drop] + arcs_d[drop + 1:]
-                        vals_d = vals_d[:drop] + vals_d[drop + 1:]
-                        try:
-                            sh, r = solve_structure(arcs_d, vals_d, v0[:sh0.n_base], le_d, off_d)
-                            done = settle(sh, r, le_d, off_d) if r.success else None
-                        except _FAILURES:
-                            done = None
-                        self._detail(f"    arc {drop} dies at {s_star:.6f}: "
-                                     + ("stepped past it" if done is not None else "no"))
-                        if done is not None:
-                            self.diagnostics.fired("R17")
-                            f, le, off = fd, le_d, off_d
-                            break
-                if done is None and self.width_steps and ds < 1e-3:
-                    # Rule R2: steps in s stall at a birth or death; a step in the young
-                    # arc's width is regular there (Lemma E).
-                    def point(sv, le0=le0, off_start=off_start):
-                        return (le0 + sv * (target_le - le0),
-                                off_start + sv * (target_off - off_start))
-                    for vw, fw, drop in self._width_moves(sh0, v0, frac, point, path_tol):
-                        le_w, off_w = point(fw)
-                        try:
-                            arcs_w, vals_w = self._arcs_of(sh0, vw)
-                            if drop is not None:
-                                arcs_w = arcs_w[:drop] + arcs_w[drop + 1:]
-                                vals_w = vals_w[:drop] + vals_w[drop + 1:]
-                            sh, r = solve_structure(arcs_w, vals_w, vw[:sh0.n_base], le_w, off_w)
-                            done = settle(sh, r, le_w, off_w) if r.success else None
-                        except _FAILURES:
-                            done = None
-                        if done is not None:
-                            f, le, off = fw, le_w, off_w
-                            break
-                if (done is None and getattr(self, "handover_ties", False)
-                        and self._tie_locked(sh0, v0)):
-                    continue               # Rule R39: the same step, with the tie
-                fold = state.pop("fold", None)
-                if (done is None and fold is not None
-                        and state.setdefault("fold_count", 0) < self.fold_turn_limit):
-                    # Rule R44: a fold (Lemma X). The solution curve goes on along the other
-                    # order's branch with the step decreasing: take that branch at the last
-                    # accepted point, follow it back until the structure changes, and go on.
-                    state["fold_count"] += 1
-                    state.setdefault("folds_seen", set()).add(fold["key"])
-                    turned = self._turn_back(fold, frac, f, le0, off_start, target_le,
-                                             target_off, solve_structure, settle, state)
-                    if turned:
+                if done is None:
+                    # hook: step failed: rescue (ends, R17, R2, R39, R44)
+                    rescue = self.pipelines[STEP_FAILED_RESCUE].first(ctx)
+                    if isinstance(rescue, Retry):
+                        ds = rescue.ds
+                        continue
+                    if isinstance(rescue, Turn):
                         # The curve goes on the other way: towards this line's other end,
                         # turning again at the next fold (arclength continuation).
                         other_le, other_off = turn_to if turn_to is not None else (le0, off_start)
                         return advance(other_le, other_off, on_step, ds_min,
                                        turn_to=(target_le, np.asarray(target_off, dtype=float)),
                                        backward=not backward)
+                    if isinstance(rescue, Rescued):
+                        state.pop("fold", None)
+                        done, f, le, off = rescue.done, rescue.f, rescue.le, rescue.off
                 if done is None:
-                    if located is not None:
-                        self.diagnostics.fired("R16")
-                        self._detail(f"    birth located at {located:.2f} of the step")
-                        ds = (f - frac) * located
-                    elif theta_far is not None and np.isfinite(theta_far[0]):
-                        # Rule R37: theta ~ h^p, so this h is cut to the target theta.
-                        ds = (f - frac) * float(np.clip(
-                            (self.contraction_target / theta_far[0]) ** (1.0 / theta_far[1]),
-                            0.1, 0.5))
-                    else:
-                        if getattr(self, "step_memory", False):
-                            fail_ds, since_fail = f - frac, 0
-                        ds *= 0.5
+                    # hook: step failed: size (R16, R37, R46, halving)
+                    ctx.f, ctx.ds, ctx.located, ctx.theta_far = f, ds, located, theta_far
+                    ds = self.pipelines[STEP_FAILED_SIZE].first(ctx)
                     continue
                 prev2 = prev if prev is not None and prev[2] == arcs else None
                 prev = (frac, v0, arcs)
@@ -3575,26 +3442,10 @@ class Homotopy:
                     prev = None            # the structure changed: no secant across it
                     prev2 = None
                     state["progress_at"] = time.perf_counter()     # progress, for R15
-                nxt = ds * 1.5
-                if getattr(self, "step_memory", False):
-                    # Rule R46 (Lemma S): grow to at most 0.9 of the last failed step for
-                    # three successes, then probe again; a new structure forgets it.
-                    if changed:
-                        fail_ds = None
-                    elif fail_ds is not None:
-                        since_fail += 1
-                        if since_fail <= 3:
-                            nxt = min(nxt, 0.9 * fail_ds)
-                        else:
-                            fail_ds = None
-                if (not changed and theta_done is not None and theta_done[0] is not None
-                        and f - frac > floor):
-                    # Rule R37: the step that gives the target contraction next.
-                    self.diagnostics.fired("R37")
-                    th, order = theta_done
-                    nxt = (f - frac) * float(np.clip(
-                        (self.contraction_target / max(th, 1e-12)) ** (1.0 / order), 0.5, 2.0))
-                frac, ds = f, min(nxt, 0.25)
+                # hook: step accepted: size (R46, R37, growth)
+                ctx.f, ctx.ds, ctx.changed, ctx.theta_done = f, ds, changed, theta_done
+                ctx.steered = f - frac > floor
+                frac, ds = f, self.pipelines[STEP_ACCEPTED_SIZE].first(ctx)
                 if on_step is not None and on_step():
                     return True
             if backward:
@@ -3614,25 +3465,21 @@ class Homotopy:
                         0.0, candidates=1, structure=tuple(entries))
             steps.append(step)
             hit = self._exact_jump(entries, v, tol)
-            if hit is None and self.collapsed_touches:
-                # Rule R20: an order-1 touch stands in for an arc too short to solve on
-                # the route (Lemma Q: it is not an extremal itself unless degenerate);
-                # the exact problem gets the arc, centred on it with the touch's jump.
-                for arcs_x, values_x in self._touch_arcs(sh, v):
-                    entries_x, vals_x = self._mas_entries(arcs_x, values_x)
-                    v_x = self._smoothed(entries_x, None, state["off"]).pack_arcs(
-                        v[:sh.n_base], vals_x)
-                    hit = self._exact_jump(entries_x, v_x, tol)
-                    if hit is not None:
-                        self.diagnostics.fired("R20 exact")
-                        entries = self._mas_entries(arcs_x, values_x, names=True)[0]
-                        arcs = arcs_x
-                        break
+            ectx = ExactContext(self, state, sh, v, tol, depth, split_exact)
+            if hit is None:
+                # hook: exact rejected, its first part (R20); R21 and R32 come after the
+                # verdict is said, as they always have.
+                got = self.pipelines[EXACT_REJECTED].rules[0].act(ectx)
+                if got is not None:
+                    hit, arcs = got
             self._say(f"active set at eps = {step.eps:.3g}: {self._names(arcs)}, "
                       f"exact {'accepted' if hit else 'not accepted'}")
-            if hit is None and depth < 2 and (self.exact_splits and self.split_rising
-                                              or self.exact_births):
-                hit = split_exact(depth)
+            if hit is None:
+                for rule in self.pipelines[EXACT_REJECTED].rules[1:]:
+                    got = rule.act(ectx)
+                    if got is not None:
+                        hit = got[0]
+                        break
             if hit is not None:
                 step.accepted = True
                 found.append(hit)

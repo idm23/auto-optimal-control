@@ -1336,6 +1336,31 @@ jump, density, gap, order, bound, end, held sign).
 - **Consequence.** Goal 3 at 80% (56 s alone on its one solving route) needs a route
   about 1.8 times faster, not a different schedule.
 
+### Observation O5: where the path rules act (2026-11-21)
+
+The path-level rules now sit behind one interface (`pipeline.py`): a rule names the hook
+it acts at and answers `act(ctx)` from a context of that hook. The route runs each hook's
+active rules in order (the first answer wins, or for the predictor, all guesses are
+collected). The hook map in `pipeline.py` lists each hook, its rules and the ones still
+inline.
+
+| Hook | Rules |
+| --- | --- |
+| predict | R48 quadratic, secant, last solution |
+| step failed: size | R16 located birth, R37 contraction cut, R46 halve |
+| step accepted: size | R46 and R37 growth |
+| settle start, settle | R25, R30/R38/R39 order, R44 fold, history, violation, dead arc (R18), bounds |
+| step failed: split, rescue | R25 split, arcs to the ends, R17 deaths, R2 widths, R39 tie, fold turn |
+| exact rejected | R20 collapsed touches, exact splits and births |
+
+- **Behaviour.** The verbose route logs of rest 4, goal 9 at 70% and vgoals 1 and 3 at 80%
+  are identical before and after, step for step. Page 105 solves the same 84 cases
+  in 690 s against 689 s.
+- **Cost.** The path rules act once per step or settle round: a few hundred times a solve.
+  The rules that act once per residual evaluation (R7, R10b, R22, R23, R39's ties, R43,
+  R55, R60) act thousands of times, so they stay in the shooting code, which is the part
+  to compile next.
+
 ### Observation O3: what the direct comparison shows for the unsolved cases
 
 The direct transcription (`auto_optimal_control.direct`) was run at 120 and 240
