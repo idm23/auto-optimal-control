@@ -18,9 +18,9 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-21, on the branch that starts the portfolio's routes in
-stages (R72, Observation O7). Rules R1, R2, R15, R16, R20, R25, R26, R28,
-R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66 and R72 are turned on
+The data shown is from the census of 2026-11-21, on the branch that integrates the route's path
+problems to 1e-10 (R74, Lemma TB). Rules R1, R2, R15, R16, R20, R25, R26, R28,
+R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72 and R74 are turned on
 (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
@@ -31,17 +31,17 @@ once, the other three after 6 s or as soon as one of the four ends (R72). The ce
 cases in its main process, so the routes are the only other processes. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-87 of the 90 cases solve, all under 60 s, and 68 of them under 5 s. The mean solve time
-of the solved cases is 4.649 s, and the slowest is 40.564 s. Times are wall-clock seconds
+87 of the 90 cases solve, all under 60 s, and 70 of them under 5 s. The mean solve time
+of the solved cases is 4.287 s, and the slowest is 37.536 s. Times are wall-clock seconds
 per case, to the millisecond.
 
-Starting four routes first (R72) is what changed. Fewer busy cores run faster
-(Observation O4), and most cases are won by one of the first four routes. Observation O7
-ran each route alone on every case, and a schedule simulated from those times predicted
-68 cases under 5 s. On page 113, with all seven routes at once, 57 were under 5 s and the
-mean was 5.078 s. The same 87 cases solve, in 404.5 s against 441.8 s. Cases that only a
-later route solves wait for it: rest 4 takes 24.8 s against 18.8 s, and vrest 1
-27.6 s against 21.9 s.
+Two changes made this. First, four routes start at once and the other three after 6 s
+(R72, Observation O7): fewer busy cores run faster (O4), and most cases are won by one of
+the first four. Second, the route integrates its path problems to 1e-10 instead of the
+exact problem's 1e-12 (R74, Lemma TB). Its solves stop at 1e-6 and its monitors judge at
+1e-6, so the integration stays two orders below both, and the exact solve keeps 1e-12.
+With all seven routes at once and 1e-12 (page 113), 57 cases were under 5 s and the
+mean was 5.078 s. The same 87 cases solve, in 373.0 s against 441.8 s.
 
 When all seven routes are busy they run at about half speed (Observation O4). The
 winners are spread over every route, so none can be dropped.

@@ -2731,3 +2731,23 @@ with the predictor's error.
 406.7 s against 404.5 s. 67 are under 5 s, against 68. Some cases gain (vgoal 3 at
 80%: 33.7 s against 37.2 s; vrest 5: 16.8 s against 19.7 s), and others lose (vgoal 4 at
 70%: 48.0 s against 40.6 s). Not adopted.
+
+### The route's integration tolerance: Rule R74
+
+*What it was.* The route integrated its path problems to the exact problem's
+tolerance, $10^{-12}$, while it solves them only to a residual of $10^{-6}$.
+
+*Rule R74* (`Homotopy.path_rtol`, Lemma TB). The route integrates to
+$\mathrm{rtol} = \mathrm{atol} = 10^{-10}$. The exact solve and its acceptance keep
+$10^{-12}$.
+
+*Census page 116 (release, R72, the route at $10^{-10}$, set with
+`--set path_options=...`, the same configuration as R74):*
+- 70 cases are under 5 s, against 68, with a mean of 4.287 s against 4.649 s.
+- The same 87 cases solve, in 373.0 s against 404.5 s.
+- Vrest 5 takes 15.0 s against 19.7 s, rest 4 20.9 s against 24.8 s, and vrest 6
+  11.9 s against 15.2 s.
+- Vrest 12 takes 28.1 s against 20.3 s, and vrest 1 32.5 s against 27.6 s: their
+  paths changed.
+
+R74 joins the release.

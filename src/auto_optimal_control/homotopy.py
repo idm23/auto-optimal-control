@@ -326,6 +326,9 @@ class Homotopy:
         #: Rule R72 (Observation O7): with parallel routes, the first ``route_width`` start
         #: at once and the rest join after ``route_delay`` seconds.
         self.staged_routes = False
+        #: Rule R74 (Lemma TB): the active-set route integrates to this tolerance (None:
+        #: path_options as given); 1e-10 when the rule is on.
+        self.path_rtol = None
         self.route_width = 4
         self.route_delay = 6.0
         self.corner_touches = False         # rule R12: refuted by Lemma L (see the note)
@@ -1334,10 +1337,16 @@ class Homotopy:
     def _smoothed(self, arcs, eps, off):
         """Shooting on the regularized kernels with exact arcs ``arcs`` and penalties off."""
         p = self.regularized_params(eps, np.zeros(self.nc), off)
+        opts = dict(self.path_options)
+        if getattr(self, "path_rtol", None):
+            # Rule R74 (Lemma TB): the route's solves stop at a residual of 1e-6 and its
+            # monitors judge at 1e-6 of a scale, so integrating to path_rtol (1e-10) keeps
+            # two orders below both; the exact solve keeps its own tolerance.
+            opts.update(rtol=float(self.path_rtol), atol=float(self.path_rtol))
         shoot = (self._multi_arc(self.kr, p, arcs, max_nfev=self.attempt_nfev, open_end=True,
                                   order1_touches=True if self.collapsed_touches else None,
-                                  **self.path_options)
-                 if arcs else SingleShooting(self.kr, p, **self.path_options))
+                                  **opts)
+                 if arcs else SingleShooting(self.kr, p, **opts))
         shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
         shoot.fast_residuals = True
         shoot.tangent_junctions = self.kr.system.riding is not None
