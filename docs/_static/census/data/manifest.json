@@ -18,8 +18,8 @@
    "index": 0,
    "setting": "80%",
    "solved": true,
-   "seconds": 6.0,
-   "tf": 1.1566341840991572,
+   "seconds": 5.6,
+   "tf": 1.1566341840991567,
    "rates": false
   },
   {
@@ -30,7 +30,7 @@
    "setting": "90%",
    "solved": true,
    "seconds": 1.3,
-   "tf": 1.1566160866446908,
+   "tf": 1.156616086644691,
    "rates": false
   },
   {
@@ -40,7 +40,7 @@
    "index": 1,
    "setting": "70%",
    "solved": true,
-   "seconds": 7.5,
+   "seconds": 7.2,
    "tf": 1.1675058733367532,
    "rates": false
   },
@@ -73,8 +73,8 @@
    "index": 2,
    "setting": "70%",
    "solved": true,
-   "seconds": 15.7,
-   "tf": 1.1556941769352842,
+   "seconds": 5.7,
+   "tf": 1.1556941769352846,
    "rates": false
   },
   {
@@ -106,8 +106,8 @@
    "index": 3,
    "setting": "70%",
    "solved": true,
-   "seconds": 3.4,
-   "tf": 1.1471710285060743,
+   "seconds": 3.8,
+   "tf": 1.147171028506074,
    "rates": false
   },
   {
@@ -139,7 +139,7 @@
    "index": 4,
    "setting": "70%",
    "solved": true,
-   "seconds": 4.6,
+   "seconds": 4.9,
    "tf": 1.167506229929953,
    "rates": false
   },
@@ -161,7 +161,7 @@
    "index": 4,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.9,
+   "seconds": 0.8,
    "tf": 1.167472073626121,
    "rates": false
   },
@@ -183,7 +183,7 @@
    "index": 5,
    "setting": "80%",
    "solved": true,
-   "seconds": 1.2,
+   "seconds": 1.1,
    "tf": 1.0530801619939685,
    "rates": false
   },
@@ -205,8 +205,8 @@
    "index": 6,
    "setting": "70%",
    "solved": true,
-   "seconds": 5.3,
-   "tf": 1.1260930725519744,
+   "seconds": 5.2,
+   "tf": 1.1260930725519738,
    "rates": false
   },
   {
@@ -238,7 +238,7 @@
    "index": 7,
    "setting": "70%",
    "solved": true,
-   "seconds": 5.6,
+   "seconds": 5.5,
    "tf": 1.0769652179327396,
    "rates": false
   },
@@ -249,7 +249,7 @@
    "index": 7,
    "setting": "80%",
    "solved": true,
-   "seconds": 3.4,
+   "seconds": 2.8,
    "tf": 1.0769516340673506,
    "rates": false
   },
@@ -260,7 +260,7 @@
    "index": 7,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.6,
+   "seconds": 1.4,
    "tf": 1.0769341916302584,
    "rates": false
   },
@@ -271,8 +271,8 @@
    "index": 8,
    "setting": "70%",
    "solved": true,
-   "seconds": 4.2,
-   "tf": 1.132731481306684,
+   "seconds": 4.5,
+   "tf": 1.1327314813067433,
    "rates": false
   },
   {
@@ -282,7 +282,7 @@
    "index": 8,
    "setting": "80%",
    "solved": true,
-   "seconds": 1.4,
+   "seconds": 1.3,
    "tf": 1.122075487553648,
    "rates": false
   },
@@ -304,7 +304,7 @@
    "index": 9,
    "setting": "70%",
    "solved": true,
-   "seconds": 6.9,
+   "seconds": 5.2,
    "tf": 1.1276667473247128,
    "rates": false
   },
@@ -315,7 +315,7 @@
    "index": 9,
    "setting": "80%",
    "solved": true,
-   "seconds": 3.5,
+   "seconds": 2.1,
    "tf": 1.127612143713533,
    "rates": false
   },
@@ -326,8 +326,8 @@
    "index": 9,
    "setting": "90%",
    "solved": true,
-   "seconds": 3.4,
-   "tf": 1.1275921826859163,
+   "seconds": 1.9,
+   "tf": 1.1275921826859165,
    "rates": false
   },
   {
@@ -348,7 +348,7 @@
    "index": 1,
    "setting": null,
    "solved": true,
-   "seconds": 8.4,
+   "seconds": 8.3,
    "tf": 1.6837318834392176,
    "rates": false
   },
@@ -370,7 +370,7 @@
    "index": 11,
    "setting": null,
    "solved": true,
-   "seconds": 8.5,
+   "seconds": 8.4,
    "tf": 1.523276293735787,
    "rates": false
   },
@@ -381,7 +381,7 @@
    "index": 12,
    "setting": null,
    "solved": true,
-   "seconds": 4.9,
+   "seconds": 4.8,
    "tf": 1.564729010847606,
    "rates": false
   },
@@ -436,8 +436,8 @@
    "index": 4,
    "setting": null,
    "solved": true,
-   "seconds": 14.1,
-   "tf": 1.794332055541291,
+   "seconds": 22.6,
+   "tf": 1.7943320555412916,
    "rates": false
   },
   {
@@ -447,7 +447,7 @@
    "index": 5,
    "setting": null,
    "solved": true,
-   "seconds": 9.5,
+   "seconds": 9.4,
    "tf": 1.7499272895751827,
    "rates": false
   },
@@ -513,7 +513,7 @@
    "index": 0,
    "setting": "80%",
    "solved": true,
-   "seconds": 5.6,
+   "seconds": 6.2,
    "tf": 1.2401773514826633,
    "rates": true
   },
@@ -525,7 +525,7 @@
    "setting": "90%",
    "solved": true,
    "seconds": 4.3,
-   "tf": 1.1912213329704735,
+   "tf": 1.1912213329704733,
    "rates": true
   },
   {
@@ -535,7 +535,7 @@
    "index": 1,
    "setting": "70%",
    "solved": true,
-   "seconds": 7.6,
+   "seconds": 7.2,
    "tf": 1.322348617625623,
    "rates": true
   },
@@ -546,7 +546,7 @@
    "index": 1,
    "setting": "80%",
    "solved": true,
-   "seconds": 3.4,
+   "seconds": 3.0,
    "tf": 1.2518299523765517,
    "rates": true
   },
@@ -557,8 +557,8 @@
    "index": 1,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.5,
-   "tf": 1.2024267919961473,
+   "seconds": 1.6,
+   "tf": 1.2024267919961475,
    "rates": true
   },
   {
@@ -568,8 +568,8 @@
    "index": 2,
    "setting": "70%",
    "solved": true,
-   "seconds": 4.9,
-   "tf": 1.2949651584935036,
+   "seconds": 9.3,
+   "tf": 1.294965158493504,
    "rates": true
   },
   {
@@ -590,7 +590,7 @@
    "index": 2,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.6,
+   "seconds": 1.8,
    "tf": 1.177101286308877,
    "rates": true
   },
@@ -612,8 +612,8 @@
    "index": 3,
    "setting": "80%",
    "solved": true,
-   "seconds": 40.7,
-   "tf": 1.4014562784441373,
+   "seconds": 45.1,
+   "tf": 1.4014562784441544,
    "rates": true
   },
   {
@@ -624,7 +624,7 @@
    "setting": "90%",
    "solved": true,
    "seconds": 1.7,
-   "tf": 1.181448106690481,
+   "tf": 1.1814481066904807,
    "rates": true
   },
   {
@@ -645,8 +645,8 @@
    "index": 4,
    "setting": "80%",
    "solved": true,
-   "seconds": 10.3,
-   "tf": 1.2518295381160833,
+   "seconds": 9.4,
+   "tf": 1.2518295381160829,
    "rates": true
   },
   {
@@ -656,7 +656,7 @@
    "index": 4,
    "setting": "90%",
    "solved": true,
-   "seconds": 3.5,
+   "seconds": 3.4,
    "tf": 1.2023979057082723,
    "rates": true
   },
@@ -667,8 +667,8 @@
    "index": 5,
    "setting": "70%",
    "solved": true,
-   "seconds": 3.6,
-   "tf": 1.1927523555899104,
+   "seconds": 3.5,
+   "tf": 1.1927523555899098,
    "rates": true
   },
   {
@@ -733,7 +733,7 @@
    "index": 7,
    "setting": "70%",
    "solved": true,
-   "seconds": 3.5,
+   "seconds": 3.3,
    "tf": 1.219783789942942,
    "rates": true
   },
@@ -744,7 +744,7 @@
    "index": 7,
    "setting": "80%",
    "solved": true,
-   "seconds": 2.5,
+   "seconds": 2.4,
    "tf": 1.1547250215742417,
    "rates": true
   },
@@ -755,7 +755,7 @@
    "index": 7,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.5,
+   "seconds": 1.4,
    "tf": 1.1091447197920614,
    "rates": true
   },
@@ -777,8 +777,8 @@
    "index": 8,
    "setting": "80%",
    "solved": true,
-   "seconds": 1.6,
-   "tf": 1.2031265764433274,
+   "seconds": 1.8,
+   "tf": 1.2031265764433272,
    "rates": true
   },
   {
@@ -789,7 +789,7 @@
    "setting": "90%",
    "solved": true,
    "seconds": 1.1,
-   "tf": 1.1556384137309093,
+   "tf": 1.1556384137309088,
    "rates": true
   },
   {
@@ -799,7 +799,7 @@
    "index": 9,
    "setting": "70%",
    "solved": true,
-   "seconds": 6.8,
+   "seconds": 5.8,
    "tf": 1.2771918929138906,
    "rates": true
   },
@@ -810,7 +810,7 @@
    "index": 9,
    "setting": "80%",
    "solved": true,
-   "seconds": 6.5,
+   "seconds": 5.5,
    "tf": 1.2090430565165193,
    "rates": true
   },
@@ -821,7 +821,7 @@
    "index": 9,
    "setting": "90%",
    "solved": true,
-   "seconds": 3.5,
+   "seconds": 3.3,
    "tf": 1.1613182851264467,
    "rates": true
   },
@@ -843,7 +843,7 @@
    "index": 1,
    "setting": null,
    "solved": true,
-   "seconds": 30.0,
+   "seconds": 23.1,
    "tf": 1.9962336056835661,
    "rates": true
   },
@@ -853,9 +853,9 @@
    "family": "vrest",
    "index": 10,
    "setting": null,
-   "solved": false,
-   "seconds": 36.1,
-   "tf": null,
+   "solved": true,
+   "seconds": 16.2,
+   "tf": 1.577202471701988,
    "rates": true
   },
   {
@@ -865,7 +865,7 @@
    "index": 11,
    "setting": null,
    "solved": true,
-   "seconds": 4.5,
+   "seconds": 4.1,
    "tf": 1.7602678228477031,
    "rates": true
   },
@@ -876,7 +876,7 @@
    "index": 12,
    "setting": null,
    "solved": true,
-   "seconds": 25.0,
+   "seconds": 24.2,
    "tf": 1.692312753018173,
    "rates": true
   },
@@ -887,8 +887,8 @@
    "index": 13,
    "setting": null,
    "solved": true,
-   "seconds": 8.2,
-   "tf": 1.4768231291805731,
+   "seconds": 7.6,
+   "tf": 1.4768231291805758,
    "rates": true
   },
   {
@@ -898,8 +898,8 @@
    "index": 14,
    "setting": null,
    "solved": true,
-   "seconds": 0.8,
-   "tf": 1.4427958625431139,
+   "seconds": 0.9,
+   "tf": 1.4427958625431134,
    "rates": true
   },
   {
@@ -920,7 +920,7 @@
    "index": 3,
    "setting": null,
    "solved": true,
-   "seconds": 9.0,
+   "seconds": 8.6,
    "tf": 1.5262151775776283,
    "rates": true
   },
@@ -942,7 +942,7 @@
    "index": 5,
    "setting": null,
    "solved": true,
-   "seconds": 19.3,
+   "seconds": 19.4,
    "tf": 2.028126109547205,
    "rates": true
   },
@@ -986,8 +986,8 @@
    "index": 9,
    "setting": null,
    "solved": true,
-   "seconds": 14.4,
-   "tf": 1.388021817361581,
+   "seconds": 14.1,
+   "tf": 1.3880218173615808,
    "rates": true
   }
  ]

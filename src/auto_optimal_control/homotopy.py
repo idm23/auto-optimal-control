@@ -439,6 +439,9 @@ class Homotopy:
         #: Rule R61 (Lemma AC): a path solve's chord starts from the last Jacobian of the
         #: same structure instead of a fresh one.
         self.carry_jacobian = False
+        #: Rule R63 (Lemma AC 5): a path solve whose first Newton step contracts by more
+        #: than 12 ends at once, where its backtracking cannot pass.
+        self.hopeless_newton = False
         #: The free-violation checks read the densities' trajectory instead of sampling
         #: the solution again: one integration of each accepted solution for both
         #: (Lemma V1's monitors are functionals of one sampled extremal).
@@ -1325,6 +1328,7 @@ class Homotopy:
         shoot.fast_residuals = True
         shoot.tangent_junctions = self.kr.system.riding is not None
         shoot.natural_monotonicity = getattr(self, "natural_monotonicity", False)
+        shoot.theta_abort = 12.0 if getattr(self, "hopeless_newton", False) else None
         return shoot
 
     def _free_samples(self, shoot, v, n_points=801):
