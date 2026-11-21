@@ -226,6 +226,7 @@ class LocatedBirth:
         if ctx.located is None:
             return None
         ctx.homotopy._detail(f"    birth located at {ctx.located:.2f} of the step")
+        ctx.memory["natural"] = ctx.f - ctx.frac       # R65: the step before the cut
         return (ctx.f - ctx.frac) * ctx.located
 
 
@@ -256,6 +257,20 @@ class Halve:
 
 
 # -- step accepted: size --------------------------------------------------------
+
+class Resume:
+    """Rule R65 (Lemma S): after a step cut short for an event (R16's located birth, R64's
+    cap), the next step resumes at least half the step planned before the cut: the cut
+    measured the event, not Newton's radius."""
+
+    name, hook, fires = "R65", STEP_ACCEPTED_SIZE, True
+
+    def act(self, ctx):
+        natural = ctx.memory.pop("natural", None)
+        if natural is None or not natural > ctx.ds * 1.5 / 0.5:
+            return None
+        return min(0.5 * natural, 0.25)
+
 
 class Grow:
     """The default: 1.5 times the step; Rule R46 (Lemma S) grows to at most 0.9 of
@@ -327,7 +342,7 @@ def default_pipelines():
     return {
         PREDICT: Pipeline(PREDICT, [QuadraticPredictor(), SecantPredictor(), LastSolution()]),
         STEP_FAILED_SIZE: Pipeline(STEP_FAILED_SIZE, [LocatedBirth(), ContractionCut(), Halve()]),
-        STEP_ACCEPTED_SIZE: Pipeline(STEP_ACCEPTED_SIZE, [Grow()]),
+        STEP_ACCEPTED_SIZE: Pipeline(STEP_ACCEPTED_SIZE, [Resume(), Grow()]),
         STEP_ACCEPTED_CAP: Pipeline(STEP_ACCEPTED_CAP, [BirthAhead()]),
     }
 

@@ -1184,7 +1184,13 @@ route stalls.
     last success and the least failure (R59), took 133 s against 47 s: after such a
     point its bracket keeps the steps short. So (1) describes the controller's
     equilibrium, not where the steps are limited.
-- **Used by.** R46, R48.
+- **Corollary (an event's cut).** A step shortened to end at a located or predicted
+  event (R16, R64) is not a failure of Newton at that length: it says nothing about
+  $h^*$, which the accepted steps before it bound from below. So the step after it may
+  return to the step planned before the cut; past a birth, Lemma E's square-root growth
+  of the young arc's width can make that too long, and the failure is then an ordinary
+  one, halved as any other.
+- **Used by.** R46, R48, R65 (the corollary).
 
 ### AC. Newton's progress is measured in its own norm, not the residual's — proved
 

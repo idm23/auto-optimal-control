@@ -446,6 +446,8 @@ class Homotopy:
         #: Rule R64 (Lemma V6): an accepted step's successor ends just past the predicted
         #: birth of a limit (the secant of its margin).
         self.births_ahead = False
+        #: Rule R65 (Lemma S): after a step cut for an event, resume half the step before.
+        self.resume_steps = False
         #: The free-violation checks read the densities' trajectory instead of sampling
         #: the solution again: one integration of each accepted solution for both
         #: (Lemma V1's monitors are functionals of one sampled extremal).
@@ -3488,6 +3490,7 @@ class Homotopy:
                 ctx.ds, ctx.state = ds, state
                 cap = self.pipelines[STEP_ACCEPTED_CAP].first(ctx)    # hook: R64
                 if cap is not None:
+                    ctx.memory["natural"] = ds         # R65: the step before the cap
                     ds = max(cap, ds_min)
                 if on_step is not None and on_step():
                     return True
