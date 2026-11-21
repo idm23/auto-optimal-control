@@ -29,9 +29,10 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-84 of the 90 cases solve, all under 60 s: the median is 6.1 s and the slowest 47.5 s. The
-rules now act through hook pipelines (Observation O5); the solver takes the same steps as
-before, and the 84 cases take 690 s against 689 s.
+84 of the 90 cases solve, all under 60 s: the median is 4.1 s and the slowest 45.3 s. The
+single-shooting seed and the checks' samples now use the closed form of the free arcs
+(Lemma T), and the checks evaluate each limit, control and density at all their samples in
+one compiled call. The 84 cases take 519 s against 690 s (25% faster).
 - Goal 4 at 70% is lost. Its route turns on wall-clock rules, and it has failed on reruns
   of unchanged code before.
 - Rest 10 is still lost to R55 (Lemma AC): near its last birth, two branches of solutions

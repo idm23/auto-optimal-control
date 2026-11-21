@@ -4,6 +4,8 @@
 Generic: the chains, the law's constants and the quadrature come in as arrays,
 so one compiled module serves every certified problem."""
 
+import numpy as np
+
 from libc.math cimport sqrt, fabs, copysign, pow
 
 cdef enum:
@@ -43,7 +45,7 @@ cdef inline int _roots(int L, const double* a, double lo_t, double hi_t, double*
     return k
 
 
-def flow(double tau, const double[::1] z0, const long[:, ::1] ch, int n,
+cpdef double flow(double tau, const double[::1] z0, const long[:, ::1] ch, int n,
          const double[::1] lo, const double[::1] hi, const double[::1] r, const double[::1] c,
          const double[::1] cl, const double[::1] cq, const double[::1] gx, const double[::1] gw,
          double[::1] z_out, double[:, ::1] phi, bint stm, bint cost):
@@ -144,3 +146,14 @@ def flow(double tau, const double[::1] z0, const long[:, ::1] ch, int n,
                     for k in range(L):
                         phi[ch[i, m], n + ch[i, k]] = dI[m][k]
     return total
+
+
+def sample(const double[::1] taus, const double[::1] z0, const long[:, ::1] ch, int n,
+           const double[::1] lo, const double[::1] hi, const double[::1] r, const double[::1] c,
+           const double[::1] cl, const double[::1] cq, const double[::1] gx, const double[::1] gw,
+           double[:, ::1] Z):
+    """``Z[j]`` the free arc's state from ``z0`` after ``taus[j]``, for every ``j``."""
+    cdef double[:, ::1] phi = np.zeros((1, 1))
+    cdef Py_ssize_t j
+    for j in range(taus.shape[0]):
+        flow(taus[j], z0, ch, n, lo, hi, r, c, cl, cq, gx, gw, Z[j], phi, False, False)

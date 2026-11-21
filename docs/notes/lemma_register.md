@@ -1018,8 +1018,12 @@ route stalls.
   makes $u$ only Lipschitz there. The flow is still exact, and so is the STM
   away from that measure-zero set of $\lambda(0)$.
 - **To formalize.** Short: the closed forms are polynomial identities.
-- **Used by.** R23. It is a rule of the machinery: it computes the same flow
-  without integration error, so no answer is accepted on its account.
+- **Used by.** R23: the free arcs of multiple shooting, and (since page 106) the
+  single-shooting seed and every sample the checks take on free arcs and on R60's
+  arcs. It is a rule of the machinery: it computes the same flow without
+  integration error, so no answer is accepted on its account. On the seed it
+  lowers the residual Newton reaches from about $10^{-10}$ to $10^{-14}$, and the
+  route takes the same steps.
 
 ### T″. An arc riding limits on single chain states is a free arc with those controls at 0 — proved
 
@@ -1360,6 +1364,36 @@ inline.
   The rules that act once per residual evaluation (R7, R10b, R22, R23, R39's ties, R43,
   R55, R60) act thousands of times, so they stay in the shooting code, which is the part
   to compile next.
+
+### Observation O6: where a solve's time goes once the free arcs are closed (2026-11-21)
+
+Measured on one route, warm, with every kernel call timed (vgoal 1 at 80%, 2.1 s; vgoal 3
+at 80%, 26.5 s):
+
+| Part | vgoal 1 @80 | vgoal 3 @80 |
+| --- | --- | --- |
+| Riding with the STM (Jacobians) | 29% | 45% |
+| Riding without it (residuals) | 12% | 13% |
+| Closed-form chains, other kernels | 28% | 22% |
+| Python and NumPy | 31% | 20% |
+
+- **A riding STM evaluation.** About 23 µs against 1.9 µs without the STM. In C
+  (the generated code, timed at recorded states): the Lagrangian Hessian
+  $\nabla^2(\mu \cdot g^{(q)})$ of the torque limits takes 9.6 µs, the rest of the riding
+  Jacobian 5.6 µs, $A\Phi$ (508 of 1296 entries nonzero) about 4 µs, the integrator about
+  3 µs.
+- **Tried: holding the Hessian over a window.** With the STM out of step control
+  (its tolerance changes nothing for the exact Hessian: the steps follow $z$), a
+  Hessian held over a window of 0.03 makes the STM calls 1.7 times faster with
+  relative STM errors near $10^{-4}$, and $z$ is unchanged. But the routes then lose
+  vgoal 1 at 80% (window 0.01) and vgoal 3 at 80% (0.03, and once per call). The
+  Jacobian steers more than Newton: the path's tangent, the predictor, the step
+  control by $\Theta$ and the location of births all read it. Not adopted.
+- **Tried: per-root Hessians** (Lemma SP2 extended to $L_{xx}$). The page was 0.4%
+  faster, the build took 52 s instead of 33. The six torques share one recursion,
+  so one torque's Hessian costs nearly all of it. Not adopted.
+- **Consequence.** The Hessian is exact or absent. What remains is the Python glue
+  (compiled next), and fewer Jacobians.
 
 ### Observation O3: what the direct comparison shows for the unsolved cases
 

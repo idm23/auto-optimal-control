@@ -1332,7 +1332,14 @@ class Homotopy:
         k = shoot.kernels
         if not isinstance(shoot, MultiArcShooting):
             x0, lam0, _, tf = shoot.unpack(v)
-            tr = k.trajectory(shoot.t0, np.concatenate([x0, lam0]), tf, shoot.params,
+            z0 = np.concatenate([x0, lam0])
+            chains = shoot._closed_chains()
+            if chains is not None:
+                # R23 (Lemma T): the free arc's closed form at the samples.
+                t = np.linspace(shoot.t0, tf, n_points)
+                Z, _ = chains.sample(shoot.t0, z0, t, shoot.params)
+                return [(t, k.constraint_batch(t, Z, shoot.params), ())]
+            tr = k.trajectory(shoot.t0, z0, tf, shoot.params,
                               n_points=n_points, constraint_events=False, **self.options)
             return [(tr["t"], tr["g"], ())]
         if getattr(self, "one_sampling", False):
@@ -1421,13 +1428,15 @@ class Homotopy:
             on = np.flatnonzero(tr["active"][:, c] & (tr["t"] >= val[0]) & (tr["t"] <= val[1]))
             if len(on) < 3:
                 continue
-            mu = []
-            for j in on:
-                aid = tr["arc"][j]
-                m_ = k.boundary_multiplier(aid, tr["t"][j], tr["z"][j], p)
-                mu.append(float(np.atleast_1d(m_)[0]) if aid < k.N_CONSTRAINTS
-                          else float(np.atleast_1d(m_)[list(k.arc_constraints(aid)).index(c)]))
-            t, mu = tr["t"][on], np.asarray(mu)
+            mu = np.empty(len(on))
+            arc_ids = tr["arc"][on]
+            for aid in np.unique(arc_ids):
+                sel = arc_ids == aid
+                rows = on[sel]
+                M = k.boundary_multiplier_batch(int(aid), tr["t"][rows], tr["z"][rows], p)
+                col = 0 if aid < k.N_CONSTRAINTS else list(k.arc_constraints(int(aid))).index(c)
+                mu[sel] = M[:, col]
+            t = tr["t"][on]
             dt = np.diff(t)
             keep = dt > 0
             eta = -np.diff(mu)[keep] / dt[keep]
