@@ -2568,3 +2568,27 @@ goal 2 at 70% solves (8.4 s, against a failed route), goal 9 at 70% is slower (1
 *Census page 111 (release plus R61, R63, R64, R65): 87 of 90, against 86.* Vgoal 4 at
 70% is solved. The 86 cases solved on both pages take 416 s against 418 s, median 2.7 s.
 R65 joins the release.
+
+### A touch on its own limit's arc: Rule R66
+
+*What it was.* An arc split by R5 leaves R20's collapsed touch in the gap, and when the
+gap closes R11 merges the pieces around it. The touch then lies on an arc of its own
+limit. There its conditions ($g = \dot g = 0$) hold identically, so the Jacobian has two
+zero rows, and its time and jump are free (Lemma IT: the jump only shifts the arc's
+multiplier, E4's shift). Newton moved such a `tau1_max` touch anywhere from $-0.12$ to
+$1.30$ while the residual stayed near $10^{-8}$. Off the arc, the next evaluation left
+the riding domain. On vrest 12's fourth route, 2,787 of the 3,853 structures read had
+one. On vrest 5's first route, 2,415 of 3,702 had one, there a `w` touch (order 2).
+
+*Rule R66* (`Homotopy.absorb_touches`, the hook "structure", with R11). A touch of a
+limit on an arc of that limit (its closure) joins the arc, its jump carried to the entry:
+$\pi_1 \mathrel{+}= \nu$, and at order 2 $\pi_2 \mathrel{+}= \nu (t_c - t_{\rm in})$. At
+twelve solutions of each route, the residual without the touch matched the touch's to
+$10^{-12}$. With $\pi_1$ alone at order 2 it was off by up to 7.7. An arc ridden from the
+start has no entry jump and keeps its touch. Alone, vrest 5's first route takes 12.1 s
+against 45.8 s, and vrest 12's fourth 11.8 s against a failure at 69 s.
+
+*Census page 112 (release plus R66): 87 of 90, the same cases.* They take 456 s against
+458 s, median 2.7 s. R66 fired 65 times. Neither rescued route is the one that wins its
+case on the page: another route finishes each first, as before. R66 joins the release: it
+changes no answer, and it makes the structures it touches regular.

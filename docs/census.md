@@ -18,9 +18,10 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-20, on the branch where each riding reads only
-its own roots' rows and gradients (Lemma SP2). Rules R1, R2, R15, R16, R20, R25, R26,
-R29, R32, R41, R43, R48, R50, R54, R55 and R60 are turned on (the release's configuration), with
+The data shown is from the census of 2026-11-21, on the branch that absorbs a touch point
+lying on its own limit's arc (R66, Lemma IT). Rules R1, R2, R15, R16, R20, R25, R26,
+R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65 and R66 are turned on (the
+release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
 secondary weight (R24); the first draw at a hundred times it, once lowering the weight
@@ -29,10 +30,12 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-87 of the 90 cases solve, all under 60 s: the median is 2.7 s and the slowest 43.0 s.
-After a step cut short at a birth, the next step resumes half the step planned before
-(R65, Lemma S). The 86 cases solved before and after take 416 s against 418 s; vgoal 4 at
-70% is solved.
+87 of the 90 cases solve, all under 60 s: the median is 2.7 s and the slowest 44.4 s.
+A touch point on an arc of its own limit is absorbed into the arc, its jump carried to the
+arc's entry (R66, Lemma IT): the structure is otherwise singular. The same 87 cases solve
+as before, in 456 s against 458 s. The routes it rescues are not the ones that win here:
+alone, vrest 5's first route takes 12 s against 46 s, and vrest 12's fourth 12 s against
+a failure.
 
 When all seven routes are busy they run at about half speed (Observation O4). On most
 cases all seven run until one wins, and the winners are spread over every route.

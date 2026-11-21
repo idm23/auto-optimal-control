@@ -734,3 +734,40 @@ def test_a_density_that_jumps_at_the_base_is_not_located_again():
     h._split_fraction(shoot, "old", shoot, "new")
     ends["eta1"] = -0.095
     assert h._split_fraction(shoot, "old", shoot, "new") is not None
+
+
+def test_touch_on_its_own_limits_arc_is_absorbed():
+    """Lemma IT and R66: a touch point of a limit that lies on an arc of that limit (its
+    closure included) joins the arc, its jump added to the arc's entry jump; a touch of
+    another limit, or one off the arc, is left alone."""
+    import numpy as np
+
+    h = Homotopy.__new__(Homotopy)
+    h.merge_touching = True
+    h.absorb_touches = True
+    h.diagnostics = Diagnostics()
+    arcs = [("boundary", 0), ("touch", 0), ("touch", 1), ("touch", 0), ("boundary", 1)]
+    values = [(0.12, 0.73, np.array([0.5])),   # tau1_max
+              (0.28, 0.3),                      # tau1_max touch on it: absorbed
+              (0.40, 0.2),                      # another limit's touch: kept
+              (0.80, 0.1),                      # off the arc: kept
+              (0.95, 1.10, np.array([0.1, 0.0]))]
+    out_a, out_v = h._merge_touching(arcs, values)
+    assert out_a == [("boundary", 0), ("touch", 1), ("touch", 0), ("boundary", 1)]
+    np.testing.assert_allclose(out_v[0][2], [0.8])
+    assert values[0][2][0] == 0.5                # the caller's values are not changed
+    # At the arc's end (the closure).
+    values = [(0.12, 0.73, np.array([0.5])), (0.73, 0.3)]
+    out_a, out_v = h._merge_touching(arcs[:2], values)
+    assert out_a == [("boundary", 0)]
+    np.testing.assert_allclose(out_v[0][2], [0.8])
+    # Order 2: the jump carried to the entry is nu (1, t_c - t_in) (E4's shift).
+    values = [(0.2, 0.6, np.array([0.1, 0.02])), (0.5, 0.4)]
+    out_a, out_v = h._merge_touching(arcs[:2], values)
+    np.testing.assert_allclose(out_v[0][2], [0.5, 0.02 + 0.4 * 0.3])
+    # An arc ridden from the start has no entry jump: the touch stays.
+    values = [(-np.inf, 0.73, np.array([0.5])), (0.5, 0.3)]
+    assert len(h._merge_touching(arcs[:2], values)[0]) == 2
+    # Off by default.
+    h.absorb_touches = False
+    assert len(h._merge_touching(arcs[:2], values)[0]) == 2

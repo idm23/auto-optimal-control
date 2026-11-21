@@ -51,7 +51,7 @@ route failed                   ``_solve.active_route`` (portfolio)    R15 R47
 solve failed                   ``Homotopy._through_reversal``         R4
 seed failed                    ``Homotopy._solve_structure``          R8
 newborn arc                    ``Homotopy._activate``                 R6 R12 R26
-structure                      ``_merge_touching``, touches           R11
+structure                      ``_merge_touching``, touches           R11 R66
 settle failed: density neg.    ``Homotopy._split_fraction``           R54
 exact rejected (reorders)      ``_exact_jump``                        R41
 not converged (evaluation)     ``SingleShooting.solve_chord``         R55
