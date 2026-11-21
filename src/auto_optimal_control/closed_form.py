@@ -355,21 +355,41 @@ class IntegratorChains:
         out["dz_dt1"] = self.rhs(z, p, pinned)
         return out
 
-    def _propagate_compiled(self, t0, z0, t1, p, stm, cost, pinned=()):
-        lo, hi, r, c, cl, cq, L0 = self._constants(p)
-        if pinned:
-            lo, hi = lo.copy(), hi.copy()
+    def _pinned_constants(self, p, pinned):
+        """``_constants(p)`` with ``pinned`` chains' bounds at 0, cached per ``pinned``."""
+        const = self._constants(p)
+        if not pinned:
+            return const
+        cache = self.__dict__.setdefault("_pinned_cache", {})
+        key = (self._key, pinned)
+        if key not in cache:
+            if len(cache) > 64:
+                cache.clear()
+            lo, hi = const[0].copy(), const[1].copy()
             lo[list(pinned)] = hi[list(pinned)] = 0.0
-        z0 = np.ascontiguousarray(z0, dtype=float)
+            cache[key] = (lo, hi) + const[2:]
+        return cache[key]
+
+    def _law_of(self, p, pinned):
+        """The compiled law at ``p`` (``pinned`` chains' bounds at 0), cached."""
+        self._constants(p)
+        cache = self.__dict__.setdefault("_laws", {})
+        key = (self._key, pinned)
+        law = cache.get(key)
+        if law is None:
+            if len(cache) > 64:
+                cache.clear()
+            lo, hi, r, c, cl, cq, L0 = self._pinned_constants(p, pinned)
+            law = cache[key] = self.module.Law(self._ch_c, self.n, lo, hi, r, c, cl, cq,
+                                               self._gx, self._gw, L0)
+        return law
+
+    def _propagate_compiled(self, t0, z0, t1, p, stm, cost, pinned=()):
+        law = self._law_of(p, tuple(pinned))
         tau = float(t1) - float(t0)
-        z = np.empty_like(z0)
-        Phi = np.zeros((2 * self.n, 2 * self.n)) if stm else np.zeros((1, 1))
-        total = self.module.flow(tau, z0, self._ch_c, self.n, lo, hi, r, c, cl, cq,
-                                 self._gx, self._gw, z, Phi, bool(stm), bool(cost))
-        out = {"t": float(t1), "z": z, "status": 0, "stm": Phi if stm else None,
-               "cost": L0 * tau + total if cost else None}
-        out["dz_dt1"] = self._rhs(z, lo, hi, r, c)
-        return out
+        z, Phi, total, f = law.propagate(tau, z0, bool(stm), bool(cost))
+        return {"t": float(t1), "z": z, "status": 0, "stm": Phi,
+                "cost": law.L0 * tau + total if cost else None, "dz_dt1": f}
 
     def sample(self, t0, z0, times, p, pinned=()):
         """``(Z, U)``: the free arc's states and controls at ``times`` from ``z(t0) = z0``
@@ -377,13 +397,8 @@ class IntegratorChains:
         times = np.asarray(times, dtype=float)
         z0 = np.ascontiguousarray(z0, dtype=float)
         if self.module is not None:
-            lo, hi, r, c, cl, cq, _ = self._constants(p)
-            if pinned:
-                lo, hi = lo.copy(), hi.copy()
-                lo[list(pinned)] = hi[list(pinned)] = 0.0
-            Z = np.empty((len(times), len(z0)))
-            self.module.sample(np.ascontiguousarray(times - float(t0)), z0, self._ch_c, self.n,
-                               lo, hi, r, c, cl, cq, self._gx, self._gw, Z)
+            lo, hi, r, c = self._pinned_constants(p, tuple(pinned))[:4]
+            Z = self._law_of(p, tuple(pinned)).sample(times - float(t0), z0)
         else:
             Z = np.array([self.propagate(t0, z0, ti, p, pinned=pinned)["z"] for ti in times])
             lo, hi, r, c = self._law(p)
@@ -394,17 +409,10 @@ class IntegratorChains:
         U = np.clip(-(Z[:, n + ch[:, -1]] + c) / r, lo, hi)
         return Z, U
 
-    def _rhs(self, z, lo, hi, r, c):
-        n, ch = self.n, self.chains
-        f = np.zeros_like(z)
-        S, Lam = z[ch], z[n + ch]
-        f[ch[:, :-1]] = S[:, 1:]
-        f[ch[:, -1]] = np.clip(-(Lam[:, -1] + c) / r, lo, hi)
-        f[n + ch[:, 1:]] = -Lam[:, :-1]
-        return f
-
     def rhs(self, z, p, pinned=()):
         """``z' = F(z)`` on a free arc (with ``pinned`` chains' controls at 0)."""
+        if self.module is not None and self._cost_terms is not None:
+            return self._law_of(p, tuple(pinned)).rhs(z)
         z = np.asarray(z, dtype=float)
         n, L, ch = self.n, self.L, self.chains
         lo, hi, r, c = self._constants(p)[:4] if self._cost_terms is not None else self._law(p)

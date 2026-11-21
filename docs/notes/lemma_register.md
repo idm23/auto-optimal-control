@@ -1392,8 +1392,15 @@ at 80%, 26.5 s):
 - **Tried: per-root Hessians** (Lemma SP2 extended to $L_{xx}$). The page was 0.4%
   faster, the build took 52 s instead of 33. The six torques share one recursion,
   so one torque's Hessian costs nearly all of it. Not adopted.
-- **Consequence.** The Hessian is exact or absent. What remains is the Python glue
-  (compiled next), and fewer Jacobians.
+- **Consequence.** The Hessian is exact or absent. What remains is the Python glue,
+  and fewer Jacobians.
+- **Compiled since (page 107).** With identical solutions (bit for bit, on the cases
+  timed): R7's corner test and the regular-junction test in C; first-order tangency for
+  residuals (no Hessians); the chains' law held as one compiled object; control bounds
+  and boundary-arc samples batched (FNI's stepper from C, the same steps); the checks
+  reuse the last residual's arcs, which 91% of their calls hit. Single routes are 10–17%
+  faster. The Python left inside evaluations is then 9–14% of a solve: a fully compiled
+  evaluator is worth at most that, so the next work is on the number of Jacobians.
 
 ### Observation O3: what the direct comparison shows for the unsolved cases
 

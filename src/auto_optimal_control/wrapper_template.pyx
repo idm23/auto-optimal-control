@@ -6,12 +6,13 @@ Do not edit: regenerate with ``auto_optimal_control.build.build_kernels``.
 
 import numpy as np
 
-from libc.math cimport INFINITY
+from libc.math cimport INFINITY, fabs
 from libc.string cimport memcmp, memcpy
 
 from fast_numerical_integration.integrators cimport (
     EventFunction, OdeSystem, fni_event, fni_hybrid_options, fni_integrate, fni_integrate_hybrid,
-    fni_options,
+    fni_options, fni_solver, fni_solver_init, fni_solver_step, fni_solver_free,
+    fni_solver_ensure_dense, fni_solver_dense_eval, FNI_RUNNING, FNI_EVENTS_ENDPOINTS,
     fni_options_init, fni_rhs_fn, FNI_EVENTS_INTERIOR, fni_stats, FNI_DOP853, FNI_OK, FNI_RESET_CONTINUE, FNI_RESET_STOP, FNI_RK23,
     FNI_RK45, FNI_STATUS_EVENT, FNI_STATUS_RESET_LIMIT)
 
@@ -1400,6 +1401,91 @@ cdef class BoundaryDynamics(OdeSystem):
         self.c_ctx = &self.ctx
 
 
+def sample_boundary(c, double ta, double tb, za, t_eval, params=None, method="DOP853",
+                    double rtol=1e-10, double atol=1e-12):
+    """``(t, z)``: the boundary arc of ``c`` from ``z(ta) = za`` sampled at ``t_eval``
+    (monotone from ``ta`` towards ``tb``). The same steps and dense output as FNI's
+    ``solve_ivp`` on :class:`BoundaryDynamics` with ``t_eval``, in one call; a failed
+    step ends the samples where it stopped, as there."""
+    cdef _b_ctx ctx
+    cdef double[::1] pv = _params(params)
+    cdef fni_solver sv
+    cdef fni_options opt
+    cdef Py_ssize_t m, i, j, got = 0, nxt
+    cdef double t, eps100 = 100 * 2.220446049250313e-16
+    cdef int rc = 0
+    y0 = np.array(za, dtype=np.float64).reshape(-1)
+    if y0.shape[0] != NZ:
+        raise ValueError(f"za must have {NZ} values")
+    te = np.ascontiguousarray(t_eval, dtype=np.float64).reshape(-1)
+    m = te.shape[0]
+    cdef bint forward = tb > ta
+    cdef const double[::1] ts = te if forward else np.ascontiguousarray(te[::-1])
+    rv = np.full(NZ, rtol if rtol > eps100 else eps100)
+    av = np.full(NZ, atol)
+    cdef double[::1] rview = rv
+    cdef double[::1] aview = av
+    cdef double[::1] y0v = y0
+    Z = np.empty((m, NZ))
+    T = np.empty(m)
+    cdef double[:, ::1] Zv = Z
+    cdef double[::1] Tv = T
+    ctx.p = &pv[0]
+    ctx.c = _exact(c)
+    ctx.singular = 0
+    ctx.calls = 0
+    ctx.max_calls = 0
+    fni_options_init(&opt)
+    opt.rtol_vec = &rview[0]
+    opt.atol_vec = &aview[0]
+    opt.first_step = -1.0
+    opt.max_step = INFINITY
+    opt.event_detection = FNI_EVENTS_ENDPOINTS
+    opt.n_interior = 4
+    meth = {"RK23": FNI_RK23, "RK45": FNI_RK45, "DOP853": FNI_DOP853}[method]
+    sv.mem = NULL
+    rc = fni_solver_init(&sv, meth, _b_rhs_fn, &ctx, NZ, ta, &y0v[0], tb, &opt)
+    try:
+        if rc != 0:
+            raise RuntimeError(f"sample_boundary: solver init failed with code {rc}")
+        i = 0 if forward else m              # next sample (ts ascending)
+        while sv.status == FNI_RUNNING:
+            with nogil:
+                rc = fni_solver_step(&sv)
+            if rc != 0:
+                raise RuntimeError("a native right-hand side or event function returned an error code")
+            t = sv.t
+            if forward:
+                nxt = i
+                while nxt < m and ts[nxt] <= t:
+                    nxt += 1
+                if nxt > i:
+                    rc = fni_solver_ensure_dense(&sv)
+                    if rc != 0:
+                        raise RuntimeError("sample_boundary: dense output failed")
+                    for j in range(i, nxt):
+                        Tv[got] = ts[j]
+                        fni_solver_dense_eval(&sv, ts[j], &Zv[got, 0])
+                        got += 1
+                    i = nxt
+            else:
+                nxt = i
+                while nxt > 0 and ts[nxt - 1] >= t:
+                    nxt -= 1
+                if i > nxt:
+                    rc = fni_solver_ensure_dense(&sv)
+                    if rc != 0:
+                        raise RuntimeError("sample_boundary: dense output failed")
+                    for j in range(i - 1, nxt - 1, -1):
+                        Tv[got] = ts[j]
+                        fni_solver_dense_eval(&sv, ts[j], &Zv[got, 0])
+                        got += 1
+                    i = nxt
+    finally:
+        fni_solver_free(&sv)
+    return T[:got], Z[:got]
+
+
 def boundary_rhs(c, double t, z, params=None):
     """``F_b(t, z, p)`` (NZ,) on a boundary arc of constraint ``c``."""
     cdef int k = _exact(c)
@@ -1461,8 +1547,8 @@ def _points(T, Z):
 def constraint_batch(T, Z, params=None):
     """``constraint`` at every sample: ``g`` of shape (len(T), NC)."""
     Tv, Zv = _points(T, Z)
-    cdef double[::1] tv = Tv
-    cdef double[:, ::1] zv = Zv
+    cdef const double[::1] tv = Tv
+    cdef const double[:, ::1] zv = Zv
     cdef double[::1] pv = _params(params)
     cdef Py_ssize_t m = tv.shape[0], i
     out = np.zeros((m, NC1))
@@ -1477,11 +1563,31 @@ def constraint_batch(T, Z, params=None):
     return out[:, :NC]
 
 
+def control_bounds_batch(T, Z, params=None):
+    """``control_bounds`` at every sample: ``(lower, upper)``, each of shape (len(T), NU)."""
+    Tv, Zv = _points(T, Z)
+    cdef const double[::1] tv = Tv
+    cdef const double[:, ::1] zv = Zv
+    cdef double[::1] pv = _params(params)
+    cdef Py_ssize_t m = tv.shape[0], i
+    lo, hi = np.zeros((m, max(NU, 1))), np.zeros((m, max(NU, 1)))
+    cdef double[:, ::1] lv = lo
+    cdef double[:, ::1] hv = hi
+    cdef int rc = 0
+    with nogil:
+        for i in range(m):
+            rc = P_control_bounds(tv[i], &zv[i, 0], &pv[0], &lv[i, 0], &hv[i, 0])
+            if rc:
+                break
+    _check(rc, "control_bounds_batch")
+    return lo[:, :NU], hi[:, :NU]
+
+
 def control_batch(T, Z, params=None):
     """``control`` at every sample: shape (len(T), NU)."""
     Tv, Zv = _points(T, Z)
-    cdef double[::1] tv = Tv
-    cdef double[:, ::1] zv = Zv
+    cdef const double[::1] tv = Tv
+    cdef const double[:, ::1] zv = Zv
     cdef double[::1] pv = _params(params)
     cdef Py_ssize_t m = tv.shape[0], i
     out = np.zeros((m, max(NU, 1)))
@@ -1499,8 +1605,8 @@ def control_batch(T, Z, params=None):
 def hamiltonian_batch(T, Z, params=None):
     """``hamiltonian`` at every sample: shape (len(T),)."""
     Tv, Zv = _points(T, Z)
-    cdef double[::1] tv = Tv
-    cdef double[:, ::1] zv = Zv
+    cdef const double[::1] tv = Tv
+    cdef const double[:, ::1] zv = Zv
     cdef double[::1] pv = _params(params)
     cdef Py_ssize_t m = tv.shape[0], i
     out = np.zeros(m)
@@ -1519,8 +1625,8 @@ def boundary_control_batch(c, T, Z, params=None):
     """``boundary_control`` at every sample of an arc of ``c``: (len(T), NU)."""
     cdef int k = _exact(c)
     Tv, Zv = _points(T, Z)
-    cdef double[::1] tv = Tv
-    cdef double[:, ::1] zv = Zv
+    cdef const double[::1] tv = Tv
+    cdef const double[:, ::1] zv = Zv
     cdef double[::1] pv = _params(params)
     cdef Py_ssize_t m = tv.shape[0], i
     out = np.zeros((m, max(NU, 1)))
@@ -1540,8 +1646,8 @@ def boundary_multiplier_batch(c, T, Z, params=None):
     (``arc_constraints`` order)."""
     cdef int k = _exact(c)
     Tv, Zv = _points(T, Z)
-    cdef double[::1] tv = Tv
-    cdef double[:, ::1] zv = Zv
+    cdef const double[::1] tv = Tv
+    cdef const double[:, ::1] zv = Zv
     cdef double[::1] pv = _params(params)
     cdef Py_ssize_t m = tv.shape[0], i
     out = np.zeros((m, max(MSET, 1)))
@@ -1627,6 +1733,82 @@ def tangency_gradient(c, double t, z, params=None):
     _check(P_b_tangency_hess(k, t, &zv[0], &pv[0], &cc[0], &d[0]), "tangency_gradient")
     return (nt[:q], nx.reshape(QMAX, n)[:q], nxx.reshape(QMAX, n, n)[:q],
             nxt.reshape(QMAX, n)[:q])
+
+
+def tangency_first(c, double t, z, params=None):
+    """``(dN/dt (q,), dN/dx (q, n))``: :func:`tangency_gradient` without the second
+    derivatives (a residual alone needs none)."""
+    cdef int k = _single(c)
+    cdef int q = CONSTRAINT_ORDERS[k]
+    cdef int n = NZ // 2
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    nt = np.zeros(QMAX)
+    nx = np.zeros(QMAX * n)
+    cdef double[::1] a = nt
+    cdef double[::1] b = nx
+    _check(P_b_tangency_grad(k, t, &zv[0], &pv[0], &a[0], &b[0]), "tangency_first")
+    return nt[:q], nx.reshape(QMAX, n)[:q]
+
+
+def rate_corner(ride, c, double t, z, params, const double[:, ::1] G):
+    """Rule R7's test (``MultiArcShooting._rate_row_here``): whether the riding control of
+    arc ``ride`` at ``(t, z)`` holds a bound in every control that moves ``dg_c/dt``
+    (``a = G^T dN_c/dx``, ``G = df/du`` of shape (n, NU)). False where riding fails."""
+    cdef int kr = _exact(ride)
+    cdef int kc = _single(c)
+    cdef int n = NZ // 2, i, j
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef double u[NU + 1]
+    cdef double lo[NU + 1]
+    cdef double hi[NU + 1]
+    cdef double a[NU + 1]
+    cdef double nt[QMAX]
+    cdef double nx[QMAX * NZ]
+    cdef double amax = 0.0, tight, uj
+    if G.shape[0] != n or G.shape[1] != NU:
+        raise ValueError("G must be (n, NU)")
+    if P_b_control(kr, t, &zv[0], &pv[0], u) != 0:
+        return False
+    _check(P_control_bounds(t, &zv[0], &pv[0], lo, hi), "control_bounds")
+    _check(P_b_tangency_grad(kc, t, &zv[0], &pv[0], nt, nx), "tangency_gradient")
+    for j in range(NU):
+        a[j] = 0.0
+        for i in range(n):
+            a[j] += G[i, j] * nx[i]
+        if fabs(a[j]) > amax:
+            amax = fabs(a[j])
+    amax = 1e-9 * (amax if amax > 1e-300 else 1e-300)
+    for j in range(NU):
+        if fabs(a[j]) > amax:
+            uj = u[j]
+            tight = 1e-9 * (fabs(uj) if fabs(uj) > 1.0 else 1.0)
+            if not (uj - lo[j] <= tight or hi[j] - uj <= tight):
+                return False
+    return True
+
+
+def interior_controls(side, double t, z, params=None):
+    """Whether every control on ``side`` (a boundary arc id, or None for the free law) is
+    strictly inside its bounds at ``(t, z)``, by a margin of ``1e-12 max(1, |u|)``."""
+    cdef double[::1] zv = _buffer(z, NZ, "z")
+    cdef double[::1] pv = _params(params)
+    cdef double u[NU + 1]
+    cdef double lo[NU + 1]
+    cdef double hi[NU + 1]
+    cdef double margin
+    cdef int j
+    if side is None:
+        _check(P_control(t, &zv[0], &pv[0], u), "control")
+    else:
+        _check(P_b_control(_exact(side), t, &zv[0], &pv[0], u), "boundary_control")
+    _check(P_control_bounds(t, &zv[0], &pv[0], lo, hi), "control_bounds")
+    for j in range(NU):
+        margin = 1e-12 * (fabs(u[j]) if fabs(u[j]) > 1.0 else 1.0)
+        if not (u[j] - lo[j] > margin and hi[j] - u[j] > margin):
+            return False
+    return True
 
 
 def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, cost=False,
