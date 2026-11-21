@@ -2715,3 +2715,19 @@ against 57. The mean solve time is 4.649 s against 5.078 s, and the 87 take 404.
 against 441.8 s. The simulation predicted 68 and 404 s. Cases that only routes 5 to 7
 solve wait for them: rest 4 takes 24.8 s against 18.8 s, vrest 1 27.6 s against 21.9 s,
 and vrest 10 14.2 s against 10.1 s. R72 joins the release.
+
+### No MINPACK fallback after a hopeless chord: Rule R71, tried
+
+*What it was.* On vgoal 9 at 70%'s winning route, R63 ends a path solve's chord at
+$\theta \approx 3000$ (Lemma AC 5). The solve's residual is below `path_fallback`
+($10^{-2}$), so MINPACK still runs, twice per failed step: 27 of its 28 calls failed,
+about 1.5 s of the route's 5.7 s.
+
+*Rule R71* (tried, not kept). A chord that R63 ends gets no fallback, and the step is
+shortened. Lemma AC 5 says no damping passes there, and a shorter step lowers $\theta$
+with the predictor's error.
+
+*Census page 115 (release, R72 and R71): neutral.* The same 87 cases solve, in
+406.7 s against 404.5 s. 67 are under 5 s, against 68. Some cases gain (vgoal 3 at
+80%: 33.7 s against 37.2 s; vrest 5: 16.8 s against 19.7 s), and others lose (vgoal 4 at
+70%: 48.0 s against 40.6 s). Not adopted.
