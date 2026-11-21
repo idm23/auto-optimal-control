@@ -71,8 +71,9 @@ import numpy as np
 PREDICT = "predict"
 STEP_FAILED_SIZE = "step failed: size"
 STEP_ACCEPTED_SIZE = "step accepted: size"
+STEP_ACCEPTED_CAP = "step accepted: cap"
 
-HOOKS = (PREDICT, STEP_FAILED_SIZE, STEP_ACCEPTED_SIZE)
+HOOKS = (PREDICT, STEP_FAILED_SIZE, STEP_ACCEPTED_SIZE, STEP_ACCEPTED_CAP)
 
 
 @dataclass
@@ -285,12 +286,49 @@ class Grow:
         return min(nxt, 0.25)
 
 
+class BirthAhead:
+    """Rule R64 (Lemma V6): the next step ends just past the predicted birth of a limit.
+
+    Each limit not in the structure has a margin, its largest value off its arcs (in
+    its scale). Between two accepted steps of one structure, the secant of a negative,
+    rising margin predicts where it reaches zero; the step is capped to end there plus
+    R16's target in the settle's window (0.2 ``locate_tol``), so the new limit is brought in
+    instead of overshot. A wrong prediction fails as an uncapped step would."""
+
+    name, hook, fires = "R64", STEP_ACCEPTED_CAP, True
+
+    def act(self, ctx):
+        h, mem, st = ctx.homotopy, ctx.memory, ctx.state
+        scale = getattr(h, "_route_scale", None)
+        if st is None or scale is None:
+            return None
+        sh, v = st["shoot"], st["v"]
+        arcs = h._arcs_of(sh, v)[0]
+        m = h._margins(sh, v, arcs) / scale
+        last = mem.get("margins")
+        mem["margins"] = (ctx.f, m, arcs)
+        if last is None or ctx.changed or last[2] != arcs:
+            return None
+        f0, m0, _ = last
+        span = ctx.f - f0
+        if not span > 0:
+            return None
+        with np.errstate(invalid="ignore", divide="ignore"):
+            slope = (m - m0) / span
+            ok = np.isfinite(m) & np.isfinite(m0) & (m < 0) & (slope > 0)
+            if not ok.any():
+                return None
+            cap = float(np.min(-m[ok] / slope[ok] + 0.2 * h.locate_tol / slope[ok]))
+        return cap if cap < ctx.ds else None
+
+
 def default_pipelines():
     """The path step's pipelines, in the order the solver has always used."""
     return {
         PREDICT: Pipeline(PREDICT, [QuadraticPredictor(), SecantPredictor(), LastSolution()]),
         STEP_FAILED_SIZE: Pipeline(STEP_FAILED_SIZE, [LocatedBirth(), ContractionCut(), Halve()]),
         STEP_ACCEPTED_SIZE: Pipeline(STEP_ACCEPTED_SIZE, [Grow()]),
+        STEP_ACCEPTED_CAP: Pipeline(STEP_ACCEPTED_CAP, [BirthAhead()]),
     }
 
 

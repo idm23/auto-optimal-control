@@ -1331,6 +1331,24 @@ jump, density, gap, order, bound, end, held sign).
   start, if every event met has a proved continuation and the curve stays
   bounded, it reaches $s = 1$ after finitely many events. Depends on V2 to
   V4, S8. *Gaps:* the table (V4) and boundedness, which must be detected.
+- **V6. A birth is predicted by the secant of its margin — proved, relative to V2.**
+  On a branch of one structure (V2), let $m_c(s) = \max_{t \notin A_c} g_c(t; s)$ be the
+  margin of a limit $c$ not in the structure ($A_c$: its arcs, here none), in its scale.
+  1. $m_c$ is Lipschitz in $s$ (a maximum of a $C^1$ family over a compact set), and
+     $C^1$ near an $s$ where the maximizer is unique and nondegenerate, with
+     $m_c' = \partial_s g_c(t^*(s); s)$ (Danskin; the envelope theorem).
+  2. With accepted points $s_0 < s_1$ and $m_c(s_1) < 0 < \sigma = (m_c(s_1) -
+     m_c(s_0))/(s_1 - s_0)$, the secant's zero $\hat s = s_1 - m_c(s_1)/\sigma$ satisfies
+     $m_c(\hat s) = O(\sup|m_c''| (\hat s - s_0)(\hat s - s_1))$, so a step to
+     $\hat s + \delta/\sigma$ ends with $m_c \approx \delta$ to that order.
+  - *Proof.* (1) is Danskin's theorem for $\max_t g_c(t; v(s))$, with $v$ the $C^1$
+    branch of V2 and $g_c$ smooth in $(t, z)$. (2) is the interpolation error of the
+    linear interpolant through $s_0, s_1$, extended to $\hat s$. ∎
+  - *Use (R64).* $\delta$ is R16's target, $0.2$ of `locate_tol`: the step ends inside
+    the window in which the settle brings a new limit in (V1's monitor), instead of
+    beyond it, where the step is rejected and R16 locates the birth after the fact. If
+    the peak jumps (a second local maximum overtakes the first, where (1)'s
+    hypothesis fails) the prediction is wrong and the step fails as before.
 - **V2′. Correction: a monitor at a fixed time is continuous only away from held-set
   sweeps — proved, relative to P.** V2's monitors are continuous along the branch as
   functionals: the density as a function on the arc, not at one instant. Fix a time

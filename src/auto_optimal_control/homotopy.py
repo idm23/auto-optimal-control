@@ -89,7 +89,8 @@ from auto_optimal_control.policy import (Lexicographic, SecondaryCost, _effort, 
 from auto_optimal_control.pontryagin import OUTLINE_ABOVE_OPS, bang_bang_controls, derive
 from auto_optimal_control.problem import Box, OptimalControlProblem, PathConstraint
 from auto_optimal_control.diagnostics import Diagnostics
-from auto_optimal_control.pipeline import (PREDICT, SETTLE, SETTLE_START, STEP_ACCEPTED_SIZE,
+from auto_optimal_control.pipeline import (PREDICT, SETTLE, SETTLE_START, STEP_ACCEPTED_CAP,
+                                           STEP_ACCEPTED_SIZE,
                                            STEP_FAILED_RESCUE, STEP_FAILED_SIZE,
                                            STEP_FAILED_SPLIT, Accept, Reject, Rescued, Retry,
                                            SettleContext, StepContext, Turn, default_pipelines,
@@ -442,6 +443,9 @@ class Homotopy:
         #: Rule R63 (Lemma AC 5): a path solve whose first Newton step contracts by more
         #: than 12 ends at once, where its backtracking cannot pass.
         self.hopeless_newton = False
+        #: Rule R64 (Lemma V6): an accepted step's successor ends just past the predicted
+        #: birth of a limit (the secant of its margin).
+        self.births_ahead = False
         #: The free-violation checks read the densities' trajectory instead of sampling
         #: the solution again: one integration of each accepted solution for both
         #: (Lemma V1's monitors are functionals of one sampled extremal).
@@ -1514,6 +1518,18 @@ class Homotopy:
                          f"falls from {eta0:.2e} to {eta1:.2e} over the step")
             return float(np.clip(theta, 0.05, 0.9))
         return None
+
+    def _margins(self, shoot, v, arcs=()):
+        """Per limit, its largest ``g`` off its arcs (``-inf`` where it has no such
+        samples, or is in the structure ``arcs``): the margin to a birth (R64)."""
+        out = np.full(self.nc, -np.inf)
+        own = {c for _, c in arcs}
+        for t, g, active in self._free_samples(shoot, v):
+            for c in range(self.nc):
+                if c in active or c in own or not len(g):
+                    continue
+                out[c] = max(out[c], float(g[:, c].max()))
+        return out
 
     def _free_violations(self, shoot, v, scale, floor=None):
         """``[(c, start, end, peak)]``: where each limit is violated while it is not ridden
@@ -3187,6 +3203,7 @@ class Homotopy:
         # unconstrained solution, or, when it hardly moves there (a joint the motion
         # barely uses), how far that solution is from the limit.
         scale = np.maximum(np.maximum(g.max(axis=0) - g.min(axis=0), np.abs(g.max(axis=0))), 1e-12)
+        self._route_scale = scale
         off0 = np.maximum(g.max(axis=0), 0.0) + 1e-3 * scale
         if self.offset_start == "staggered":
             # Rule R1 (docs/notes/structure_certificates.md, Lemmas C and D): offsets that
@@ -3468,6 +3485,10 @@ class Homotopy:
                 ctx.f, ctx.ds, ctx.changed, ctx.theta_done = f, ds, changed, theta_done
                 ctx.steered = f - frac > floor
                 frac, ds = f, self.pipelines[STEP_ACCEPTED_SIZE].first(ctx)
+                ctx.ds, ctx.state = ds, state
+                cap = self.pipelines[STEP_ACCEPTED_CAP].first(ctx)    # hook: R64
+                if cap is not None:
+                    ds = max(cap, ds_min)
                 if on_step is not None and on_step():
                     return True
             if backward:
