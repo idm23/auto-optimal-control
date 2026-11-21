@@ -156,6 +156,20 @@ def riding_kernels(pmp, P, make_function, mapping):
                           for j in range(m)],
                        names, zero=[("o", n * n + n * m)]),
     ]
+    # Lemma SP2: a set's riding needs only its own roots' rows and gradients (mu_k = 0
+    # off the set). Each root gets its own functions; a set uses them where the tape says
+    # its roots' parts are cheaper than the whole (the roots share the arm's recursion).
+    lim_steps = [len(tape.reachable([A[j][k] for j in range(m)] + [b[k]])) for k in range(nr)]
+    grad_steps = [len(tape.reachable(Gx[k])) for k in range(nr)]
+    lim_all = len(tape.reachable([A[j][k] for k in range(nr) for j in range(m)] + b))
+    lx_all = len(tape.reachable(Lx))
+    gx_all = len(tape.reachable([g for row in Gx for g in row]))
+    for k in range(nr):
+        parts.append(_tape_function(tape, f"{P}r_limits_root{k}", args,
+                                    [(f"o[{k * m + j}]", A[j][k]) for j in range(m)]
+                                    + [(f"o[{nr * m + k}]", b[k])], names))
+        parts.append(_tape_function(tape, f"{P}r_grad_root{k}", args,
+                                    [(f"o[{k * n + i}]", Gx[k][i]) for i in range(n)], names))
 
     # -- the sets ---------------------------------------------------------------
     sets = [(c,) for c in range(nc)] + [idx for idx, _ in pmp.boundary_sets]
@@ -168,6 +182,18 @@ def riding_kernels(pmp, P, make_function, mapping):
     signs = ", ".join(str(float(s)) for s in system.sign_of)
     dim = m + mset + (m if bounded else 0)
 
+    def roots_of(s):
+        return sorted({system.root_of[c] for c in s})
+
+    def local(s, steps, whole):
+        return int(sum(steps[k] for k in roots_of(s)) < 0.8 * whole)
+
+    local_lim = ", ".join(str(local(s, lim_steps, lim_all)) for s in sets)
+    local_lx = ", ".join(str(local(s, grad_steps, lx_all)) for s in sets)
+    local_gx = ", ".join(str(local(s, grad_steps, gx_all)) for s in sets)
+    lim_fns = ", ".join(f"{P}r_limits_root{k}" for k in range(nr))
+    grad_fns = ", ".join(f"{P}r_grad_root{k}" for k in range(nr))
+
     text = f"""
 static const signed char {P}r_set[{len(sets)}][{mset}] = {{
     {table}
@@ -175,6 +201,46 @@ static const signed char {P}r_set[{len(sets)}][{mset}] = {{
 static const signed char {P}r_size[{len(sets)}] = {{{sizes}}};
 static const signed char {P}r_root[{nc}] = {{{roots}}};
 static const double {P}r_sign[{nc}] = {{{signs}}};
+
+/* Lemma SP2: per set, whether its rows, its Lx and its gradients come from its own roots'
+   functions (1) or from the whole (0), by the tape's count of steps. */
+static const signed char {P}r_local_lim[{len(sets)}] = {{{local_lim}}};
+static const signed char {P}r_local_lx[{len(sets)}] = {{{local_lx}}};
+static const signed char {P}r_local_gx[{len(sets)}] = {{{local_gx}}};
+typedef void (*{P}r_part_fn)(double, const double*, const double*, const double*, const double*,
+                            double* restrict);
+static const {P}r_part_fn {P}r_lim_fn[{nr}] = {{{lim_fns}}};
+static const {P}r_part_fn {P}r_grad_fn[{nr}] = {{{grad_fns}}};
+
+/* The limits' rows (A, b) of set id: those of its roots, or every root's. */
+static void {P}r_limits_of(int id, double t, const double* z, const double* p, double* limits) {{
+    if (!{P}r_local_lim[id]) {{ {P}r_limits(t, z, p, 0, 0, limits); return; }}
+    for (int i = 0; i < {P}r_size[id]; ++i)
+        {P}r_lim_fn[{P}r_root[{P}r_set[id][i]]](t, z, p, 0, 0, limits);
+}}
+
+/* The gradients of the rates of set id's roots (rows root * n of Gx; others unset). */
+static void {P}r_gx_of(int id, double t, const double* z, const double* p, const double* u,
+                       const double* mr, double* Gx) {{
+    if (!{P}r_local_gx[id]) {{ {P}r_rate_grad(t, z, p, u, mr, Gx); return; }}
+    for (int i = 0; i < {P}r_size[id]; ++i)
+        {P}r_grad_fn[{P}r_root[{P}r_set[id][i]]](t, z, p, u, mr, Gx);
+}}
+
+/* Lx = grad_x sum_k mu_k g_k^(q_k): from set id's roots' gradients (Gx, if computed),
+   or by the whole tape's reverse pass. */
+static void {P}r_lx_of(int id, double t, const double* z, const double* p, const double* u,
+                       const double* mr, double* Lx, double* Gx, int have_gx) {{
+    if (!{P}r_local_lx[id]) {{ {P}r_lagrangian_x(t, z, p, u, mr, Lx); return; }}
+    if (!have_gx)
+        for (int i = 0; i < {P}r_size[id]; ++i)
+            {P}r_grad_fn[{P}r_root[{P}r_set[id][i]]](t, z, p, u, mr, Gx);
+    for (int i = 0; i < {n}; ++i) Lx[i] = 0.0;
+    for (int q = 0; q < {P}r_size[id]; ++q) {{
+        const int k = {P}r_root[{P}r_set[id][q]];
+        for (int i = 0; i < {n}; ++i) Lx[i] += mr[k] * Gx[k * {n} + i];
+    }}
+}}
 
 /* Dense LU with partial pivoting; K has d rows of stride {dim}. */
 static int {P}r_lu(double* K, int d, int* piv) {{
@@ -300,7 +366,7 @@ static int {P}r_solve(int id, double t, const double* z, const double* p, double
     double R[{m * m}], limits[{nr * m + nr}], v[{dim}], lo[{m}], hi[{m}];
     int held[{m}], rc = 0, solved = 0;
     {P}r_quadratic(t, z, p, R, c0);
-    {P}r_limits(t, z, p, 0, 0, limits);
+    {P}r_limits_of(id, t, z, p, limits);
     {P}control_bounds(t, z, p, lo, hi);
     /* The program is strictly convex, so its solution is unique and does not depend on
        where the active-set search starts. Along an integration the held set rarely
@@ -406,7 +472,7 @@ int {P}boundary_held_guards(int c, double t, const double* z, const double* p, d
     double R[{m * m}], limits[{nr * m + nr}], v[{dim}], lo[{m}], hi[{m}], K[{dim * dim}], c0[{m}];
     int piv[{dim}], d;
     {P}r_quadratic(t, z, p, R, c0);
-    {P}r_limits(t, z, p, 0, 0, limits);
+    {P}r_limits_of(c, t, z, p, limits);
     {P}control_bounds(t, z, p, lo, hi);
     int rc = {P}r_system(c, R, limits, c0, lo, hi, {P}r_fixed, K, piv, v, &d);
     if (rc) return rc;
@@ -438,7 +504,7 @@ int {P}boundary_held_flip(int c, double t, const double* z, const double* p, int
     else {{
         double R[{m * m}], limits[{nr * m + nr}], v[{dim}];
         {P}r_quadratic(t, z, p, R, c0);
-        {P}r_limits(t, z, p, 0, 0, limits);
+        {P}r_limits_of(c, t, z, p, limits);
         int rc = {P}r_system(c, R, limits, c0, lo, hi, old, K, piv, v, &d);
         if (rc) return rc;
         start[k] = (hi[k] - v[k] < v[k] - lo[k]) ? 1 : -1;
@@ -466,9 +532,9 @@ int {P}boundary_held_flip(int c, double t, const double* z, const double* p, int
 
 int {P}riding_rhs(int c, double t, const double* z, const double* p, double* dz) {{
     {P}R_LOCALS;
-    double Hx[{n}], Lx[{n}];
+    double Hx[{n}], Lx[{n}], G[{nr * n}];
     {P}r_flow(t, z, p, u, dz, Hx);
-    {P}r_lagrangian_x(t, z, p, u, mr, Lx);
+    {P}r_lx_of(c, t, z, p, u, mr, Lx, G, 0);
     for (int i = 0; i < {n}; ++i) dz[{n} + i] = -Hx[i] - Lx[i];
     return 0;
 }}
@@ -482,7 +548,7 @@ static int {P}r_sensitivity(int c, double t, const double* z, const double* p, c
                             unsigned char* zero) {{
     const int s = {P}r_size[c];
     double v[{dim}];
-    {P}r_rate_grad(t, z, p, u, mr, Gx);
+    (void)t; (void)z; (void)p; (void)u; (void)mr;     /* Gx: the caller's (r_gx_of) */
     for (int j = 0; j < {nz}; ++j) {{
         int any = 0;
         for (int i = 0; i < {m}; ++i) {{
@@ -515,6 +581,7 @@ int {P}riding_jac(int c, double t, const double* z, const double* p, double* A) 
     const int s = {P}r_size[c];
     {P}r_derivatives(t, z, p, u, Fx, Fu, Hxx, Hxu);
     {P}r_lagrangian_hess(t, z, p, u, mr, L2);
+    {P}r_gx_of(c, t, z, p, u, mr, Gx);
     unsigned char zero[{nz}];
     {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, Lxu, Gx, zero);
     for (int j = 0; j < {nz}; ++j) {{
@@ -545,12 +612,13 @@ int {P}riding_jac(int c, double t, const double* z, const double* p, double* A) 
    needs both at the same point). Same results as riding_rhs and riding_jac. */
 int {P}riding_rhs_jac(int c, double t, const double* z, const double* p, double* dz, double* A) {{
     {P}R_LOCALS;
-    double Hx[{n}], Lx[{n}];
+    double Hx[{n}], Lx[{n}], Gx[{nr * n}];
     {P}r_flow(t, z, p, u, dz, Hx);
-    {P}r_lagrangian_x(t, z, p, u, mr, Lx);
+    {P}r_gx_of(c, t, z, p, u, mr, Gx);
+    {P}r_lx_of(c, t, z, p, u, mr, Lx, Gx, 1);
     for (int i = 0; i < {n}; ++i) dz[{n} + i] = -Hx[i] - Lx[i];
     double Fx[{n * n}], Fu[{n * m}], Hxx[{n * n}], Hxu[{n * m}];
-    double L2[{n * n + n * m}], Gx[{nr * n}], D[{dim * nz}];
+    double L2[{n * n + n * m}], D[{dim * nz}];
     const double* Lxx = L2;
     const double* Lxu = L2 + {n * n};
     const int s = {P}r_size[c];
@@ -617,6 +685,7 @@ static int {P}r_gradients(int c, double t, const double* z, const double* p, dou
     if (rc) return rc;
     {P}r_derivatives(t, z, p, u, Fx, Fu, Hxx, Hxu);
     {P}r_lagrangian_hess(t, z, p, u, mr, L2);
+    {P}r_gx_of(c, t, z, p, u, mr, Gx);
     unsigned char zero[{nz}];
     return {P}r_sensitivity(c, t, z, p, u, mr, K, piv, d, D, Fu, Hxu, L2 + {n * n}, Gx, zero);
 }}

@@ -2344,6 +2344,22 @@ rate limits qualify and torque limits do not. Position limits (order 3) would qu
 *Census page (release configuration plus R60, 60 s cap): 85 of 90, the same cases*, in
 752 s against 786 s (4% faster). The slowest case is now 54.0 s. R60 joins the release.
 
+### A riding reads only its own roots: Lemma SP2
+
+The riding kernels computed every root's rows and rate gradients at each evaluation, and
+$L_x$ by a reverse pass over all twelve roots' rates. By Lemma SP2 a set needs only its own
+roots. Each root now has its own rows and gradient function. A set uses them where the
+tape's counts say they are cheaper than the whole (a table fixed when the code is
+generated), and takes $L_x$ from its roots' gradients. The numbers are the same up to
+rounding: the arm's Jacobians pass the central-difference test as before.
+
+*Goal 3 at 80%* ($k = 100$, release rules): 34.8 s to 30.7 s.
+
+*Census page (release configuration, 60 s cap): 84 of 90.* The 84 cases solved on both
+pages take 689 s against 744 s (7.5% faster), and the median falls from 6.4 s to 5.8 s.
+Goal 4 at 70% is lost. Its route turns on wall-clock rules, and it has failed on reruns of
+unchanged code before.
+
 ## Rules these license
 
 | Rule | What the solver does | Needs |
