@@ -18,8 +18,8 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-21, on the branch that integrates the route's path
-problems to 1e-10 (R74, Lemma TB). Rules R1, R2, R15, R16, R20, R25, R26, R28,
+The data shown is from the census of 2026-11-21, on the branch that takes a route's accepted answer
+as it is, without solving it again in the parent process. Rules R1, R2, R15, R16, R20, R25, R26, R28,
 R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72 and R74 are turned on
 (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
@@ -31,8 +31,8 @@ once, the other three after 6 s or as soon as one of the four ends (R72). The ce
 cases in its main process, so the routes are the only other processes. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-87 of the 90 cases solve, all under 60 s, and 70 of them under 5 s. The mean solve time
-of the solved cases is 4.287 s, and the slowest is 37.536 s. Times are wall-clock seconds
+87 of the 90 cases solve, all under 60 s, and 71 of them under 5 s. The mean solve time
+of the solved cases is 4.182 s, and the slowest is 36.859 s. Times are wall-clock seconds
 per case, to the millisecond.
 
 Two changes made this. First, four routes start at once and the other three after 6 s
@@ -40,8 +40,10 @@ Two changes made this. First, four routes start at once and the other three afte
 the first four. Second, the route integrates its path problems to 1e-10 instead of the
 exact problem's 1e-12 (R74, Lemma TB). Its solves stop at 1e-6 and its monitors judge at
 1e-6, so the integration stays two orders below both, and the exact solve keeps 1e-12.
-With all seven routes at once and 1e-12 (page 113), 57 cases were under 5 s and the
-mean was 5.078 s. The same 87 cases solve, in 373.0 s against 441.8 s.
+Third, the parent process takes the answer a route accepted as it is, with its exact
+shooting rebuilt around it, and polls the routes every 10 ms: 0.1 to 0.3 s per case, with
+the same final times to 1e-15. With all seven routes at once and 1e-12 (page 113), 57 cases were under 5 s and the
+mean was 5.078 s. The same 87 cases solve, in 363.8 s against 441.8 s.
 
 When all seven routes are busy they run at about half speed (Observation O4). The
 winners are spread over every route, so none can be dropped.

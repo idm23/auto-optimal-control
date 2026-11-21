@@ -2751,3 +2751,18 @@ $10^{-12}$.
   paths changed.
 
 R74 joins the release.
+
+### A route's accepted answer, taken as it is
+
+*What it was.* With parallel routes, the first route to return an exact answer had
+already accepted it, with `_exact_jump`'s checks in its own process. The parent then
+solved it again from the route's vector and checked it again. That took 0.08–0.29 s per
+case, and the parent polled the routes every 50 ms.
+
+*Change* (`Homotopy.trust_routes`, on by default; engineering, no new rule). The route
+sends its objective, its accepted solution and its junction setting. The parent rebuilds
+the exact shooting around the solution without solving again, and polls every 10 ms.
+
+*Census page 117 (release with R72 and R74, plus this):* 71 cases are under 5 s, against
+70, and the mean is 4.182 s against 4.287 s. The same 87 cases solve, in 363.8 s against
+373.0 s. Final times agree with page 116 to $9 \times 10^{-16}$ relative.
