@@ -105,3 +105,36 @@ def test_a_solve_is_the_same_with_closed_free_arcs(kernel_cache):
         out.append((float(r.solution.tf), r.arcs))
     assert out[0][1] == out[1][1]
     assert abs(out[0][0] - out[1][0]) < 1e-10
+
+
+@pytest.mark.slow
+def test_rule_R60_arcs_on_chain_states_are_the_pinned_free_flow(kernel_cache):
+    """Lemma T'': riding rate or position limits (orders 2 and 3) holds those chains'
+    jerks at 0 and leaves the costates' equations free, so the integrated riding arc is
+    the closed-form free flow with those chains' bounds at [0, 0]."""
+    stated = examples.two_link_arm_min_time(rate_limits=True, position_limits=True)
+    problem = SecondaryCost(0.01).apply(stated, analyze(stated))
+    k = build_kernels(derive(problem, outline_above=0, simultaneous=2),
+                      name="clipped_numeric_joint_limits", cache_dir=kernel_cache)
+    chains, why = IntegratorChains.certify(k.system)
+    assert chains is not None, why
+    names = list(k.CONSTRAINT_NAMES)
+    pinned = {n: j for n, j in zip(names, chains.pinned_of)}
+    assert all(j is None for n, j in pinned.items() if n.startswith("tau"))
+    assert all(j is not None for n, j in pinned.items() if not n.startswith("tau"))
+    p = np.ones(len(k.system.params))
+    rng = np.random.default_rng(3)
+    checked = 0
+    for c in range(k.N_CONSTRAINTS + len(k.BOUNDARY_SETS)):
+        ids = list(k.arc_constraints(c))
+        if any(pinned[names[i]] is None for i in ids):
+            continue
+        pins = tuple(sorted({pinned[names[i]] for i in ids}))
+        z0 = rng.uniform(-0.5, 0.5, k.N_Z)
+        tau = rng.choice([-1, 1]) * rng.uniform(0.05, 0.5)
+        r = k.propagate_boundary(c, 0.0, z0, tau, p, stm=True, rtol=1e-13, atol=1e-13)
+        f = chains.propagate(0.0, z0, tau, p, stm=True, pinned=pins)
+        assert np.abs(f["z"] - r["z"]).max() < 1e-11
+        assert np.abs(f["stm"] - r["stm"]).max() < 1e-8 * max(1.0, np.abs(r["stm"]).max())
+        checked += 1
+    assert checked >= 4

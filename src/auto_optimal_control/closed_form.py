@@ -93,6 +93,7 @@ class IntegratorChains:
         self._lo, self._hi, self._r, self._c, self._cost = lo, hi, r, c, cost
         self._cost_terms = cost_terms     # p -> (L(0), linear, quadratic coefficients per control)
         self.n = n
+        self.pinned_of = ()               # Lemma T'': set by ``certify``
         self._key = None
         self._ch_c = np.ascontiguousarray(self.chains, dtype=np.int_)
         self.module = None                # the compiled flow, set by ``use_compiled``
@@ -188,7 +189,30 @@ class IntegratorChains:
         at0 = {v: 0 for v in controls}
         terms = f([Lc.subs(at0)] + [sp.diff(Lc, u).subs(at0) for u in controls]
                   + [sp.diff(Lc, u, 2) / 2 for u in controls])
-        return cls(chains, L, f(los), f(his), f(rs), f(cs), cost, len(states), terms), None
+        out = cls(chains, L, f(los), f(his), f(rs), f(cs), cost, len(states), terms)
+        out.pinned_of = cls._pins(prob, states, chains, params, system.time)
+        return out, None
+
+    @staticmethod
+    def _pins(prob, states, chains, params, time):
+        """Lemma T'': per path limit, the chain whose control its riding pins at 0, or
+        None. A limit ``a s - b`` on one chain state ``s`` (``a`` a nonzero constant, ``b``
+        free of the states and time) is ridden through ``g^(q) = a u`` with no state in
+        it, so riding it holds that chain's control at 0 and adds nothing to the
+        costates' equations."""
+        out = []
+        where = {s: j for j, ch in enumerate(chains) for s in (states[i] for i in ch)}
+        for pc in prob.path_constraints:
+            e = sp.sympify(pc.expr)
+            used = [s for s in states if e.has(s)]
+            pin = None
+            if len(used) == 1 and not e.has(time):
+                s = used[0]
+                a = sp.diff(e, s)
+                if a.free_symbols <= set(params) and sp.diff(e, s, 2) == 0 and a != 0:
+                    pin = where[s]
+            out.append(pin)
+        return tuple(out)
 
     def use_compiled(self, cache_dir=None):
         """Use the compiled flow where it is available (chains of length 2 or 3)."""
@@ -248,14 +272,19 @@ class IntegratorChains:
             out[:, col * (L - 1):(col + 1) * (L - 1)] = roots
         return out
 
-    def propagate(self, t0, z0, t1, p, stm=False, cost=False):
+    def propagate(self, t0, z0, t1, p, stm=False, cost=False, pinned=()):
         """``z(t1)`` from ``z(t0) = z0`` along the free arc, with ``Phi = dz(t1)/dz0``
-        and ``int L dt`` on request: the keys of ``propagate`` that shooting reads."""
+        and ``int L dt`` on request: the keys of ``propagate`` that shooting reads.
+        ``pinned``: chains whose control is held at 0, an arc riding limits on their
+        states (Lemma T'')."""
         if self.module is not None:
-            return self._propagate_compiled(t0, z0, t1, p, stm, cost)
+            return self._propagate_compiled(t0, z0, t1, p, stm, cost, pinned)
         z0 = np.asarray(z0, dtype=float)
         n, L, ch = self.n, self.L, self.chains
         lo, hi, r, c = self._law(p)
+        if pinned:
+            lo, hi = lo.copy(), hi.copy()
+            lo[list(pinned)] = hi[list(pinned)] = 0.0
         tau = float(t1) - float(t0)
         S = z0[ch]                                   # (nc, L) states, bottom first
         Lam = z0[n + ch]                             # (nc, L) costates
@@ -323,11 +352,14 @@ class IntegratorChains:
                 vals = np.asarray(self._cost(us, list(p)), float) - L0
                 total += float(np.sum(w[i] * vals))
             out["cost"] = total
-        out["dz_dt1"] = self.rhs(z, p)
+        out["dz_dt1"] = self.rhs(z, p, pinned)
         return out
 
-    def _propagate_compiled(self, t0, z0, t1, p, stm, cost):
+    def _propagate_compiled(self, t0, z0, t1, p, stm, cost, pinned=()):
         lo, hi, r, c, cl, cq, L0 = self._constants(p)
+        if pinned:
+            lo, hi = lo.copy(), hi.copy()
+            lo[list(pinned)] = hi[list(pinned)] = 0.0
         z0 = np.ascontiguousarray(z0, dtype=float)
         tau = float(t1) - float(t0)
         z = np.empty_like(z0)
@@ -348,11 +380,14 @@ class IntegratorChains:
         f[n + ch[:, 1:]] = -Lam[:, :-1]
         return f
 
-    def rhs(self, z, p):
-        """``z' = F(z)`` on a free arc."""
+    def rhs(self, z, p, pinned=()):
+        """``z' = F(z)`` on a free arc (with ``pinned`` chains' controls at 0)."""
         z = np.asarray(z, dtype=float)
         n, L, ch = self.n, self.L, self.chains
         lo, hi, r, c = self._law(p)
+        if pinned:
+            lo, hi = lo.copy(), hi.copy()
+            lo[list(pinned)] = hi[list(pinned)] = 0.0
         f = np.zeros_like(z)
         S, Lam = z[ch], z[n + ch]
         f[ch[:, :-1]] = S[:, 1:]

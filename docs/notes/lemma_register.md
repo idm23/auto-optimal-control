@@ -993,6 +993,46 @@ route stalls.
 - **Used by.** R23. It is a rule of the machinery: it computes the same flow
   without integration error, so no answer is accepted on its account.
 
+### T″. An arc riding limits on single chain states is a free arc with those controls at 0 — proved
+
+- **Statement.** Assume T's certificate: integrator chains $s_0' = s_1, \dots,
+  s_{L-1}' = u$, with $H$ quadratic in each control and decoupled across them. Let a
+  boundary arc ride limits $g_k = a_k s_{j_k, \ell_k} - b_k$, each on one state of
+  chain $j_k$, with $a_k \ne 0$ and $a_k, b_k$ free of the states and of time. Then on
+  the arc:
+  1. each ridden chain's control is $u_{j_k} \equiv 0$;
+  2. every other control follows the free law $u = \mathrm{clip}(-(\lambda_{\rm top} +
+     c)/r, \mathrm{lo}, \mathrm{hi})$;
+  3. the costates satisfy the free arc's equations.
+
+  So the arc's flow, its STM and its cost are T's closed form with the bounds of the
+  ridden chains set to $[0, 0]$. Position, rate and acceleration limits of the jerk
+  chain all qualify: orders 3, 2 and 1.
+- **Proof.**
+  - Limit $k$ has order $q_k = L - \ell_k$. Its first $q_k - 1$ derivatives are free
+    of $u$, and the last is the top state's: $g_k^{(q_k - 1)} = a_k s_{j_k, L-1}$.
+    Its rate is $g_k^{(q_k)} = a_k u_{j_k}$, so in Lemma B's system the limit's row is
+    $A_k = a_k e_{j_k}$, with $b_k = 0$. That forces $u_{j_k} = 0$, which lies within
+    a box that contains 0.
+  - $R$ is diagonal and the rows touch only the ridden controls, so the program
+    separates by control. Each free control minimizes its own quadratic over its
+    box: the clipped free law.
+  - The costates' equations are $\lambda' = -H_x - \nabla_x \sum_k \mu_k
+    g_k^{(q_k)}$, and $\nabla_x (a_k u_{j_k}) = 0$. So they are the free arc's
+    equations.
+  - The closed form with bounds $[0, 0]$ on chain $j$ is the flow with
+    $u_j \equiv 0$, and its STM has $\partial u_j / \partial z = 0$, as the riding
+    law does. ∎
+- **Seen.** On the arm's rate-limited problem, the closed form and the integrated
+  riding agree on six single-limit sets from random states:
+  - end states to $2 \times 10^{-14}$;
+  - STMs to $1.4 \times 10^{-7}$ on entries up to 225, the integrated STM's own
+    tolerance, since the closed form's STM is exact.
+
+  Arcs riding only rate limits take 13% of the riding time on goal 3 at 80%.
+- **Depends on.** T, B.
+- **Used by.** R60.
+
 ### W. The secondary weight is a route parameter, and Newton's radius grows with it — proved (1), sketch (2)
 
 - **Statement.** Take a problem solved under the policy `SecondaryCost` with a
