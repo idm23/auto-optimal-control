@@ -1498,6 +1498,37 @@ jump, density, gap, order, bound, end, held sign).
 - **Consequence.** Goal 3 at 80% (56 s alone on its one solving route) needs a route
   about 1.8 times faster, not a different schedule.
 
+### TB. The route's tolerance budget — proved (the budget), with a census measurement
+
+- **Statement.** On the active-set route, the path problem at each point is solved to a
+  residual of $10^{-6}$ (`path_tol`), and the settle's monitors judge at $10^{-6}$ of a
+  scale: a density's rise relative to $\max(1, |\mu|)$, a violation relative to the
+  limit's scale, the order of junctions to $10^{-8}$ of $T$ (R38). Integrate the route's
+  arcs to $\mathrm{rtol} = \mathrm{atol} = \varepsilon$ with DOP853. Then each residual
+  and each sampled monitor is off by at most $C\,\varepsilon$, where $C$ is the
+  sensitivity of the row (or sample) to the integration error. That is the STM's norm
+  along the arcs, of order 10 to $10^2$ on the arm's rows.
+  - So $\varepsilon = 10^{-10}$ keeps the integration's part at most $10^{-8}$, two
+    orders below every threshold on the route.
+  - The exact problem (R4's solve, the acceptance and its checks) keeps its own
+    tolerance of $10^{-12}$, so the answers are unchanged.
+- **Proof.** DOP853's error per step is controlled to $\varepsilon$ in the mixed norm.
+  The global error of a stable flow over a horizon of order 1 is a bounded multiple of
+  it: $\|\delta z(t)\| \le \|\Phi\|\,\varepsilon$ to first order, and a row is a
+  smooth function of $z$ at the arc's ends. The thresholds are fixed numbers. $\square$
+- **What it does not say.** The path itself (its steps, births and splits) depends on
+  the iterates, which move by up to the threshold. A looser tolerance can change which
+  branch a route takes at an event, with no change in what each solve certifies.
+- **Measured.** Census page 116 (release, R72, the route at $10^{-10}$):
+  - 70 cases under 5 s against 68, and a mean of 4.287 s against 4.649 s.
+  - The same 87 cases solve, in 373.0 s against 404.5 s.
+  - Single routes run 8–19% faster with identical counts of Jacobians and residuals
+    (goal 9 at 70%, rest 1, vgoal 9 at 70%).
+  - Two routes' paths changed: vrest 12 takes 28.1 s against 20.3 s, and vrest 1
+    32.5 s against 27.6 s.
+  - At $10^{-9}$ some routes took a third more Jacobians, so $10^{-10}$ is kept.
+- **Used by.** R74.
+
 ### Observation O7: each route alone on every case, and staged starts (2026-11-21)
 
 - **Measured.** Each of R15's seven routes ran alone over all 90 cases (release rules
