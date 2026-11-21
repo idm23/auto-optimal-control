@@ -326,6 +326,9 @@ class Homotopy:
         #: Rule R72 (Observation O7): with parallel routes, the first ``route_width`` start
         #: at once and the rest join after ``route_delay`` seconds.
         self.staged_routes = False
+        #: With parallel routes, the answer a route accepted is taken as it is (its exact
+        #: shooting rebuilt here), not solved again in the parent.
+        self.trust_routes = True
         #: Rule R74 (Lemma TB): the active-set route integrates to this tolerance (None:
         #: path_options as given); 1e-10 when the rule is on.
         self.path_rtol = None
@@ -2054,8 +2057,10 @@ class Homotopy:
                                        max_solves=self.max_path_solves)
                 out = None
                 if hit is not None:
-                    _, xs, xsol = hit
-                    out = (self._entries(xs), np.asarray(xsol.v, dtype=float))
+                    J_, xs, xsol = hit
+                    out = (self._entries(xs), np.asarray(xsol.v, dtype=float),
+                           (float(J_), replace(xsol, result=None),
+                            bool(getattr(xs, "tangent_junctions", False))))
                 conn.send((out, self.diagnostics.as_dict()))
             except Exception:
                 conn.send((None, {}))
@@ -2091,7 +2096,7 @@ class Homotopy:
                 for n_, member in waiting:
                     launch(n_, member)
                 waiting = []
-            time.sleep(0.05)
+            time.sleep(0.01)
             for item in list(running):
                 n_, p, conn = item
                 if not conn.poll():
@@ -2112,8 +2117,14 @@ class Homotopy:
                         table = getattr(self.diagnostics, part)
                         table[key_] = table.get(key_, 0) + cnt
                 if out is not None:
-                    entries, v = out
-                    hit = self._exact_jump(list(entries), v, tol)
+                    entries, v, accepted = out
+                    if getattr(self, "trust_routes", False):
+                        # The route accepted this answer with the same checks (_exact_jump,
+                        # _accept) in its own process: the exact shooting is rebuilt here
+                        # around it, without solving it again.
+                        hit = self._rebuilt(list(entries), *accepted)
+                    else:
+                        hit = self._exact_jump(list(entries), v, tol)
                     if hit is not None:
                         if n_:
                             self.diagnostics.fired("R15")
@@ -3152,6 +3163,18 @@ class Homotopy:
         level = 0.5 * (lo + hi)
         _, _, ta, tb = ends(level)
         return ta, tb, float(level)
+
+    def _rebuilt(self, arcs, J, sol, tangent):
+        """``(J, shoot, sol)`` for an exact answer a route already accepted: the exact
+        problem's shooting for ``arcs``, with the route's solution."""
+        kx, px = self.exact_kernels, self.exact_params()
+        if arcs:
+            shoot = self._multi_arc(kx, px, arcs, max_nfev=self.attempt_nfev, open_end=True,
+                                     **self.options)
+        else:
+            shoot = SingleShooting(kx, px, **self.options)
+        shoot.tangent_junctions = tangent
+        return J, shoot, sol
 
     def _exact_jump(self, arcs, v, tol, reorders=0):
         """The exact problem's solve of structure ``arcs`` from ``v``: ``(J, shoot, sol)`` or None."""

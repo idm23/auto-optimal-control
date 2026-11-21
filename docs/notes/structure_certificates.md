@@ -2751,3 +2751,36 @@ $10^{-12}$.
   paths changed.
 
 R74 joins the release.
+
+### A route's accepted answer, taken as it is
+
+*What it was.* With parallel routes, the first route to return an exact answer had
+already accepted it, with `_exact_jump`'s checks in its own process. The parent then
+solved it again from the route's vector and checked it again. That took 0.08–0.29 s per
+case, and the parent polled the routes every 50 ms.
+
+*Change* (`Homotopy.trust_routes`, on by default; engineering, no new rule). The route
+sends its objective, its accepted solution and its junction setting. The parent rebuilds
+the exact shooting around the solution without solving again, and polls every 10 ms.
+
+*Census page 117 (release with R72 and R74, plus this):* 71 cases are under 5 s, against
+70, and the mean is 4.182 s against 4.287 s. The same 87 cases solve, in 363.8 s against
+373.0 s. Final times agree with page 116 to $9 \times 10^{-16}$ relative.
+
+### Tried alongside, not kept
+
+Measured on node-1 with each case's winning route alone (counts of Jacobians):
+- **R48's quadratic predictor on every leg, not only the weight's.** Vrest 13 took 190
+  against 201, rest 1 221 against 268, and vrest 3 237 against 240. Goal 3 at 70% took 195
+  against 184, rest 5 197 against 188, and goal 2 at 70% 337 against 235. Across a held-set
+  kink the quadratic extrapolates worse than the secant.
+- **Broyden updates of the chord's Jacobian.** Vrest 6 took 258 against 244 (8.4 s against
+  7.1 s), and goal 9 at 70% 95 against 113.
+- **A looser path tolerance ($10^{-5}$).** Goal 9 at 70% took 93 against 113, and vgoal 9
+  at 70% 230 against 167.
+- **A looser STM tolerance.** No effect: the STM is not in step control.
+- **Caching segments by their exact inputs.** Only 1.5% of segments repeat.
+- **Rule R73, a ban that ends once the route moves past the checkpoint.** It did not
+  fire on vrest 4.
+- **Offset seeds 2 to 7 at starting weights 1, 10 and 100** on vgoal 0 at 70%, vgoal 3 at
+  70% and vrest 4. None of the 54 solved.
