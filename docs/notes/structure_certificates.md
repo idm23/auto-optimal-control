@@ -2529,3 +2529,24 @@ The 85 cases solved on both pages take 423 s against 434 s (2.6% faster), median
 Goal 2 at 70% (15.7 → 5.7 s) and vrest 1 (30.0 → 23.1 s) gain most; rest 4 (14.1 → 22.6 s)
 and vgoal 3 at 80% (40.7 → 45.1 s) lose time to routes that go another way. R63 joins the
 release.
+
+### A step that ends at the next birth: Rule R64
+
+*What overshoots cost.* On vgoal 3 at 80% ($k = 100$, release with R61 and R63) the
+route took 338 steps, and 57 were rejected with "violation too large": the step went past
+a new limit's birth by more than the settle's window (`locate_tol`), so R16 located the
+birth after the fact and the step was retried shorter. The route then stalled.
+
+*Rule R64* (`Homotopy.births_ahead`, the hook "step accepted: cap"). After two accepted
+steps of one structure, each limit outside the structure has a margin (its largest $g$,
+in its scale). Where a margin is negative and rising, the secant's zero predicts the birth
+(Lemma V6), and the next step is capped to end there plus R16's target ($0.2$ of
+`locate_tol`, over the margin's slope), so the settle brings the limit in. A wrong
+prediction fails as the uncapped step would. On vgoal 3 at 80%'s route: 57 → 19 overshoots,
+and the route solves (23 s). Goal 9 at 70%: 2.33 → 1.87 s. Half of `locate_tol` as the
+target, tried first, lost vgoal 1 at 80% on its route.
+
+*Census page 110 (release plus R61, R63, R64): 86 of 90, the same cases.* They take
+418 s against 439 s (4.7% faster), median 2.8 s. Vrest 10 (16.2 → 10.6 s), vgoal 2 at 70%
+and vgoal 4 at 80% gain most; goal 3 at 70% (3.8 → 7.7 s) loses most. R64 joins the
+release.

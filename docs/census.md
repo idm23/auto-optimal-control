@@ -29,9 +29,9 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-86 of the 90 cases solve, all under 60 s: the median is 2.9 s and the slowest 45.1 s. A
-path solve whose first Newton step no damping can save ends at once (R63, Lemma AC (5)).
-The 85 cases solved before and after take 423 s against 434 s; vrest 10 is solved.
+86 of the 90 cases solve, all under 60 s: the median is 2.8 s and the slowest 46.1 s. A
+step now ends at the next predicted birth of a limit (R64, Lemma V6) instead of
+overshooting it. The 86 cases take 418 s against 439 s (4.7% faster).
 
 When all seven routes are busy they run at about half speed (Observation O4). On most
 cases all seven run until one wins, and the winners are spread over every route.
