@@ -18,27 +18,33 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-21, on the branch that refuses a split whose gap
-closes (R28, Lemma E4). Rules R1, R2, R15, R16, R20, R25, R26, R28,
-R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65 and R66 are turned on (the
-release's configuration), with
+The data shown is from the census of 2026-11-21, on the branch that starts the portfolio's routes in
+stages (R72, Observation O7). Rules R1, R2, R15, R16, R20, R25, R26, R28,
+R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66 and R72 are turned on
+(the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
 secondary weight (R24); the first draw at a hundred times it, once lowering the weight
 after the limits and once with them (R45); and at three hundred times it with them. The
-routes run in parallel, one case at a time, on 8 physical cores (the census runs its
-cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
+routes run in parallel, one case at a time, on 8 physical cores: the first four at
+once, the other three after 6 s or as soon as one of the four ends (R72). The census runs its
+cases in its main process, so the routes are the only other processes. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-87 of the 90 cases solve, all under 60 s: the median is 2.7 s and the slowest 39.4 s.
-A split whose gap solves to zero width is refused (R28): by Lemma E4 it is the merged
-arc again, with the rise still in it, in a chart that is singular in the gap's position
-and width. Without R28, the route splits, R11 merges, and R5 splits again. The same 87
-cases solve as before, in 442 s against 456 s. Vgoal 3 at 80% takes 38.1 s against
-44.4 s: alone, its winning route splits `tau5_max` once instead of 30 times.
+87 of the 90 cases solve, all under 60 s, and 68 of them under 5 s. The mean solve time
+of the solved cases is 4.649 s, and the slowest is 40.564 s. Times are wall-clock seconds
+per case, to the millisecond.
 
-When all seven routes are busy they run at about half speed (Observation O4). On most
-cases all seven run until one wins, and the winners are spread over every route.
+Starting four routes first (R72) is what changed. Fewer busy cores run faster
+(Observation O4), and most cases are won by one of the first four routes. Observation O7
+ran each route alone on every case, and a schedule simulated from those times predicted
+68 cases under 5 s. On page 113, with all seven routes at once, 57 were under 5 s and the
+mean was 5.078 s. The same 87 cases solve, in 404.5 s against 441.8 s. Cases that only a
+later route solves wait for it: rest 4 takes 24.8 s against 18.8 s, and vrest 1
+27.6 s against 21.9 s.
+
+When all seven routes are busy they run at about half speed (Observation O4). The
+winners are spread over every route, so none can be dropped.
 
 - **`goal` and `rest`:** all 45.
 - **`vgoal`:** 28 of 30: all ten at 90%, all ten at 80% and eight at 70% (all but goals

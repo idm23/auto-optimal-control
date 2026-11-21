@@ -138,7 +138,7 @@ def run(name):
         h.snapshot_tag = name
         t0 = time.time()
         r = h.solve(p, BOX, TS)
-        row = {"name": name, "exact": bool(r.exact), "sec": round(time.time() - t0, 1),
+        row = {"name": name, "exact": bool(r.exact), "sec": round(time.time() - t0, 3),
                "tf": float(r.solution.tf) if r.exact else None, "msg": r.message[:80],
                "diagnostics": r.diagnostics}
         cap = getattr(ARGS, "cap", None)
@@ -165,7 +165,8 @@ def summary(rows):
     ok = [r for r in rows if r["exact"]]
     secs = sorted(r["sec"] for r in ok)
     print(f"solved {len(ok)} of {len(rows)}; under 60 s: {sum(s < 60 for s in secs)}; "
-          f"median {secs[len(secs) // 2] if secs else None} s")
+          f"under 5 s: {sum(s < 5 for s in secs)}; "
+          f"mean {sum(secs) / len(secs) if secs else float('nan'):.3f} s")
     for tag in ("goal", "rest", "vgoal", "vrest"):
         part = [r for r in rows if r["name"].startswith(tag) and r["name"][len(tag):][:1].isdigit()]
         if part:
