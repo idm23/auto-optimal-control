@@ -744,7 +744,7 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Used by.** R27, and R21 through it (the held-set window of goal 8 at 70%);
   R34 (the gap contains the window; wider seeds, goal 3 at 70%).
 
-### E4. A closed gap is the merged arc — proved (order 1), sketch (order 2)
+### E4. A closed gap is the merged arc — proved (order 1), sketch (order 2 and the width direction)
 
 - **Statement.** Let two arcs of one order-1 limit $c$ meet at $t_m$: the first leaves
   at $t_m$ with $\mu(t_m^-) = 0$ (its exit row), the second enters at $t_m$ with jump
@@ -786,8 +786,36 @@ margin is zero exactly when the corner is the only control that holds $g$.
   - R11 compared only consecutive boundary arcs of any limit. A `w3_min` arc starting
     between the two (at 0.537) hid them from each other, so they were never merged.
   - The route then failed 1,976 steps with `'tau4_min' is entered twice without an exit`.
-- **Depends on.** The indirect form of S1; H2 for order 2.
-- **Used by.** R11.
+- **The width direction (sketch, with a numerical check, 2026-11-21).** At a closed
+  gap the kernel has a second direction to first order: the gap's width $w$.
+  - By J the first piece leaves tangentially. The free control starts equal to the
+    riding control and differs from it by $O(t - t_m)$.
+  - Over a free stretch of width $w$, the motion therefore differs from the ridden one
+    by $O(w^2)$. So do $g$ at the second entry and the costate after it.
+  - With the split point and jumps moved as above, every row is $O(w^2)$ in $w$. So the
+    width's column of the Jacobian vanishes at $w = 0$. This is Lemma E's square root
+    seen from the other side: the width moves like the square root of the residual.
+- **Consequence for splits.** Suppose a split (R5, R27 or R29) solves to a closed gap.
+  - It has found the merged arc again, with the rise the split was meant to remove.
+  - It sits in a chart with a two-dimensional near-kernel, so Newton does not fix where
+    the gap is.
+  - R11 merges it on the next step, the rise is seen again, and R5 splits it again.
+
+  R28's zero-width clause refuses such a solution. The settle then tries the next
+  option or keeps the unsplit solution.
+- **Seen (closed gaps).** Vgoal 3 at 80%, route 4 (`weight_start` 10, `offset_seed`
+  1), on 2026-11-21.
+  - `tau5_max`'s multiplier rises by $6.9 \times 10^{-3}$ (of 0.73) at 0.7833. There
+    joint 2's jerk joins the held set and joint 4's leaves it: U's case.
+  - R5 split the arc 30 times. Each split solved to a gap of width
+    $|w| \le 4 \times 10^{-10}$, at points spread from 0.7721 to 0.7855.
+  - At six of those solutions, the Jacobian's two smallest singular values were
+    $10^{-25}$ to $10^{-24}$ and $7 \times 10^{-13}$ to $9 \times 10^{-13}$ of the
+    largest. An ordinary solve on the same route had $2 \times 10^{-8}$.
+  - The cycle took 9.0 s and 183 of the route's 734 Jacobians. With R28 the route
+    splits once, to a gap that stays open, and solves in 19.2 s against 24.6 s.
+- **Depends on.** The indirect form of S1; H2 for order 2; J and E for the width.
+- **Used by.** R11, R28.
 
 ### IT. A touch on its own limit's arc is no event — proved (order 1), sketch with a numerical check (order 2)
 
