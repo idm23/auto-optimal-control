@@ -1448,6 +1448,114 @@ def boundary_multiplier(c, double t, z, params=None):
     return np.array([mu[i] for i in range(len(BOUNDARY_SETS[k - NC]))])
 
 
+# -- batched point evaluations: one call for many samples (a trajectory's checks) --
+
+def _points(T, Z):
+    Tv = np.ascontiguousarray(T, dtype=np.float64).reshape(-1)
+    Zv = np.ascontiguousarray(Z, dtype=np.float64).reshape(len(Tv), -1)
+    if Zv.shape[1] != NZ:
+        raise ValueError(f"Z has {Zv.shape[1]} columns, not {NZ}")
+    return Tv, Zv
+
+
+def constraint_batch(T, Z, params=None):
+    """``constraint`` at every sample: ``g`` of shape (len(T), NC)."""
+    Tv, Zv = _points(T, Z)
+    cdef double[::1] tv = Tv
+    cdef double[:, ::1] zv = Zv
+    cdef double[::1] pv = _params(params)
+    cdef Py_ssize_t m = tv.shape[0], i
+    out = np.zeros((m, NC1))
+    cdef double[:, ::1] ov = out
+    cdef int rc = 0
+    with nogil:
+        for i in range(m):
+            rc = P_constraint(tv[i], &zv[i, 0], &pv[0], &ov[i, 0])
+            if rc:
+                break
+    _check(rc, "constraint_batch")
+    return out[:, :NC]
+
+
+def control_batch(T, Z, params=None):
+    """``control`` at every sample: shape (len(T), NU)."""
+    Tv, Zv = _points(T, Z)
+    cdef double[::1] tv = Tv
+    cdef double[:, ::1] zv = Zv
+    cdef double[::1] pv = _params(params)
+    cdef Py_ssize_t m = tv.shape[0], i
+    out = np.zeros((m, max(NU, 1)))
+    cdef double[:, ::1] ov = out
+    cdef int rc = 0
+    with nogil:
+        for i in range(m):
+            rc = P_control(tv[i], &zv[i, 0], &pv[0], &ov[i, 0])
+            if rc:
+                break
+    _check(rc, "control_batch")
+    return out[:, :NU]
+
+
+def hamiltonian_batch(T, Z, params=None):
+    """``hamiltonian`` at every sample: shape (len(T),)."""
+    Tv, Zv = _points(T, Z)
+    cdef double[::1] tv = Tv
+    cdef double[:, ::1] zv = Zv
+    cdef double[::1] pv = _params(params)
+    cdef Py_ssize_t m = tv.shape[0], i
+    out = np.zeros(m)
+    cdef double[::1] ov = out
+    cdef int rc = 0
+    with nogil:
+        for i in range(m):
+            rc = P_hamiltonian(tv[i], &zv[i, 0], &pv[0], &ov[i])
+            if rc:
+                break
+    _check(rc, "hamiltonian_batch")
+    return out
+
+
+def boundary_control_batch(c, T, Z, params=None):
+    """``boundary_control`` at every sample of an arc of ``c``: (len(T), NU)."""
+    cdef int k = _exact(c)
+    Tv, Zv = _points(T, Z)
+    cdef double[::1] tv = Tv
+    cdef double[:, ::1] zv = Zv
+    cdef double[::1] pv = _params(params)
+    cdef Py_ssize_t m = tv.shape[0], i
+    out = np.zeros((m, max(NU, 1)))
+    cdef double[:, ::1] ov = out
+    cdef int rc = 0
+    with nogil:
+        for i in range(m):
+            rc = P_b_control(k, tv[i], &zv[i, 0], &pv[0], &ov[i, 0])
+            if rc:
+                break
+    _check(rc, "boundary_control_batch")
+    return out[:, :NU]
+
+
+def boundary_multiplier_batch(c, T, Z, params=None):
+    """``boundary_multiplier`` at every sample: (len(T), m), ``m`` the limits ridden
+    (``arc_constraints`` order)."""
+    cdef int k = _exact(c)
+    Tv, Zv = _points(T, Z)
+    cdef double[::1] tv = Tv
+    cdef double[:, ::1] zv = Zv
+    cdef double[::1] pv = _params(params)
+    cdef Py_ssize_t m = tv.shape[0], i
+    out = np.zeros((m, max(MSET, 1)))
+    cdef double[:, ::1] ov = out
+    cdef int rc = 0
+    with nogil:
+        for i in range(m):
+            rc = P_b_multiplier(k, tv[i], &zv[i, 0], &pv[0], &ov[i, 0])
+            if rc:
+                break
+    _check(rc, "boundary_multiplier_batch")
+    return out[:, :(1 if k < NC else len(BOUNDARY_SETS[k - NC]))]
+
+
 def boundary_multiplier_gradient(c, double t, z, params=None):
     """``(dmu/dt, dmu/dz)`` on a boundary arc: shapes ``(m,)`` and ``(m, NZ)``, with ``m``
     the number of limits it rides (``arc_constraints`` order)."""

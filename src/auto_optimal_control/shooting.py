@@ -254,6 +254,11 @@ class SingleShooting:
         if not tf > self.t0:
             raise ShootingError(f"final time {tf} is not after the initial time {self.t0}",
                                 "bad_final_time")
+        chains = self._closed_chains()
+        if chains is not None:
+            # Rule R23 (Lemma T): the whole trajectory is one free arc of integrator
+            # chains, so its flow and STM are the closed form, not an integration.
+            return chains.propagate(self.t0, z0, tf, self.params, stm=stm)
         # A bound on the work: coincident saturation corners can otherwise never finish.
         tolerance = {"stm_rtol": self.jacobian_rtol} if stm else {}
         r = self.kernels.propagate(self.t0, z0, tf, self.params, stm=stm, **tolerance,
@@ -263,6 +268,15 @@ class SingleShooting:
         if r["status"] != 0:
             raise ShootingError(f"propagation failed with status {r['status']}", "free_failed")
         return r
+
+    def _closed_chains(self):
+        """R23's closed form for this single arc, or None: off, not certified, or the
+        integration must stop at a violation (``terminate``)."""
+        if "_chains" not in self.__dict__:
+            self._chains = (_chains_of(self.kernels)
+                            if MultiArcShooting.closed_free_default
+                            and not self.options.get("terminate") else None)
+        return self._chains
 
     def residual(self, v):
         """``R(v)``. Raises :class:`ShootingError` if propagation fails."""
@@ -1942,7 +1956,12 @@ class MultiArcShooting(SingleShooting):
             npts = max(int(n_points * (tb - ta) / span), 2)
             te = np.linspace(ta, tb, npts)
             held = np.full(k.N_SWITCHING, -1)
-            if kind is None:
+            pins = self._pins_of(c) if kind == "boundary" else None
+            if (kind is None and self._chains is not None and not flags) or pins is not None:
+                # R23 / R60 (Lemmas T, T''): the closed form at the samples.
+                ts = te
+                zs, us = self._chains.sample(ta, za, te, p, pinned=pins or ())
+            elif kind is None:
                 # Bang-bang switches are located as in propagate.
                 sol = k.trajectory(ta, za, tb, p, t_eval=te, constraint_events=False,
                                    arc=self._free_arc(ta, za, flags), frozen=sorted(flags),
@@ -1963,7 +1982,8 @@ class MultiArcShooting(SingleShooting):
                 ctl = k.boundary_control if kind == "boundary" else k.singular_control
                 ts, zs = sample_segment(Dyn(c, p), ta, tb, za, npts, method=self.options["method"],
                                         rtol=self.options["rtol"], atol=self.options["atol"])
-                us = [ctl(c, ti, zi, p) for ti, zi in zip(ts, zs)]
+                us = (k.boundary_control_batch(c, ts, zs, p) if kind == "boundary"
+                      else [ctl(c, ti, zi, p) for ti, zi in zip(ts, zs)])
             for ti, zi, ui in zip(ts, zs, us):
                 T.append(ti)
                 Z.append(zi)
@@ -1972,7 +1992,7 @@ class MultiArcShooting(SingleShooting):
                 Sg.append(c if kind == "singular" else -1)
                 Hd.append(held)
         T, Z = np.array(T), np.array(Z)
-        G = np.array([k.constraint(ti, zi, p) for ti, zi in zip(T, Z)]).reshape(len(T), -1)
+        G = k.constraint_batch(T, Z, p).reshape(len(T), -1)
         A = np.array(A)
         active = np.zeros((len(T), k.N_CONSTRAINTS), dtype=bool)
         for aid in set(A.tolist()) - {-1}:

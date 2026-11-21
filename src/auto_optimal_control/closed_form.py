@@ -371,6 +371,29 @@ class IntegratorChains:
         out["dz_dt1"] = self._rhs(z, lo, hi, r, c)
         return out
 
+    def sample(self, t0, z0, times, p, pinned=()):
+        """``(Z, U)``: the free arc's states and controls at ``times`` from ``z(t0) = z0``
+        (with ``pinned`` chains' controls at 0, Lemma T'')."""
+        times = np.asarray(times, dtype=float)
+        z0 = np.ascontiguousarray(z0, dtype=float)
+        if self.module is not None:
+            lo, hi, r, c, cl, cq, _ = self._constants(p)
+            if pinned:
+                lo, hi = lo.copy(), hi.copy()
+                lo[list(pinned)] = hi[list(pinned)] = 0.0
+            Z = np.empty((len(times), len(z0)))
+            self.module.sample(np.ascontiguousarray(times - float(t0)), z0, self._ch_c, self.n,
+                               lo, hi, r, c, cl, cq, self._gx, self._gw, Z)
+        else:
+            Z = np.array([self.propagate(t0, z0, ti, p, pinned=pinned)["z"] for ti in times])
+            lo, hi, r, c = self._law(p)
+            if pinned:
+                lo, hi = lo.copy(), hi.copy()
+                lo[list(pinned)] = hi[list(pinned)] = 0.0
+        ch, n = self.chains, self.n
+        U = np.clip(-(Z[:, n + ch[:, -1]] + c) / r, lo, hi)
+        return Z, U
+
     def _rhs(self, z, lo, hi, r, c):
         n, ch = self.n, self.chains
         f = np.zeros_like(z)
@@ -384,7 +407,7 @@ class IntegratorChains:
         """``z' = F(z)`` on a free arc (with ``pinned`` chains' controls at 0)."""
         z = np.asarray(z, dtype=float)
         n, L, ch = self.n, self.L, self.chains
-        lo, hi, r, c = self._law(p)
+        lo, hi, r, c = self._constants(p)[:4] if self._cost_terms is not None else self._law(p)
         if pinned:
             lo, hi = lo.copy(), hi.copy()
             lo[list(pinned)] = hi[list(pinned)] = 0.0

@@ -398,11 +398,9 @@ class Kernels:
             lo, hi = sorted((t0, t_end))
             t_eval = t_eval[(t_eval >= lo) & (t_eval <= hi)]
             Z = sol.sol(t_eval).T.reshape(len(t_eval), mod.N_Z)
-        U = np.array([mod.control(ti, zi, p) for ti, zi in zip(t_eval, Z)]).reshape(
-            len(t_eval), mod.N_CONTROLS)
-        H = np.array([mod.hamiltonian(ti, zi, p) for ti, zi in zip(t_eval, Z)])
-        G = np.array([mod.constraint(ti, zi, p) for ti, zi in zip(t_eval, Z)]).reshape(
-            len(t_eval), mod.N_CONSTRAINTS)
+        U = mod.control_batch(t_eval, Z, p).reshape(len(t_eval), mod.N_CONTROLS)
+        H = mod.hamiltonian_batch(t_eval, Z, p)
+        G = mod.constraint_batch(t_eval, Z, p).reshape(len(t_eval), mod.N_CONSTRAINTS)
         times = np.zeros(0) if sol is None else np.asarray(sol.t_resets, dtype=float)
         index = (np.zeros(0, dtype=np.intp) if sol is None
                  else np.asarray(sol.reset_events, dtype=np.intp))
