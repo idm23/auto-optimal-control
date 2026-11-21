@@ -116,6 +116,34 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **Depends on.** B.
 - **Used by.** The riding kernels (`riding.py`: `r_sensitivity`, `riding_rhs_jac`).
 
+### SP2. A riding needs only its own roots — proved
+
+- **Statement.** On a boundary arc riding set $S$, with roots $k(S)$, the multipliers of
+  the other roots are zero ($\mu_k = 0$ for $k \notin k(S)$). So the arc's right-hand
+  side, its Jacobian and its multipliers' sensitivities read only:
+  - the rows $(A_k, b_k)$ of its own roots;
+  - their rate gradients $\nabla_x g_k^{(q_k)}$;
+  - $L_x = \sum_{k \in k(S)} \mu_k \nabla_x g_k^{(q_k)}$.
+- **Proof.** Lemma B's system has one row per limit of $S$, and the costates' equation
+  carries $\sum_k \mu_k \nabla_x g_k^{(q_k)}$ with $\mu$ zero off $S$. ∎
+- **What it saves.** The generated code computed every root's rows and gradients at each
+  evaluation. On the arm's rate-limited problem the tape counts are:
+
+  | | all 12 roots | one torque root |
+  |---|---|---|
+  | rows | 3,207 steps | 251 (joint 6) to 2,562 (joint 1), about 1,500 on average |
+  | gradients | 14,173 steps | 700 to 5,492 |
+  | $\mu$-weighted $L_x$ | 6,491 steps | — |
+
+  The rate roots take none: their rows are constant (T″). Each root now has its own
+  rows and gradient function. A set uses its own roots' functions where their steps
+  add up to less than 0.8 of the whole, a table fixed when the code is generated, and
+  takes $L_x$ from its roots' gradients.
+- **Seen.** On goal 3 at 80% ($k = 100$, release rules with R60): 34.8 s to 30.7 s. The
+  arm's Jacobians pass the same central-difference test.
+- **Depends on.** B.
+- **Used by.** The riding kernels (`riding.py`: `r_limits_of`, `r_gx_of`, `r_lx_of`).
+
 ### C. The old path makes births coincide — proved
 
 - **Statement.** Take the route $o(s) = (1 - s)(p + \epsilon)$ from the
