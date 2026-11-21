@@ -412,7 +412,7 @@ class SingleShooting:
     natural_monotonicity = False
 
     def solve_chord(self, guess, tol=1e-10, max_iterations=12, contraction=0.5,
-                    reject_theta=None):
+                    reject_theta=None, jacobian=None):
         """Newton with one Jacobian reused while the residual falls by ``contraction``.
 
         On a path with a good predictor a step needs one Jacobian and a few
@@ -425,15 +425,30 @@ class SingleShooting:
         affine-covariant estimate of half the Kantorovich quantity ``omega ||dv0||``;
         Deuflhard 2004, sec. 2.1). With ``reject_theta``, a first step that contracts
         less than that (or does not propagate) ends the iteration at the guess, with
-        ``too_far`` set: a continuation reads this as a step too long for Newton."""
+        ``too_far`` set: a continuation reads this as a step too long for Newton.
+
+        Rule R61 (Lemma AC, carried Jacobian): ``jacobian``, a Jacobian from a nearby
+        point (the last solve of a path), starts the chord in place of a fresh one; the
+        tests that refresh a chord's Jacobian (a contraction above 1/4, or none) refresh
+        it. Not with ``reject_theta``, whose test needs Newton's own contraction. The
+        solution carries ``jacobian``, the last Jacobian factored."""
         from scipy.linalg import lu_factor, lu_solve
         v = np.asarray(guess, dtype=float).copy()
         nfev = 1
         fresh = True
-        start = self._try(v)
-        if start is None:
-            return self._failed_start(v, nfev)
-        R, J = start
+        if (jacobian is not None and reject_theta is None
+                and np.shape(jacobian) == (len(v), len(v))):
+            try:
+                R = self.residual(v)
+            except (ShootingError, RuntimeError, ValueError) as exc:
+                self._failed(exc)
+                return self._failed_start(v, nfev)
+            J, fresh = jacobian, False
+        else:
+            start = self._try(v)
+            if start is None:
+                return self._failed_start(v, nfev)
+            R, J = start
         err = float(np.linalg.norm(R))
         lu = None if not np.isfinite(err) else lu_factor(J)
         theta, first = None, True
@@ -460,7 +475,7 @@ class SingleShooting:
                     theta = float("inf")
                 if reject_theta is not None and theta is not None and not theta <= reject_theta:
                     sol = self._chord_result(v, err, nfev)
-                    sol.contraction, sol.too_far = theta, True
+                    sol.contraction, sol.too_far, sol.jacobian = theta, True, J
                     return sol
             ratio = self._natural_ratio(lu, Rt, dv) if self.natural_monotonicity else None
             if np.isfinite(trial) and (trial < tol or (
@@ -519,7 +534,7 @@ class SingleShooting:
             R, J = fresh_RJ
             lu, fresh = lu_factor(J), True
         sol = self._chord_result(v, err, nfev, tol)
-        sol.contraction, sol.too_far = theta, False
+        sol.contraction, sol.too_far, sol.jacobian = theta, False, J
         return sol
 
     @staticmethod
