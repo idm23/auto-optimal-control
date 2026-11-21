@@ -323,6 +323,11 @@ class Homotopy:
                           **exact_pipelines()}
         #: Run the portfolio's routes at once in forked processes (one core each).
         self.parallel_routes = False
+        #: Rule R72 (Observation O7): with parallel routes, the first ``route_width`` start
+        #: at once and the rest join after ``route_delay`` seconds.
+        self.staged_routes = False
+        self.route_width = 4
+        self.route_delay = 6.0
         self.corner_touches = False         # rule R12: refuted by Lemma L (see the note)
         self.corner_rel = 1e-2              # R12: how near the edge a peak must be
         #: Rule R16: after a step that overshoots a birth, place the next one at the
@@ -2049,17 +2054,34 @@ class Homotopy:
 
         running = []
         started = time.perf_counter()
-        for n_, member in enumerate(members):
+
+        def launch(n_, member):
             parent, kid = ctx.Pipe(duplex=False)
             p = ctx.Process(target=child, args=(kid, member), daemon=True)
             p.start()
             kid.close()
             running.append((n_, p, parent))
+
+        # Rule R72 (Observation O7): the first ``route_width`` routes start at once and
+        # the rest after ``route_delay`` seconds, or as soon as one of them ends; fewer
+        # busy cores run faster (O4), and most cases are won early by the first routes.
+        width = (self.route_width if getattr(self, "staged_routes", False) else None) or len(members)
+        waiting = list(enumerate(members))
+        for n_, member in waiting[:width]:
+            launch(n_, member)
+        waiting = waiting[width:]
+        if waiting:
+            self.diagnostics.fired("R72")
         deadline = time.perf_counter() + self.active_set_seconds + 30.0
         if self._solve_end is not None:
             deadline = min(deadline, self._solve_end)
         found = None
-        while running and found is None and time.perf_counter() < deadline:
+        while (running or waiting) and found is None and time.perf_counter() < deadline:
+            if waiting and (time.perf_counter() - started >= getattr(self, "route_delay", 6.0)
+                            or len(running) < width):
+                for n_, member in waiting:
+                    launch(n_, member)
+                waiting = []
             time.sleep(0.05)
             for item in list(running):
                 n_, p, conn = item
