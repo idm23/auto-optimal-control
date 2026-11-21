@@ -29,16 +29,17 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-86 of the 90 cases solve, all under 60 s: the median is 2.8 s and the slowest 46.1 s. A
-step now ends at the next predicted birth of a limit (R64, Lemma V6) instead of
-overshooting it. The 86 cases take 418 s against 439 s (4.7% faster).
+87 of the 90 cases solve, all under 60 s: the median is 2.7 s and the slowest 43.0 s.
+After a step cut short at a birth, the next step resumes half the step planned before
+(R65, Lemma S). The 86 cases solved before and after take 416 s against 418 s; vgoal 4 at
+70% is solved.
 
 When all seven routes are busy they run at about half speed (Observation O4). On most
 cases all seven run until one wins, and the winners are spread over every route.
 
 - **`goal` and `rest`:** all 45.
-- **`vgoal`:** 27 of 30: all ten at 90%, all ten at 80% and seven at 70% (all but goals
-  0, 3 and 4).
+- **`vgoal`:** 28 of 30: all ten at 90%, all ten at 80% and eight at 70% (all but goals
+  0 and 3).
 - **`vrest`:** 14 of 15: all but rest 4.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit

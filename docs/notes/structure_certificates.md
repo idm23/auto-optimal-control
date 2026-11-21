@@ -2550,3 +2550,21 @@ target, tried first, lost vgoal 1 at 80% on its route.
 418 s against 439 s (4.7% faster), median 2.8 s. Vrest 10 (16.2 → 10.6 s), vgoal 2 at 70%
 and vgoal 4 at 80% gain most; goal 3 at 70% (3.8 → 7.7 s) loses most. R64 joins the
 release.
+
+### After an event's step, the step before it: Rule R65
+
+*What a located birth costs afterwards.* When R16 places a birth at 5% of a failed step
+(or R64 caps a step at a predicted birth), the step that brings the limit in is short
+for the event's sake. The next steps then grew by 1.5 from it: on vgoal 3 at 80%, from
+$5 \times 10^{-4}$ back to $10^{-2}$ took eight accepted steps, several times per route.
+
+*Rule R65* (`Homotopy.resume_steps`). The accepted step after such a cut is at least half
+the step planned before the cut. Lemma S: the cut measured where the event is, and the
+steps before it measured Newton's radius; a step too long for the young arc (Lemma E's
+square-root growth) fails and is halved as any other. On one route each it is mixed:
+goal 2 at 70% solves (8.4 s, against a failed route), goal 9 at 70% is slower (1.87 →
+2.56 s).
+
+*Census page 111 (release plus R61, R63, R64, R65): 87 of 90, against 86.* Vgoal 4 at
+70% is solved. The 86 cases solved on both pages take 416 s against 418 s, median 2.7 s.
+R65 joins the release.
