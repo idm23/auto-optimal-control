@@ -2477,3 +2477,31 @@ a rigorous error bound.
 - H. Maurer (1977), *On the minimum principle for optimal control problems
   with state constraints*, Schriftenreihe des Rechenzentrums der Universität
   Münster 41.
+
+### A path solve starts from the last Jacobian: Rule R61
+
+*Where the Jacobians go.* After the compiled pieces of page 107, a riding Jacobian costs
+five to ten residuals, and every path solve started with a fresh one. On goal 9 at 70%
+(one route, 159 Jacobians): 93 at the starts of solves, 34 after a backtrack, 21 after a
+step accepted with $\Theta > 1/4$ (AC (3)), 8 others.
+
+*Rule R61* (`Homotopy.carry_jacobian`). A path solve of the structure last solved starts
+its chord from that solve's last Jacobian, with its residual alone. Lemma AC (4) bounds
+the chord's contraction by $\omega\|v - \tilde v\| + \tilde\omega\,\mathrm{d}s$, small along
+a path, and the chord's own tests refresh the Jacobian when it is not: a step accepted
+with a contraction above 1/4, or a step that fails. Every solve still ends at the path
+tolerance. Not with R37's rejection test, which needs Newton's own contraction (off in
+the release). On one route each: goal 9 at 70%, 159 → 112 Jacobians and 502 → 636
+residuals (3.39 → 3.25 s); vgoal 1 at 80%, 152 → 123; vgoal 3 at 80%, 876 → 618, but
+that route then fails (the solves stop elsewhere within the tolerance, and the route
+goes another way).
+
+*Census page 108 (release plus R61): 85 of 90, against 84.* Goal 4 at 70%, which flips
+between runs, is solved again; vgoal 3 at 80% is solved by another route. The 84 cases
+solved on both pages take 429 s against 457 s (6% faster). R61 joins the release.
+
+*Tried with it: a budgeted refresh* (R62). After a step accepted with $\Theta > 1/4$,
+refresh only if the chord at that rate would need more than six residuals, or more than
+its remaining iterations, to reach the path tolerance (AC (3) with the solve's own
+residual). It saves one to seven Jacobians per route and no time: the refreshes it
+skips are few, and they come where the contraction is near 1/2 anyway.

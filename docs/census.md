@@ -29,20 +29,15 @@ routes run in parallel, one case at a time, on 8 physical cores (the census runs
 cases in its main process, so the routes are the only other processes). Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-84 of the 90 cases solve, all under 60 s: the median is 3.3 s and the slowest 41.2 s.
-More of each evaluation runs compiled (Observation O6): the junction tests, the closed-form
-chains, the bounds and the boundary-arc samples of the checks, which also reuse the last
-residual's arcs. The 84 cases take 457 s against 519 s (12% faster).
-- Goal 4 at 70% is lost. Its route turns on wall-clock rules, and it has failed on reruns
-  of unchanged code before.
-- Rest 10 is still lost to R55 (Lemma AC): near its last birth, two branches of solutions
-  with one structure lie close together, and Newton reaches the one where a multiplier
-  rises inside an arc.
+85 of the 90 cases solve, all under 60 s: the median is 3.4 s and the slowest 40.7 s. A
+path solve now starts from the last Jacobian of its structure (R61, Lemma AC (4)). The 84
+cases solved before and after take 429 s against 457 s (6% faster). Goal 4 at 70%, lost on
+the last pages (its route turns on wall-clock rules), is solved again.
 
 When all seven routes are busy they run at about half speed (Observation O4). On most
 cases all seven run until one wins, and the winners are spread over every route.
 
-- **`goal` and `rest`:** 44 of 45: all but goal 4 at 70%.
+- **`goal` and `rest`:** all 45.
 - **`vgoal`:** 27 of 30: all ten at 90%, all ten at 80% and seven at 70% (all but goals
   0, 3 and 4).
 - **`vrest`:** 13 of 15: all but rests 4 and 10.

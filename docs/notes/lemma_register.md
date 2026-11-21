@@ -1210,6 +1210,17 @@ route stalls.
      $N = 12$, $e_0 = 10^{-2}$ and $\tau = 10^{-10}$, that is about $0.2$. So a step
      accepted with $\Theta_k > \tfrac14$ is followed by a fresh Jacobian (Newton's
      quadratic rate), as Deuflhard's $\Theta_{\max} = \tfrac14$ prescribes.
+  4. *(A carried Jacobian.)* Let $\tilde J = D\tilde\Psi(\tilde v)$ be the Jacobian at
+     the last solution $\tilde v$ of a nearby problem $\tilde\Psi$ (the route's
+     parameter $\tilde s$, the same structure). The chord with $\tilde J$ for $\Psi$
+     (parameter $s$) contracts its corrections by at most about
+     $$\Theta \lesssim \|\tilde J^{-1}(D\Psi(v) - \tilde J)\| \le
+       \omega\,\|v - \tilde v\| + \tilde\omega\,|s - \tilde s| ,$$
+     with $\tilde\omega$ the affine-covariant Lipschitz constant of $D\Psi$ in $s$.
+     Along a path both terms are $O(ds)$. So a carried Jacobian serves while
+     $\omega\|v - \tilde v\| + \tilde\omega\,ds \lesssim \tfrac14$, and (3)'s test,
+     applied to the measured $\Theta$, refreshes it exactly when it no longer does.
+     The answer is unchanged: the chord still stops at the tolerance in the residual.
 - **Proof.**
   - (1) $D(A\Psi) = AJ$, so $(AJ)^{-1}A\Psi = J^{-1}\Psi$ at every point. The
     corrections and $\Theta$ do not depend on $A$.
@@ -1223,7 +1234,11 @@ route stalls.
   - The convergence statement is the affine-covariant Newton–Mysovskikh theorem for
     the simplified iteration (Deuflhard 2004, Thms 2.5 and 2.10).
   - (3): $N$ linear contractions by at most $\Theta$ take $e_0$ to $\Theta^N e_0$ in
-    the natural norm. ∎
+    the natural norm.
+  - (4): the chord's error map is $e \mapsto e - \tilde J^{-1}(\Psi(v^* + e) - \Psi(v^*))
+    = \tilde J^{-1}\int_0^1 (\tilde J - D\Psi(v^* + \tau e))\,d\tau\; e$, whose norm is at
+    most $\sup \|\tilde J^{-1}(D\Psi - \tilde J)\|$ on the segment; split
+    $D\Psi(v; s) - D\tilde\Psi(\tilde v; \tilde s)$ through $(\tilde v; s)$. ∎
 - **What it means for the route.** Near an L2 touch the path Jacobian is
   ill-conditioned: equilibrated $\sigma_{\min}$ of about $5 \times 10^{-4}$, so
   $\kappa$ is $10^3$ to $10^4$. The chord's old test, $\|\Psi(v_1)\| < \tfrac12
@@ -1256,7 +1271,7 @@ route stalls.
   theory (Deuflhard 2004, ch. 2).
 - **To formalize.** (1) is linear algebra. (2) needs the integral form of the mean
   value theorem, which Mathlib has, and the Newton–Mysovskikh argument.
-- **Used by.** R55; R37's $\Theta$ (sec. 5.1 of the same reference).
+- **Used by.** R55; R61, through (4); R37's $\Theta$ (sec. 5.1 of the same reference).
 
 ### V1–V5. The route as a one-parameter family
 

@@ -436,6 +436,9 @@ class Homotopy:
         #: Rule R55 (Lemma AC): path solves judge Newton's steps by the natural
         #: monotonicity test, not by the residual's norm.
         self.natural_monotonicity = False
+        #: Rule R61 (Lemma AC): a path solve's chord starts from the last Jacobian of the
+        #: same structure instead of a fresh one.
+        self.carry_jacobian = False
         #: The free-violation checks read the densities' trajectory instead of sampling
         #: the solution again: one integration of each accepted solution for both
         #: (Lemma V1's monitors are functionals of one sampled extremal).
@@ -2495,7 +2498,14 @@ class Homotopy:
             # Limits ridden at run time make every evaluation dear: a cheap attempt
             # first, and only a step that gets close earns the slower solve.
             reject = getattr(self, "_reject_theta", None)
-            r = sh.solve_chord(guess, tol=path_tol, reject_theta=reject)
+            carried = self.__dict__.setdefault("_carried", {})
+            key = (repr(entries), len(guess))
+            # Rule R61 (Lemma AC): the last Jacobian of this structure starts the chord.
+            J0 = carried.get(key) if self.carry_jacobian else None
+            r = sh.solve_chord(guess, tol=path_tol, reject_theta=reject, jacobian=J0)
+            if self.carry_jacobian and getattr(r, "jacobian", None) is not None and r.success:
+                carried.clear()
+                carried[key] = r.jacobian
             if getattr(r, "too_far", False):
                 return sh, r               # Rule R37: a shorter step, not a slower solve
             if (not r.success and r.residual_norm >= 1e5 and self.edge_exits and arcs
@@ -3851,6 +3861,7 @@ class Homotopy:
         structure. Returns a :class:`HomotopyResult`.
         """
         params = np.asarray(params, dtype=float).reshape(-1)
+        self._carried = {}                 # R61: Jacobians are carried within a solve only
         if len(params) != len(self.problem.params):
             raise ValueError(f"expected {len(self.problem.params)} parameters "
                              f"{[str(p) for p in self.problem.params]}, got {len(params)}")
