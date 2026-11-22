@@ -2836,3 +2836,12 @@ The monitors' decisions, such as where a density crosses zero and whether a rise
 exceeds its threshold, are read from the samples. They move with the samples' error,
 and the route follows them. Lemma TB's budget covers the solves' residuals, not the
 monitors' samples.
+
+### R72's first wave, chosen again
+
+With R74 and R75 the routes are faster, so the schedule was simulated again on each
+route's own times (Observation O7, measured again). The first wave is now routes 1, 2, 5
+and 6, where it was 1 to 4.
+- Census page 119: the same 76 cases under 5 s, and a mean of 3.437 s against 3.551 s.
+- Page 118's configuration repeated (page 120) differs from it by 1% in total, so the 3%
+  is the schedule's.

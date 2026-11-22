@@ -1586,6 +1586,19 @@ jump, density, gap, order, bound, end, held sign).
     gives 65, and one at a time 48.
 - **Consequence.** The schedule is worth about eight cases under 5 s (R72). The rest
   must come from faster routes.
+- **Measured again with R74 and R75 (2026-11-22).**
+  - The routes are faster, and the best route alone at full speed would give 82
+    cases under 5 s.
+  - The model's best first wave is routes 1, 2, 5 and 6, with the rest after 6 s.
+  - Census page 119 with it gives the same 76 cases under 5 s and a mean of 3.437 s
+    against 3.551 s (page 118). The 87 take 299.0 s against 309.0 s.
+  - Cases won by routes 5 to 7 gain: rest 4 takes 11.8 s against 18.0 s, vrest 1
+    13.6 s against 20.2 s, and vrest 5 7.9 s against 12.3 s. Vgoal 4 at 70%, won only by
+    route 4, takes 40.0 s against 30.1 s.
+- **Page-to-page noise.** Page 118's configuration run again (page 120): per-case times
+  within 2–3%, the total within 1% (306.1 s against 309.0 s), and the same 76 under
+  5 s. Differences of a few percent in total, or of tens of percent in one case, are
+  the schedule's, not noise.
 
 ### Observation O5: where the path rules act (2026-11-21)
 

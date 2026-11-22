@@ -223,7 +223,7 @@ RULES = (
          "certified: Lemma AC 4 (the chord converges with an approximate Jacobian) with Lemma DT's budget (the route tolerates relative Jacobian errors of 1e-6; the propagator's error on riding arcs is at most 6e-7 at this tolerance); z, the residuals and the exact solve are unchanged",
          "not converged", "tangent_rtol=1e-4"),
     Rule("R72", "route start", "the portfolio's routes run in parallel",
-         "start the first four at once and the rest after 6 s, or when one of the four ends", ("O4", "O7"),
+         "start four routes at once (the first, second, fifth and sixth) and the rest after 6 s, or when one of the four ends", ("O4", "O7"),
          "heuristic, from Observations O4 (fewer busy cores run faster) and O7 (each route alone on every case: simulated schedules)",
          "not exact", "staged_routes"),
     Rule("R50", "consistent step", "an order-2 arc's width, positive at the base, crosses zero in the step",
