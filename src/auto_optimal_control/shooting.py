@@ -200,6 +200,9 @@ class SingleShooting:
     # (None: the same). Steps fall by half or more, but a Jacobian this rough cannot bring
     # the residual below about this level times the unknowns' size.
     jacobian_rtol = None
+    #: Rule R75: riding arcs' STMs from FNI's decoupled tangent propagator at this
+    #: tolerance (None: the variational equations integrated with the state).
+    tangent_rtol = None
     max_nfev = MAX_NFEV
     # Use the tangential rows even with some control at its bound. In minimum time some control
     # nearly always is; one that stays there across the junction does not stop the arrival
@@ -1174,9 +1177,11 @@ class MultiArcShooting(SingleShooting):
             elif kind == "boundary":
                 cap = ((self.boundary_stm_max_nfev if jac else None) or self.boundary_max_nfev
                        or self.max_nfev)
+                extra = ({"tangent_rtol": self.tangent_rtol}
+                         if jac and self.tangent_rtol is not None else {})
                 r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost, max_nfev=cap,
                                          held_events=self.held_events,
-                                         **tolerance, **self.options)
+                                         **tolerance, **extra, **self.options)
                 Fa = k.boundary_rhs(c, ta, z, p)
             else:
                 r = k.propagate_singular(c, ta, z, tb, p, stm=jac, cost=cost,

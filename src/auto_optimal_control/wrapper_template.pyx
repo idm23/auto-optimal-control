@@ -11,6 +11,7 @@ from libc.string cimport memcmp, memcpy
 
 from fast_numerical_integration.integrators cimport (
     EventFunction, OdeSystem, fni_event, fni_hybrid_options, fni_integrate, fni_integrate_hybrid,
+    fni_integrate_hybrid_tangent, fni_tangent, fni_tangent_init,
     fni_options, fni_solver, fni_solver_init, fni_solver_step, fni_solver_free,
     fni_solver_ensure_dense, fni_solver_dense_eval, FNI_RUNNING, FNI_EVENTS_ENDPOINTS,
     fni_options_init, fni_rhs_fn, FNI_EVENTS_INTERIOR, fni_stats, FNI_DOP853, FNI_OK, FNI_RESET_CONTINUE, FNI_RESET_STOP, FNI_RK23,
@@ -1379,6 +1380,13 @@ cdef int _b_stm_fn(double t, const double* y, double* dydt, Py_ssize_t n, void* 
     return rc
 
 
+
+cdef int _b_tangent_jac(double t, const double* y, Py_ssize_t n, void* ctx,
+                        double* J) noexcept nogil:
+    """The riding flow's Jacobian dF_b/dz for the decoupled tangent propagator (FNI)."""
+    cdef _b_ctx* b = <_b_ctx*> ctx
+    return P_b_jac(b.c, t, y, b.p, J)
+
 cdef class BoundaryDynamics(OdeSystem):
     """``z' = F_b(t, z, p)`` while path constraint ``c`` is active (``g = 0``).
 
@@ -1814,7 +1822,8 @@ def interior_controls(side, double t, z, params=None):
 def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, cost=False,
                        method="DOP853", double rtol=1e-10, double atol=1e-12, first_step=None,
                        double max_step=np.inf, Py_ssize_t max_nfev=0, stm_rtol=None,
-                       held_events=False, Py_ssize_t max_held_resets=64):
+                       held_events=False, Py_ssize_t max_held_resets=64, tangent_rtol=None,
+                       Py_ssize_t tangent_depth=4, int tangent_order=6):
     """Integrate along a boundary arc of constraint ``c`` from ``t0`` to ``t1``.
 
     The arc's control holds ``g^(q) = 0``, so ``g`` stays at zero if ``N = 0``
@@ -1827,10 +1836,16 @@ def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, c
     without events. ``max_nfev`` is as in :func:`propagate`. Returns a dict with
     ``t``, ``z``, ``stm`` (NZ, NZ) or None, ``cost`` or None, ``dz_dt1``,
     ``nfev``, ``status`` and ``held_resets`` (None without events).
+
+    With ``tangent_rtol`` (and ``stm`` without ``cost``), ``z`` is integrated alone and
+    the STM comes from FNI's decoupled tangent propagator: one RK4 step of
+    ``Phi' = (dF_b/dz) Phi`` per accepted step of ``z``, with its own error control at
+    ``tangent_rtol``, instead of the variational equations at every stage.
     """
     if held_events and NH:
         r = _propagate_held(_exact(c), t0, z0, t1, params, stm, cost, method, rtol, atol,
-                            first_step, max_step, max_nfev, stm_rtol, max_held_resets)
+                            first_step, max_step, max_nfev, stm_rtol, max_held_resets,
+                            tangent_rtol, tangent_depth, tangent_order)
         if r is not None:
             return r
     return _propagate_on(_exact(c), 0, t0, z0, t1, params, stm, cost, method, rtol, atol,
@@ -1881,7 +1896,8 @@ cdef int _held_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n, void* 
 
 def _propagate_held(int c, double t0, z0, double t1, params, stm, cost, method, double rtol,
                     double atol, first_step, double max_step, Py_ssize_t max_nfev, stm_rtol,
-                    Py_ssize_t max_resets):
+                    Py_ssize_t max_resets, tangent_rtol=None, Py_ssize_t tangent_depth=4,
+                    int tangent_order=6):
     """:func:`propagate_boundary` with held-set events, or None to integrate without."""
     cdef _b_ctx ctx
     cdef fni_options opt
@@ -1892,6 +1908,12 @@ def _propagate_held(int c, double t0, z0, double t1, params, stm, cost, method, 
     cdef _held_shared shared
     cdef int held[NH1]
     cdef int rc, meth, k
+    cdef bint decoupled = bool(stm) and not cost and tangent_rtol is not None
+    cdef fni_tangent tg
+    cdef fni_tangent* tgp = NULL
+    cdef double[::1] Xv
+    if decoupled:
+        stm = False                 # z alone; the STM is the tangent's
     cdef Py_ssize_t ny = NZ + (NZ * NZ if stm else 0) + (1 if cost else 0)
     if method not in _METHODS:
         raise ValueError(f"method must be one of {list(_METHODS)}")
@@ -1929,25 +1951,42 @@ def _propagate_held(int c, double t0, z0, double t1, params, stm, cost, method, 
     hopt.max_resets = max_resets
     hopt.min_dwell = 0.0
     hopt.reselect_step = False
+    X = None
+    if decoupled:
+        X = np.eye(NZ).reshape(-1)
+        Xv = X
+        fni_tangent_init(&tg)
+        tg.jac = _b_tangent_jac
+        tg.ctx = &ctx
+        tg.m = NZ
+        tg.X = &Xv[0]
+        tg.rtol = float(tangent_rtol)
+        tg.atol = float(tangent_rtol)      # entries are O(1) relative to the identity at t0
+        tg.max_depth = tangent_depth
+        tg.order = tangent_order
+        tgp = &tg               # held-set changes leave the STM continuous (no reset)
     with nogil:
         rc = P_b_held_start(c, t0, &yv[0], &pv[0], held)
         if rc == 0:
             P_b_held_fix(c, held)
-            rc = fni_integrate_hybrid(meth, fn, &ctx, ny, t0, &yv[0], t1, &opt, events, NH,
-                                      _held_reset, &hc[0], &hopt, &yo[0], NULL, NULL, NULL,
-                                      NULL, NULL, 0, &st, NULL)
+            rc = fni_integrate_hybrid_tangent(meth, fn, &ctx, ny, t0, &yv[0], t1, &opt, events,
+                                              NH, _held_reset, &hc[0], &hopt, &yo[0], NULL,
+                                              NULL, NULL, NULL, NULL, 0, &st, NULL, tgp)
         P_b_held_fix(c, NULL)
     if rc != FNI_OK or shared.failed or st.status != 0:
         return None
     return {
         "t": st.t_final,
         "z": y_out[:NZ].copy(),
-        "stm": y_out[NZ:NZ + NZ * NZ].reshape(NZ, NZ).copy() if stm else None,
+        "stm": (X.reshape(NZ, NZ) if decoupled else
+                y_out[NZ:NZ + NZ * NZ].reshape(NZ, NZ).copy() if stm else None),
         "cost": float(y_out[ny - 1]) if cost else None,
         "dz_dt1": boundary_rhs(c, st.t_final, y_out[:NZ], p_arr[:NP] if NP else None),
         "nfev": st.nfev,
         "status": st.status,
         "held_resets": st.n_records,
+        "tangent_pieces": tg.n_pieces if decoupled else None,
+        "tangent_jacs": tg.n_jac if decoupled else None,
     }
 
 

@@ -326,6 +326,9 @@ class Homotopy:
         #: Rule R72 (Observation O7): with parallel routes, the first ``route_width`` start
         #: at once and the rest join after ``route_delay`` seconds.
         self.staged_routes = False
+        #: Rule R75 (Lemma DT): riding arcs' STMs in path problems from FNI's decoupled
+        #: tangent propagator at this tolerance (None: integrated with the state).
+        self.tangent_rtol = None
         #: With parallel routes, the answer a route accepted is taken as it is (its exact
         #: shooting rebuilt here), not solved again in the parent.
         self.trust_routes = True
@@ -1351,6 +1354,7 @@ class Homotopy:
                                   **opts)
                  if arcs else SingleShooting(self.kr, p, **opts))
         shoot.jacobian_rtol = PATH_JACOBIAN_RTOL
+        shoot.tangent_rtol = getattr(self, "tangent_rtol", None)
         shoot.fast_residuals = True
         shoot.tangent_junctions = self.kr.system.riding is not None
         shoot.natural_monotonicity = getattr(self, "natural_monotonicity", False)

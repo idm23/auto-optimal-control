@@ -292,6 +292,39 @@ def test_held_set_events_follow_the_riding_in_fewer_steps(clipped_two_ways):
     assert ks.propagate_boundary(0, 0.0, z, 0.1, p, held_events=True)["held_resets"] is None
 
 
+def test_the_decoupled_tangent_gives_the_riding_stm(clipped_two_ways):
+    """Rule R75: with ``tangent_rtol`` the boundary arc's state is integrated alone (the
+    same as without the STM, bit for bit) and its STM comes from FNI's decoupled
+    tangent propagator, its error set by the tangent's tolerance, across held-set changes
+    too. (These arcs are long, half a second; the arm's, between events, are short.)"""
+    ks, kn = clipped_two_ways
+    p = np.array([1, 1, 1, 1, 1.5, 1, 1.0, 2.2, 2.0])
+    rng = np.random.default_rng(3)
+    checked = changed = 0
+    for arc in range(4):
+        for _ in range(40):
+            z = rng.uniform(-1.5, 1.5, ks.N_Z)
+            z[ks.N_STATES:] *= rng.choice([0.01, 0.05, 0.3])
+            try:
+                kn.boundary_control(arc, 0.3, z, p)
+                ref = kn.propagate_boundary(arc, 0.3, z, 0.8, p, held_events=True, stm=True,
+                                            rtol=1e-13, atol=1e-13)
+            except RuntimeError:
+                continue
+            plain = kn.propagate_boundary(arc, 0.3, z, 0.8, p, held_events=True,
+                                          rtol=1e-10, atol=1e-10)
+            scale = np.abs(ref["stm"]).max()
+            for tol, bound in ((1e-4, 5e-6), (1e-5, 1e-6)):
+                t = kn.propagate_boundary(arc, 0.3, z, 0.8, p, held_events=True, stm=True,
+                                          rtol=1e-10, atol=1e-10, tangent_rtol=tol)
+                assert np.array_equal(t["z"], plain["z"])
+                assert t["tangent_pieces"] >= 1
+                assert np.abs(t["stm"] - ref["stm"]).max() < bound * scale
+            checked += 1
+            changed += bool(t["held_resets"])
+    assert checked >= 20 and changed >= 5
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("taus, t_f", [((2.2, 2.0), 3.656661), ((1.5, 0.4), 4.164857)])
 def test_minimum_time_through_run_time_arcs(kernel_cache, taus, t_f):

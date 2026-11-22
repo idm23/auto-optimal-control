@@ -1529,6 +1529,43 @@ jump, density, gap, order, bound, end, held sign).
   - At $10^{-9}$ some routes took a third more Jacobians, so $10^{-10}$ is kept.
 - **Used by.** R74.
 
+### DT. The decoupled tangent's budget — measured, relative to AC 4
+
+- **Statement.** A path problem's Jacobian needs its riding arcs' STMs only to about
+  $10^{-6}$ relative. The route tolerates relative Jacobian errors of up to
+  $10^{-6}$ without changing its answers, and up to about $10^{-7}$ with its Jacobian
+  counts within their own noise. So an STM from FNI's decoupled tangent propagator
+  is enough. That means the state integrated alone, and one sixth-order
+  Runge–Kutta piece of $\Phi' = (dF_b/dz)\,\Phi$ per accepted step, with $dF_b/dz$
+  from the riding kernel at five points of the step. Its accuracy at tangent
+  tolerance $10^{-4}$ is within that budget, and the state, the residuals and the
+  exact solve are unchanged.
+- **Why it suffices (AC 4).** A chord iteration with $\tilde J$ converges at the rate
+  $\sup\|\tilde J^{-1}(D\Psi - \tilde J)\|$. A relative error $\delta$ in the STM
+  blocks adds at most about $\kappa\,\delta$ to that rate. For the route the
+  amplification was measured directly, not bounded through $\kappa$:
+  - 84 runs: 14 cases' winning routes, with relative errors $\delta$ injected
+    elementwise into every Jacobian.
+  - All solved, with the same final times, for $\delta \le 10^{-6}$.
+  - At $10^{-5}$ goal 2 at 70% took 814 Jacobians against 351.
+- **The propagator's error** (vs. a $10^{-13}$ reference, 60 riding segments each):
+
+  | case | current STM, max | order 4 at $10^{-4}$, max | order 6 at $10^{-4}$, max |
+  |---|---|---|---|
+  | goal 3 at 70% | $7.3 \times 10^{-10}$ | $6.1 \times 10^{-6}$ | $1.3 \times 10^{-7}$ |
+  | vrest 3 | $7.0 \times 10^{-10}$ | $1.2 \times 10^{-5}$ | $5.8 \times 10^{-7}$ |
+
+  The tail errors of a fixed-step offline test (up to $4 \times 10^{-3}$, at
+  held-set changes) disappear, because the integrator's steps end at those changes.
+- **Why it is cheaper.** A riding Jacobian evaluation costs about as much as one
+  stage of the STM's right-hand side (about 23 µs on homebox), and the current STM
+  is evaluated at all 12 stages of DOP853. The sixth-order piece needs four new
+  Jacobians per step. On the 60 segments: 19.1 ms against 37.3 ms (goal 3 at 70%),
+  and 75.2 ms against 94.5 ms (vrest 3).
+- **Measured on routes** (13 cases' winning routes, alone on node-1): 44.2 s against
+  54.5 s, every one faster (0.57× to 0.94×), with the same final times.
+- **Used by.** R75.
+
 ### Observation O7: each route alone on every case, and staged starts (2026-11-21)
 
 - **Measured.** Each of R15's seven routes ran alone over all 90 cases (release rules
