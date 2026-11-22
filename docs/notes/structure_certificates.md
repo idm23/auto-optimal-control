@@ -2816,3 +2816,23 @@ time is 44.2 s against 54.5 s, every one faster, with the same answers.
 - Loss: vrest 12 takes 38.6 s against 27.9 s; its path changed.
 
 R75 joins the release.
+
+### Sampling the monitors at a looser tolerance: Rule R76, tried
+
+*What it was.* With R75, about a sixth of a route goes to sampling its arcs for the
+settle's monitors: densities, violations and orders. A riding arc is integrated again at
+the route's tolerance to sample it at 801 points.
+
+*Rule R76* (tried, not kept). The samples were integrated at $10^{-8}$, by Lemma TB's
+argument: the monitors judge at $10^{-6}$.
+
+*Result: dropped.*
+- **Losses:** rest 1 took 26.3 s and 1,942 Jacobians against 3.6 s and 263. vrest 9 took
+  6.9 s against 4.1 s and ended on another answer. Goal 2 at 70% took 5.4 s against
+  4.3 s.
+- **Neutral:** the other six routes.
+
+The monitors' decisions, such as where a density crosses zero and whether a rise
+exceeds its threshold, are read from the samples. They move with the samples' error,
+and the route follows them. Lemma TB's budget covers the solves' residuals, not the
+monitors' samples.
