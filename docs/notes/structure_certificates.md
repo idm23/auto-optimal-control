@@ -2784,3 +2784,55 @@ Measured on node-1 with each case's winning route alone (counts of Jacobians):
   fire on vrest 4.
 - **Offset seeds 2 to 7 at starting weights 1, 10 and 100** on vgoal 0 at 70%, vgoal 3 at
   70% and vrest 4. None of the 54 solved.
+
+### Riding arcs' STMs from the decoupled tangent propagator: Rule R75
+
+*What it was.* A route's Jacobians are about half its time. Most of that is riding arcs'
+STMs: the variational right-hand side, a riding Jacobian (about 23 µs), evaluated at
+every one of DOP853's twelve stages, for an accuracy of about $10^{-10}$. The route
+needs about $10^{-6}$ (Lemma DT, measured by injecting errors).
+- Loosening the STM's tolerance doesn't help: the steps are set by the state and the
+  events.
+- Lower-order integrators (RK45, RK23) need more steps, and so cost more.
+
+*Rule R75* (`Homotopy.tangent_rtol`, FNI 0.5.0's `fni_integrate_hybrid_tangent`). The
+arc's state is integrated alone (bit for bit the same), and the STM comes from FNI's
+decoupled tangent propagator:
+- one piece of Butcher's sixth-order method per accepted step, with the riding
+  Jacobian at five points from the step's dense output,
+- split for the STM only when its estimate exceeds the tangent tolerance $10^{-4}$.
+
+Steps end at held-set changes, so the tail errors of a fixed-step scheme are gone. On
+60 riding segments of each case the STM is within $6 \times 10^{-7}$ of a $10^{-13}$
+reference, and costs about half as much (Lemma DT). On 13 cases' winning routes the
+time is 44.2 s against 54.5 s, every one faster, with the same answers.
+
+*Census page 118 (release, R72, R74, the accepted answer, plus R75):*
+- 76 cases are under 5 s, against 71, and the mean is 3.551 s against 4.182 s.
+- The same 87 cases solve, in 309.0 s against 363.8 s. Final times agree with page 117
+  to $7 \times 10^{-14}$.
+- Gains: vrest 1 takes 20.2 s against 32.8 s, vgoal 3 at 80% 22.2 s against 33.1 s, and
+  goal 0 at 70% 3.5 s against 6.6 s.
+- Loss: vrest 12 takes 38.6 s against 27.9 s; its path changed.
+
+R75 joins the release.
+
+### Sampling the monitors at a looser tolerance: Rule R76, tried
+
+*What it was.* With R75, about a sixth of a route goes to sampling its arcs for the
+settle's monitors: densities, violations and orders. A riding arc is integrated again at
+the route's tolerance to sample it at 801 points.
+
+*Rule R76* (tried, not kept). The samples were integrated at $10^{-8}$, by Lemma TB's
+argument: the monitors judge at $10^{-6}$.
+
+*Result: dropped.*
+- **Losses:** rest 1 took 26.3 s and 1,942 Jacobians against 3.6 s and 263. vrest 9 took
+  6.9 s against 4.1 s and ended on another answer. Goal 2 at 70% took 5.4 s against
+  4.3 s.
+- **Neutral:** the other six routes.
+
+The monitors' decisions, such as where a density crosses zero and whether a rise
+exceeds its threshold, are read from the samples. They move with the samples' error,
+and the route follows them. Lemma TB's budget covers the solves' residuals, not the
+monitors' samples.
