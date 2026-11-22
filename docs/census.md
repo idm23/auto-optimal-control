@@ -18,21 +18,22 @@ torque limit on every joint. There are three families of cases:
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
 
-The data shown is from the census of 2026-11-21, on the branch that takes riding arcs' STMs from
-FNI's decoupled tangent propagator (R75, Lemma DT). Rules R1, R2, R15, R16, R20, R25, R26, R28,
+The data shown is from the census of 2026-11-21, on the branch that starts routes 1, 2, 5 and 6
+first (R72, Observation O7 measured again). Rules R1, R2, R15, R16, R20, R25, R26, R28,
 R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72, R74 and R75 are turned on
 (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
 secondary weight (R24); the first draw at a hundred times it, once lowering the weight
 after the limits and once with them (R45); and at three hundred times it with them. The
-routes run in parallel, one case at a time, on 8 physical cores: the first four at
-once, the other three after 6 s or as soon as one of the four ends (R72). The census runs its
+routes run in parallel, one case at a time, on 8 physical cores: four at once (the
+first, second, fifth and sixth), the other three after 6 s or as soon as one of the four
+ends (R72). The census runs its
 cases in its main process, so the routes are the only other processes. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
 87 of the 90 cases solve, all under 60 s, and 76 of them under 5 s. The mean solve time
-of the solved cases is 3.551 s, and the slowest is 38.597 s. Times are wall-clock seconds
+of the solved cases is 3.437 s, and the slowest is 39.985 s. Times are wall-clock seconds
 per case, to the millisecond.
 
 Four changes made this. First, four routes start at once and the other three after 6 s
@@ -47,7 +48,7 @@ The arc's state is integrated alone, as before. Per accepted step, one sixth-ord
 the variational equation uses the riding Jacobian at five points, instead of evaluating
 the variational right-hand side at all twelve stages. The route needs its Jacobians only
 to about 1e-6, and the propagator stays within that. Final times agree to 1e-13. With all seven routes at once and 1e-12 (page 113), 57 cases were under 5 s and the
-mean was 5.078 s. The same 87 cases solve, in 309.0 s against 441.8 s.
+mean was 5.078 s. The same 87 cases solve, in 299.0 s against 441.8 s.
 
 When all seven routes are busy they run at about half speed (Observation O4). The
 winners are spread over every route, so none can be dropped.

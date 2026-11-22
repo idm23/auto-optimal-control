@@ -337,6 +337,9 @@ class Homotopy:
         self.path_rtol = None
         self.route_width = 4
         self.route_delay = 6.0
+        #: R72: which routes (1-based) start first (None: the first ``route_width``); chosen
+        #: by Observation O7's schedule model on the routes measured with R74 and R75.
+        self.route_first = (1, 2, 5, 6)
         self.corner_touches = False         # rule R12: refuted by Lemma L (see the note)
         self.corner_rel = 1e-2              # R12: how near the edge a peak must be
         #: Rule R16: after a step that overshoots a birth, place the next one at the
@@ -2085,6 +2088,11 @@ class Homotopy:
         # busy cores run faster (O4), and most cases are won early by the first routes.
         width = (self.route_width if getattr(self, "staged_routes", False) else None) or len(members)
         waiting = list(enumerate(members))
+        lead_ids = getattr(self, "route_first", None)
+        if lead_ids and getattr(self, "staged_routes", False):
+            # The routes that start first (1-based, as the census numbers them), then the rest.
+            lead = [w for w in waiting if w[0] + 1 in lead_ids]
+            waiting = lead + [w for w in waiting if w[0] + 1 not in lead_ids]
         for n_, member in waiting[:width]:
             launch(n_, member)
         waiting = waiting[width:]
