@@ -46,9 +46,10 @@ def _joint(name):
 
 
 def classify(shooting, v):
-    """What a solution holds: ``{"1": [...], "2": [...], "together": [...]}``, the order-1
-    and order-2 limits held or touched, and the pairs ``(order-1, order-2)`` held at one
-    instant (an arc of one over an arc or a touch of the other)."""
+    """What a solution holds: ``{"1": [...], "2": [...], "3": [...], "together": [...]}``,
+    the order-1, order-2 and order-3 limits held or touched (order 3: touches only), and
+    the pairs ``(order-1, order-2)`` held at one instant (an arc of one over an arc or a
+    touch of the other)."""
     k = shooting.kernels
     names_, orders = list(k.CONSTRAINT_NAMES), list(k.CONSTRAINT_ORDERS)
     events = getattr(shooting, "events", [])
@@ -58,7 +59,7 @@ def classify(shooting, v):
             spans[i] = [float(t), float(t)]
         elif ev in ("in", "out"):
             spans.setdefault(i, [float(t), float(t)])[0 if ev == "in" else 1] = float(t)
-    held = {1: [], 2: []}
+    held = {1: [], 2: [], 3: []}
     for i, (a, b) in spans.items():
         c = shooting.arcs[i][1]
         if orders[c] in held:
@@ -66,6 +67,7 @@ def classify(shooting, v):
     together = sorted({(n1, n2) for n1, a1, b1 in held[1] for n2, a2, b2 in held[2]
                        if a1 <= b2 and a2 <= b1})
     return {"1": sorted({n for n, _, _ in held[1]}), "2": sorted({n for n, _, _ in held[2]}),
+            "3": sorted({n for n, _, _ in held[3]}),
             "together": [list(p) for p in together],
             "same joint": any(_joint(a) == _joint(b) for a, b in together),
             "other joints": any(_joint(a) != _joint(b) for a, b in together)}

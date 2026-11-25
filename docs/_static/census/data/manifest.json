@@ -7,9 +7,10 @@
    "index": 0,
    "setting": "70%",
    "solved": true,
-   "seconds": 5.61,
+   "seconds": 5.661,
    "tf": 1.187736539522118,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal0@80.json",
@@ -18,9 +19,10 @@
    "index": 0,
    "setting": "80%",
    "solved": true,
-   "seconds": 2.665,
+   "seconds": 2.677,
    "tf": 1.1566341840991572,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal0@90.json",
@@ -29,9 +31,10 @@
    "index": 0,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.803,
+   "seconds": 0.82,
    "tf": 1.1566160866446908,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal1@70.json",
@@ -40,9 +43,10 @@
    "index": 1,
    "setting": "70%",
    "solved": true,
-   "seconds": 2.605,
+   "seconds": 2.664,
    "tf": 1.1675058733367532,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal1@80.json",
@@ -51,9 +55,10 @@
    "index": 1,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.771,
+   "seconds": 0.779,
    "tf": 1.1674990130038592,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal1@90.json",
@@ -62,9 +67,10 @@
    "index": 1,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.305,
+   "seconds": 0.312,
    "tf": 1.1674987370971328,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal2@70.json",
@@ -73,9 +79,10 @@
    "index": 2,
    "setting": "70%",
    "solved": true,
-   "seconds": 3.118,
+   "seconds": 3.122,
    "tf": 1.1556941769352846,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal2@80.json",
@@ -84,9 +91,10 @@
    "index": 2,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.626,
+   "seconds": 0.631,
    "tf": 1.1434204471471174,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal2@90.json",
@@ -95,9 +103,10 @@
    "index": 2,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.315,
+   "seconds": 0.321,
    "tf": 1.1429915178734786,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal3@70.json",
@@ -106,9 +115,10 @@
    "index": 3,
    "setting": "70%",
    "solved": true,
-   "seconds": 2.801,
+   "seconds": 2.867,
    "tf": 1.1471710285060746,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal3@80.json",
@@ -117,9 +127,10 @@
    "index": 3,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.744,
+   "seconds": 0.769,
    "tf": 1.147149818619058,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal3@90.json",
@@ -128,9 +139,10 @@
    "index": 3,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.483,
+   "seconds": 0.493,
    "tf": 1.1471418817915464,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal4@70.json",
@@ -139,9 +151,10 @@
    "index": 4,
    "setting": "70%",
    "solved": true,
-   "seconds": 2.832,
+   "seconds": 2.884,
    "tf": 1.1675062299299532,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal4@80.json",
@@ -150,9 +163,10 @@
    "index": 4,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.718,
+   "seconds": 0.738,
    "tf": 1.167490703011768,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal4@90.json",
@@ -161,9 +175,10 @@
    "index": 4,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.441,
+   "seconds": 0.456,
    "tf": 1.167472073626121,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal5@70.json",
@@ -172,9 +187,10 @@
    "index": 5,
    "setting": "70%",
    "solved": true,
-   "seconds": 1.87,
+   "seconds": 1.909,
    "tf": 1.0530968715630704,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal5@80.json",
@@ -183,9 +199,10 @@
    "index": 5,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.618,
+   "seconds": 0.626,
    "tf": 1.0530801619939685,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal5@90.json",
@@ -194,9 +211,10 @@
    "index": 5,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.45,
+   "seconds": 0.472,
    "tf": 1.053072143745706,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal6@70.json",
@@ -205,9 +223,10 @@
    "index": 6,
    "setting": "70%",
    "solved": true,
-   "seconds": 2.313,
+   "seconds": 2.334,
    "tf": 1.1260930725519742,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal6@80.json",
@@ -216,9 +235,10 @@
    "index": 6,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.709,
+   "seconds": 0.721,
    "tf": 1.1158180621316613,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal6@90.json",
@@ -227,9 +247,10 @@
    "index": 6,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.319,
+   "seconds": 0.329,
    "tf": 1.115785227682338,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal7@70.json",
@@ -238,9 +259,10 @@
    "index": 7,
    "setting": "70%",
    "solved": true,
-   "seconds": 2.011,
+   "seconds": 2.041,
    "tf": 1.0769652179327394,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal7@80.json",
@@ -249,9 +271,10 @@
    "index": 7,
    "setting": "80%",
    "solved": true,
-   "seconds": 1.749,
+   "seconds": 1.774,
    "tf": 1.0769516340673504,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal7@90.json",
@@ -260,9 +283,10 @@
    "index": 7,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.827,
+   "seconds": 0.851,
    "tf": 1.0769341916302584,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal8@70.json",
@@ -271,9 +295,10 @@
    "index": 8,
    "setting": "70%",
    "solved": true,
-   "seconds": 1.36,
+   "seconds": 1.365,
    "tf": 1.132731481306677,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal8@80.json",
@@ -282,9 +307,10 @@
    "index": 8,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.57,
+   "seconds": 0.575,
    "tf": 1.122075487553648,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal8@90.json",
@@ -293,9 +319,10 @@
    "index": 8,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.284,
+   "seconds": 0.285,
    "tf": 1.1220647168169005,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal9@70.json",
@@ -304,9 +331,10 @@
    "index": 9,
    "setting": "70%",
    "solved": true,
-   "seconds": 2.989,
+   "seconds": 3.003,
    "tf": 1.1276667473247128,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal9@80.json",
@@ -315,9 +343,10 @@
    "index": 9,
    "setting": "80%",
    "solved": true,
-   "seconds": 1.029,
+   "seconds": 1.04,
    "tf": 1.1276121437135331,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "goal9@90.json",
@@ -326,9 +355,334 @@
    "index": 9,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.101,
+   "seconds": 1.12,
    "tf": 1.1275921826859163,
-   "rates": false
+   "rates": false,
+   "positions": false
+  },
+  {
+   "file": "pgoal2@70.json",
+   "name": "pgoal2@70",
+   "family": "pgoal",
+   "index": 2,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 5.678,
+   "tf": 1.1561417734926365,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "pgoal3@70.json",
+   "name": "pgoal3@70",
+   "family": "pgoal",
+   "index": 3,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 2.934,
+   "tf": 1.1471732788548288,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "pgoal4@70.json",
+   "name": "pgoal4@70",
+   "family": "pgoal",
+   "index": 4,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 2.605,
+   "tf": 1.167510431947968,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "pgoal5@70.json",
+   "name": "pgoal5@70",
+   "family": "pgoal",
+   "index": 5,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 2.504,
+   "tf": 1.0530970240473483,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "pgoal6@70.json",
+   "name": "pgoal6@70",
+   "family": "pgoal",
+   "index": 6,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 2.465,
+   "tf": 1.1275992998947078,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "pgoal6@80.json",
+   "name": "pgoal6@80",
+   "family": "pgoal",
+   "index": 6,
+   "setting": "80%",
+   "solved": true,
+   "seconds": 1.039,
+   "tf": 1.1158381746167245,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest1.json",
+   "name": "prest1",
+   "family": "prest",
+   "index": 1,
+   "setting": null,
+   "solved": true,
+   "seconds": 4.659,
+   "tf": 1.688004883722093,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest10.json",
+   "name": "prest10",
+   "family": "prest",
+   "index": 10,
+   "setting": null,
+   "solved": true,
+   "seconds": 0.849,
+   "tf": 1.446152409458013,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest11.json",
+   "name": "prest11",
+   "family": "prest",
+   "index": 11,
+   "setting": null,
+   "solved": true,
+   "seconds": 4.024,
+   "tf": 1.5273921490337155,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest12.json",
+   "name": "prest12",
+   "family": "prest",
+   "index": 12,
+   "setting": null,
+   "solved": true,
+   "seconds": 3.322,
+   "tf": 1.569927759844164,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest13.json",
+   "name": "prest13",
+   "family": "prest",
+   "index": 13,
+   "setting": null,
+   "solved": true,
+   "seconds": 3.597,
+   "tf": 1.2983996387040204,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest2.json",
+   "name": "prest2",
+   "family": "prest",
+   "index": 2,
+   "setting": null,
+   "solved": true,
+   "seconds": 1.734,
+   "tf": 1.4588324556860834,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest3.json",
+   "name": "prest3",
+   "family": "prest",
+   "index": 3,
+   "setting": null,
+   "solved": true,
+   "seconds": 2.896,
+   "tf": 1.4110143035654583,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest4.json",
+   "name": "prest4",
+   "family": "prest",
+   "index": 4,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.032,
+   "tf": null,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest5.json",
+   "name": "prest5",
+   "family": "prest",
+   "index": 5,
+   "setting": null,
+   "solved": true,
+   "seconds": 5.795,
+   "tf": 1.771322242982824,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest6.json",
+   "name": "prest6",
+   "family": "prest",
+   "index": 6,
+   "setting": null,
+   "solved": true,
+   "seconds": 5.016,
+   "tf": 1.5411901411536701,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "prest9.json",
+   "name": "prest9",
+   "family": "prest",
+   "index": 9,
+   "setting": null,
+   "solved": true,
+   "seconds": 4.326,
+   "tf": 1.3689334399350919,
+   "rates": false,
+   "positions": true
+  },
+  {
+   "file": "pvgoal5@70.json",
+   "name": "pvgoal5@70",
+   "family": "pvgoal",
+   "index": 5,
+   "setting": "70%",
+   "solved": true,
+   "seconds": 5.832,
+   "tf": 1.1927536004087318,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest1.json",
+   "name": "pvrest1",
+   "family": "pvrest",
+   "index": 1,
+   "setting": null,
+   "solved": true,
+   "seconds": 14.237,
+   "tf": 2.006482842751843,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest10.json",
+   "name": "pvrest10",
+   "family": "pvrest",
+   "index": 10,
+   "setting": null,
+   "solved": false,
+   "seconds": 32.124,
+   "tf": null,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest11.json",
+   "name": "pvrest11",
+   "family": "pvrest",
+   "index": 11,
+   "setting": null,
+   "solved": true,
+   "seconds": 3.219,
+   "tf": 1.761326472657429,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest12.json",
+   "name": "pvrest12",
+   "family": "pvrest",
+   "index": 12,
+   "setting": null,
+   "solved": true,
+   "seconds": 47.939,
+   "tf": 1.6944868762846939,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest13.json",
+   "name": "pvrest13",
+   "family": "pvrest",
+   "index": 13,
+   "setting": null,
+   "solved": true,
+   "seconds": 4.742,
+   "tf": 1.4772717968366647,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest2.json",
+   "name": "pvrest2",
+   "family": "pvrest",
+   "index": 2,
+   "setting": null,
+   "solved": false,
+   "seconds": 60.011,
+   "tf": null,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest3.json",
+   "name": "pvrest3",
+   "family": "pvrest",
+   "index": 3,
+   "setting": null,
+   "solved": true,
+   "seconds": 4.866,
+   "tf": 1.527656261383336,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest5.json",
+   "name": "pvrest5",
+   "family": "pvrest",
+   "index": 5,
+   "setting": null,
+   "solved": true,
+   "seconds": 23.389,
+   "tf": 2.039176112903086,
+   "rates": true,
+   "positions": true
+  },
+  {
+   "file": "pvrest6.json",
+   "name": "pvrest6",
+   "family": "pvrest",
+   "index": 6,
+   "setting": null,
+   "solved": true,
+   "seconds": 16.911,
+   "tf": 1.7936078124359673,
+   "rates": true,
+   "positions": true
   },
   {
    "file": "rest0.json",
@@ -337,9 +691,10 @@
    "index": 0,
    "setting": null,
    "solved": true,
-   "seconds": 0.656,
+   "seconds": 0.66,
    "tf": 1.0056486481030242,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest1.json",
@@ -348,9 +703,10 @@
    "index": 1,
    "setting": null,
    "solved": true,
-   "seconds": 4.113,
+   "seconds": 4.114,
    "tf": 1.683731883439203,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest10.json",
@@ -359,9 +715,10 @@
    "index": 10,
    "setting": null,
    "solved": true,
-   "seconds": 0.488,
+   "seconds": 0.492,
    "tf": 1.4461524092860216,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest11.json",
@@ -370,9 +727,10 @@
    "index": 11,
    "setting": null,
    "solved": true,
-   "seconds": 4.813,
+   "seconds": 4.742,
    "tf": 1.5232762937357869,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest12.json",
@@ -381,9 +739,10 @@
    "index": 12,
    "setting": null,
    "solved": true,
-   "seconds": 3.201,
+   "seconds": 3.105,
    "tf": 1.5647290108476104,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest13.json",
@@ -392,9 +751,10 @@
    "index": 13,
    "setting": null,
    "solved": true,
-   "seconds": 1.303,
+   "seconds": 1.275,
    "tf": 1.2853086939572729,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest14.json",
@@ -403,9 +763,10 @@
    "index": 14,
    "setting": null,
    "solved": true,
-   "seconds": 0.115,
+   "seconds": 0.117,
    "tf": 1.273843672358958,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest2.json",
@@ -414,9 +775,10 @@
    "index": 2,
    "setting": null,
    "solved": true,
-   "seconds": 1.204,
+   "seconds": 1.191,
    "tf": 1.451390927523119,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest3.json",
@@ -425,9 +787,10 @@
    "index": 3,
    "setting": null,
    "solved": true,
-   "seconds": 1.364,
+   "seconds": 1.314,
    "tf": 1.4026544484693209,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest4.json",
@@ -436,9 +799,10 @@
    "index": 4,
    "setting": null,
    "solved": true,
-   "seconds": 11.752,
+   "seconds": 11.536,
    "tf": 1.7943320555412907,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest5.json",
@@ -447,9 +811,10 @@
    "index": 5,
    "setting": null,
    "solved": true,
-   "seconds": 4.834,
+   "seconds": 4.759,
    "tf": 1.7499272895751836,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest6.json",
@@ -458,9 +823,10 @@
    "index": 6,
    "setting": null,
    "solved": true,
-   "seconds": 2.639,
+   "seconds": 2.595,
    "tf": 1.5387226989893856,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest7.json",
@@ -469,9 +835,10 @@
    "index": 7,
    "setting": null,
    "solved": true,
-   "seconds": 0.31,
+   "seconds": 0.317,
    "tf": 1.3850275266539074,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest8.json",
@@ -480,9 +847,10 @@
    "index": 8,
    "setting": null,
    "solved": true,
-   "seconds": 0.104,
+   "seconds": 0.103,
    "tf": 1.1867642584190146,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "rest9.json",
@@ -491,9 +859,10 @@
    "index": 9,
    "setting": null,
    "solved": true,
-   "seconds": 3.203,
+   "seconds": 3.124,
    "tf": 1.3685146027721427,
-   "rates": false
+   "rates": false,
+   "positions": false
   },
   {
    "file": "vgoal0@70.json",
@@ -502,9 +871,10 @@
    "index": 0,
    "setting": "70%",
    "solved": false,
-   "seconds": 60.042,
+   "seconds": 60.047,
    "tf": null,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal0@80.json",
@@ -513,9 +883,10 @@
    "index": 0,
    "setting": "80%",
    "solved": true,
-   "seconds": 3.723,
+   "seconds": 3.776,
    "tf": 1.240177351482663,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal0@90.json",
@@ -524,9 +895,10 @@
    "index": 0,
    "setting": "90%",
    "solved": true,
-   "seconds": 3.517,
+   "seconds": 3.586,
    "tf": 1.1912213329704733,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal1@70.json",
@@ -535,9 +907,10 @@
    "index": 1,
    "setting": "70%",
    "solved": true,
-   "seconds": 3.342,
+   "seconds": 3.42,
    "tf": 1.3223486176256225,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal1@80.json",
@@ -546,9 +919,10 @@
    "index": 1,
    "setting": "80%",
    "solved": true,
-   "seconds": 2.426,
+   "seconds": 2.465,
    "tf": 1.2518299523765517,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal1@90.json",
@@ -557,9 +931,10 @@
    "index": 1,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.872,
+   "seconds": 0.892,
    "tf": 1.202426791996147,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal2@70.json",
@@ -568,9 +943,10 @@
    "index": 2,
    "setting": "70%",
    "solved": true,
-   "seconds": 3.023,
+   "seconds": 3.108,
    "tf": 1.2949651584935036,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal2@80.json",
@@ -579,9 +955,10 @@
    "index": 2,
    "setting": "80%",
    "solved": true,
-   "seconds": 1.857,
+   "seconds": 1.887,
    "tf": 1.2255940726802375,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal2@90.json",
@@ -590,9 +967,10 @@
    "index": 2,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.094,
+   "seconds": 1.124,
    "tf": 1.1771012863088768,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal3@70.json",
@@ -601,9 +979,10 @@
    "index": 3,
    "setting": "70%",
    "solved": false,
-   "seconds": 60.039,
+   "seconds": 60.057,
    "tf": null,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal3@80.json",
@@ -612,9 +991,10 @@
    "index": 3,
    "setting": "80%",
    "solved": true,
-   "seconds": 24.504,
+   "seconds": 26.051,
    "tf": 1.4014562784441504,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal3@90.json",
@@ -623,9 +1003,10 @@
    "index": 3,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.161,
+   "seconds": 1.2,
    "tf": 1.181448106690481,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal4@70.json",
@@ -634,9 +1015,10 @@
    "index": 4,
    "setting": "70%",
    "solved": true,
-   "seconds": 39.985,
+   "seconds": 38.436,
    "tf": 1.3557897962021916,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal4@80.json",
@@ -645,9 +1027,10 @@
    "index": 4,
    "setting": "80%",
    "solved": true,
-   "seconds": 3.003,
+   "seconds": 3.143,
    "tf": 1.2518295381160827,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal4@90.json",
@@ -656,9 +1039,10 @@
    "index": 4,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.237,
+   "seconds": 1.294,
    "tf": 1.2023979057082723,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal5@70.json",
@@ -667,9 +1051,10 @@
    "index": 5,
    "setting": "70%",
    "solved": true,
-   "seconds": 3.061,
+   "seconds": 3.134,
    "tf": 1.1927523555899096,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal5@80.json",
@@ -678,9 +1063,10 @@
    "index": 5,
    "setting": "80%",
    "solved": true,
-   "seconds": 1.048,
+   "seconds": 1.087,
    "tf": 1.1291360662587133,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal5@90.json",
@@ -689,9 +1075,10 @@
    "index": 5,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.882,
+   "seconds": 0.909,
    "tf": 1.0845691614303665,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal6@70.json",
@@ -700,9 +1087,10 @@
    "index": 6,
    "setting": "70%",
    "solved": true,
-   "seconds": 0.782,
+   "seconds": 0.79,
    "tf": 1.263780475171651,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal6@80.json",
@@ -711,9 +1099,10 @@
    "index": 6,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.65,
+   "seconds": 0.663,
    "tf": 1.196382251550161,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal6@90.json",
@@ -722,9 +1111,10 @@
    "index": 6,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.547,
+   "seconds": 0.557,
    "tf": 1.149158436022989,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal7@70.json",
@@ -733,9 +1123,10 @@
    "index": 7,
    "setting": "70%",
    "solved": true,
-   "seconds": 1.709,
+   "seconds": 1.728,
    "tf": 1.2197837899429427,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal7@80.json",
@@ -744,9 +1135,10 @@
    "index": 7,
    "setting": "80%",
    "solved": true,
-   "seconds": 1.546,
+   "seconds": 1.859,
    "tf": 1.154725021574242,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal7@90.json",
@@ -755,9 +1147,10 @@
    "index": 7,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.863,
+   "seconds": 0.877,
    "tf": 1.1091447197920614,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal8@70.json",
@@ -766,9 +1159,10 @@
    "index": 8,
    "setting": "70%",
    "solved": true,
-   "seconds": 1.013,
+   "seconds": 1.021,
    "tf": 1.2748804278230799,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal8@80.json",
@@ -777,9 +1171,10 @@
    "index": 8,
    "setting": "80%",
    "solved": true,
-   "seconds": 0.941,
+   "seconds": 0.965,
    "tf": 1.2031265764433274,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal8@90.json",
@@ -788,9 +1183,10 @@
    "index": 8,
    "setting": "90%",
    "solved": true,
-   "seconds": 0.658,
+   "seconds": 0.662,
    "tf": 1.155638413730909,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal9@70.json",
@@ -799,9 +1195,10 @@
    "index": 9,
    "setting": "70%",
    "solved": true,
-   "seconds": 5.6,
+   "seconds": 5.581,
    "tf": 1.2771918929138908,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal9@80.json",
@@ -810,9 +1207,10 @@
    "index": 9,
    "setting": "80%",
    "solved": true,
-   "seconds": 2.925,
+   "seconds": 3.216,
    "tf": 1.2090430565165196,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vgoal9@90.json",
@@ -821,9 +1219,10 @@
    "index": 9,
    "setting": "90%",
    "solved": true,
-   "seconds": 1.569,
+   "seconds": 1.588,
    "tf": 1.1613182851264465,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest0.json",
@@ -832,9 +1231,10 @@
    "index": 0,
    "setting": null,
    "solved": true,
-   "seconds": 0.92,
+   "seconds": 0.907,
    "tf": 1.0226946220414903,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest1.json",
@@ -843,9 +1243,10 @@
    "index": 1,
    "setting": null,
    "solved": true,
-   "seconds": 13.64,
+   "seconds": 12.899,
    "tf": 1.9962336056835654,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest10.json",
@@ -854,9 +1255,10 @@
    "index": 10,
    "setting": null,
    "solved": true,
-   "seconds": 11.078,
+   "seconds": 11.104,
    "tf": 1.577202122984379,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest11.json",
@@ -865,9 +1267,10 @@
    "index": 11,
    "setting": null,
    "solved": true,
-   "seconds": 2.231,
+   "seconds": 2.247,
    "tf": 1.7602678228477042,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest12.json",
@@ -876,9 +1279,10 @@
    "index": 12,
    "setting": null,
    "solved": true,
-   "seconds": 38.949,
+   "seconds": 39.608,
    "tf": 1.6923127530181727,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest13.json",
@@ -887,9 +1291,10 @@
    "index": 13,
    "setting": null,
    "solved": true,
-   "seconds": 3.957,
+   "seconds": 3.976,
    "tf": 1.4768231291805751,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest14.json",
@@ -898,9 +1303,10 @@
    "index": 14,
    "setting": null,
    "solved": true,
-   "seconds": 0.504,
+   "seconds": 0.519,
    "tf": 1.4427958625431139,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest2.json",
@@ -909,9 +1315,10 @@
    "index": 2,
    "setting": null,
    "solved": true,
-   "seconds": 1.893,
+   "seconds": 1.894,
    "tf": 1.608786149970643,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest3.json",
@@ -920,9 +1327,10 @@
    "index": 3,
    "setting": null,
    "solved": true,
-   "seconds": 3.464,
+   "seconds": 3.434,
    "tf": 1.5262151775776278,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest4.json",
@@ -931,9 +1339,10 @@
    "index": 4,
    "setting": null,
    "solved": false,
-   "seconds": 60.033,
+   "seconds": 60.035,
    "tf": null,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest5.json",
@@ -942,9 +1351,10 @@
    "index": 5,
    "setting": null,
    "solved": true,
-   "seconds": 7.869,
+   "seconds": 8.035,
    "tf": 2.028126109547209,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest6.json",
@@ -953,9 +1363,10 @@
    "index": 6,
    "setting": null,
    "solved": true,
-   "seconds": 10.377,
+   "seconds": 10.368,
    "tf": 1.7899665154624398,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest7.json",
@@ -964,9 +1375,10 @@
    "index": 7,
    "setting": null,
    "solved": true,
-   "seconds": 1.17,
+   "seconds": 1.178,
    "tf": 1.485070802781608,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest8.json",
@@ -975,9 +1387,10 @@
    "index": 8,
    "setting": null,
    "solved": true,
-   "seconds": 0.568,
+   "seconds": 0.575,
    "tf": 1.3441667264822545,
-   "rates": true
+   "rates": true,
+   "positions": false
   },
   {
    "file": "vrest9.json",
@@ -986,9 +1399,10 @@
    "index": 9,
    "setting": null,
    "solved": true,
-   "seconds": 5.751,
+   "seconds": 5.816,
    "tf": 1.388021817361581,
-   "rates": true
+   "rates": true,
+   "positions": false
   }
  ]
 }
