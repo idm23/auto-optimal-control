@@ -39,23 +39,38 @@ def _describe(name):
     return {"family": family, "index": index, "setting": f"{pct}%" if pct else None}
 
 
-def export_case(out_dir, name, params, row, result=None, torques=None):
+def export_case(out_dir, name, params, row, result=None, torques=None, rates=None,
+                positions=None):
     """Write ``<out_dir>/<name>.json``.
 
     ``params`` is the case's parameter vector ([q0, qf, jerk limits, torque limits],
-    then rate limits for a rate case), ``row`` the census row (``exact``, ``sec``,
-    ``tf``, ``msg``, and for a rate case ``orders``: which limits the answer holds),
-    ``result`` the solve result when exact, and ``torques(Q, W, A)`` the joint torques
-    at sampled states."""
+    then rate limits for a rate case, then ``q_min``, ``q_max`` for a position case),
+    ``row`` the census row (``exact``, ``sec``, ``tf``, ``msg``, and for a rate or
+    position case ``orders``: which limits the answer holds), ``result`` the solve result
+    when exact, and ``torques(Q, W, A)`` the joint torques at sampled states. ``rates``
+    and ``positions`` say which limits the case has (by default: rates when there are
+    30 parameters, positions never); ``positions`` may be the list of joints whose
+    position limits bind."""
     p = np.asarray(params, dtype=float)
     q0, qf, jerk, tau = p[:6], p[6:12], p[12:18], p[18:24]
-    rates = p[24:30] if len(p) >= 30 else None
+    if rates is None:
+        rates = len(p) == 30
+    rates = p[24:30] if rates else None
+    off = 30 if rates is not None else 24
+    pos = None
+    if positions is not None and positions is not False:
+        pos = (p[off:off + 6], p[off + 6:off + 12])
     data = {"name": name, **_describe(name), "solved": bool(row.get("exact")),
             "seconds": row.get("sec"), "tf": row.get("tf"), "message": row.get("msg"),
             "jerk_limits": _round(jerk), "torque_limits": _round(tau),
             "start": _round(_points(q0)), "goal": _round(_points(qf))}
     if rates is not None:
         data["rate_limits"] = _round(rates)
+    if pos is not None:
+        data["position_limits"] = {"min": _round(pos[0]), "max": _round(pos[1]),
+                                   "joints": list(positions) if positions is not True
+                                   else list(range(6))}
+    if rates is not None or pos is not None:
         data["orders"] = row.get("orders")
     if result is not None and row.get("exact"):
         tr = result.shooting.trajectory(result.solution.v, n_points=N_SAMPLES)
@@ -85,6 +100,7 @@ def write_manifest(out_dir):
         d = json.loads(f.read_text())
         cases.append({"file": f.name, "name": d["name"], "family": d["family"],
                       "index": d["index"], "setting": d["setting"], "solved": d["solved"],
-                      "seconds": d["seconds"], "tf": d["tf"], "rates": "rate_limits" in d})
+                      "seconds": d["seconds"], "tf": d["tf"], "rates": "rate_limits" in d,
+                      "positions": "position_limits" in d})
     (out / "manifest.json").write_text(json.dumps({"cases": cases}, indent=1))
     return len(cases)

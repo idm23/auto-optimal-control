@@ -1,7 +1,7 @@
 # Arm census
 
 The six-joint arm benchmark: minimum-time, jerk-limited motions, each with a
-torque limit on every joint. There are three families of cases:
+torque limit on every joint. There are four families of cases:
 
 - **`goal<i>@<p>`**: from rest at the origin to one of ten random targets. The
   torque limits are set from the motion with no torque limits. Each joint's
@@ -17,9 +17,24 @@ torque limit on every joint. There are three families of cases:
   order 1. The cases are frozen in `benchmarks/rate_cases.json`, made by
   `benchmarks/rate_cases.py`. Each row says which limits its answer holds, and which
   ones at the same instant.
+- **`pgoal<i>@<p>`, `prest<i>`, `pvgoal<i>@<p>`, `pvrest<i>`**: the census answers that
+  swing a joint past its start-to-goal range, again with that joint's angle capped. A
+  position limit must contain the start and goal angles, so it binds only where the
+  answer overshoots. The motions limited by jerk alone never do; the torque-limited
+  answers do, the arm swinging past its target to use the dynamics.
+  - **The cap:** each overshooting joint is capped a fraction `p` of the way from its end
+    range to its peak there (the goals' `p`; 90%, 80% and 70% in turn for the rest
+    cases), as the rate cases cap rates. A side that does not overshoot gets no limit.
+  - **The two families:** `pgoal` and `prest` come from the torque-limited answers (17),
+    with torque and position limits. `pvgoal` and `pvrest` come from the rate-limited
+    answers (10), with torque, rate and position limits: all three orders at once.
+  - **The order:** with jerk control an angle limit has order 3, and with a smooth
+    control law it is only touched, never ridden (Jacobson, Lele & Speyer 1971).
+  - **Where they live:** the cases are frozen in `benchmarks/position_cases.json`, made
+    by `benchmarks/position_cases.py`.
 
-The data shown is from the census of 2026-11-21, on the branch that starts routes 1, 2, 5 and 6
-first (R72, Observation O7 measured again). Rules R1, R2, R15, R16, R20, R25, R26, R28,
+The data shown is from the census of 2026-11-22, on the branch that adds the position-limit
+cases (Observation O8). Rules R1, R2, R15, R16, R20, R25, R26, R28,
 R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72, R74 and R75 are turned on
 (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
@@ -32,8 +47,10 @@ ends (R72). The census runs its
 cases in its main process, so the routes are the only other processes. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-87 of the 90 cases solve, all under 60 s, and 76 of them under 5 s. The mean solve time
-of the solved cases is 3.437 s, and the slowest is 39.985 s. Times are wall-clock seconds
+111 of the 117 cases solve, all under 60 s, and 92 of them under 5 s. The mean solve time
+of the solved cases is 4.281 s. Of the 27 position-limit cases, 24 solve, 16 of them
+under 5 s, and every one of the 24 touches the position limits it was given. The 90 older
+cases are as before: 87 solve, 76 under 5 s. Times are wall-clock seconds
 per case, to the millisecond.
 
 Four changes made this. First, four routes start at once and the other three after 6 s
@@ -57,6 +74,8 @@ winners are spread over every route, so none can be dropped.
 - **`vgoal`:** 28 of 30: all ten at 90%, all ten at 80% and eight at 70% (all but goals
   0 and 3).
 - **`vrest`:** 14 of 15: all but rest 4.
+- **`pgoal`:** all 6. **`prest`:** 10 of 11, all but rest 4. **`pvgoal`:** the one.
+  **`pvrest`:** 7 of 9, all but rest 2 and rest 10.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit
 on another joint at the same instant (the nine new ones are not yet read for this): goals 3 and 4 at 90%, goals 0 and 1 at 80%, rest 2 and rest 9.
@@ -64,7 +83,8 @@ Goal 3 at 90% also holds `tau4_min` and `w4_min` together, and goal 1 at 80%
 `tau5_min` and `w5_max`.
 
 Pick a case to watch it. Its traces turn red where the joint rides its limit: torques
-for every case, and rates too for a rate-limited one. The page is drawn from the data in
+for every case, rates too for a rate-limited one, and for a position-limit case the
+capped joints' angles, red where they touch a limit. The page is drawn from the data in
 `_static/census/data`. Every pull request that changes the solver or the census
 refreshes it before merging; the README's "Merging a pull request" has the command.
 Exporting a census adds every case it runs, new ones included:

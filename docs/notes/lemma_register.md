@@ -1566,6 +1566,24 @@ jump, density, gap, order, bound, end, held sign).
   54.5 s, every one faster (0.57× to 0.94×), with the same final times.
 - **Used by.** R75.
 
+### Observation O8: the census's position limits are touched, as order 3 predicts (2026-11-22)
+
+- **The cases.** 27 census answers swing a joint past its start-to-goal range: 17
+  torque-limited and 10 rate-limited (`benchmarks/position_cases.py`). Each is repeated
+  with the overshooting joints capped at the case's `p` of their overshoot.
+- **Measured (census page 121):**
+  - 24 of the 27 solve, 16 of them under 5 s.
+  - Every solved answer touches the limits it was given, as order-3 touch points. For
+    example, pgoal 2 at 70% caps joints 3 and 6 and touches `q3_min` and `q6_max`, and
+    prest 5 caps joints 2 to 5 and touches all four.
+  - None rides a position limit, as Jacobson, Lele & Speyer's result for order 3 with a
+    smooth control law says.
+  - Prest 4, pvrest 2 and pvrest 10 are not solved: their routes stall in tightening.
+- **Consequence.** The route's order-3 handling, touch points only, carries the arm's
+  position limits without new rules. The cases that fail, and the slow ones (pvrest 12
+  at 47.9 s), are where its touch-point events interact with the torque and rate arcs.
+- **Used by.** Nothing yet: a measurement of the census.
+
 ### Observation O7: each route alone on every case, and staged starts (2026-11-21)
 
 - **Measured.** Each of R15's seven routes ran alone over all 90 cases (release rules

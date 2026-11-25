@@ -60,6 +60,10 @@ TQ = None
 EXPORT = None
 RATE_CASES = json.loads((Path(__file__).resolve().parent / "rate_cases.json").read_text()) \
     if (Path(__file__).resolve().parent / "rate_cases.json").exists() else {}
+HP = None            # the arm with position limits (order 3), for position_cases.json
+HPV = None           # the arm with rate and position limits
+POSITION_CASES = json.loads((Path(__file__).resolve().parent / "position_cases.json").read_text()) \
+    if (Path(__file__).resolve().parent / "position_cases.json").exists() else {}
 
 
 def _configure(h, args):
@@ -95,6 +99,29 @@ def rates_homotopy():
     return HV
 
 
+def positions_homotopy(rates=False):
+    """The arm with joint position limits, and rate limits too with ``rates`` (built on
+    first use, configured as ``H``)."""
+    global HP, HPV
+    if rates:
+        if HPV is None:
+            HPV = Homotopy(examples.six_joint_arm_min_time(rate_limits=True, position_limits=True),
+                           cache_dir=ARGS.cache)
+            _configure(HPV, ARGS)
+        return HPV
+    if HP is None:
+        HP = Homotopy(examples.six_joint_arm_min_time(position_limits=True), cache_dir=ARGS.cache)
+        _configure(HP, ARGS)
+    return HP
+
+
+def homotopy_for(name):
+    """The Homotopy that solves census case ``name``."""
+    if name in POSITION_CASES:
+        return positions_homotopy(rates=POSITION_CASES[name]["base"] in RATE_CASES)
+    return rates_homotopy() if name in RATE_CASES else H
+
+
 def setup(args):
     global H, TQ, EXPORT, ARGS
     ARGS = args
@@ -110,6 +137,8 @@ def setup(args):
 
 
 def params(name, free_cache={}):
+    if name in POSITION_CASES:
+        return list(POSITION_CASES[name]["params"])
     if name in RATE_CASES:
         return list(RATE_CASES[name]["params"])
     rng = np.random.default_rng(0)
@@ -134,7 +163,7 @@ def run(name):
     p, r = None, None
     try:
         p = params(name)
-        h = rates_homotopy() if name in RATE_CASES else H
+        h = homotopy_for(name)
         h.snapshot_tag = name
         t0 = time.time()
         r = h.solve(p, BOX, TS)
@@ -145,7 +174,7 @@ def run(name):
         if cap is not None and row["exact"] and row["sec"] > cap:
             # Over the cap is a failure, even if it solved in the end.
             row.update(exact=False, tf=None, msg=f"over the {cap:g} s cap (solved in {row['sec']} s)")
-        if row["exact"] and name in RATE_CASES:
+        if row["exact"] and (name in RATE_CASES or name in POSITION_CASES):
             # Which orders the answer holds, and whether at once (the case's group is
             # only its intent).
             from rate_cases import classify
@@ -155,7 +184,10 @@ def run(name):
                "diagnostics": {}}
     if EXPORT and p is not None:
         try:
-            export_case(EXPORT, name, p, row, r if row["exact"] else None, TQ)
+            pc = POSITION_CASES.get(name)
+            rates = name in RATE_CASES or (pc is not None and pc["base"] in RATE_CASES)
+            export_case(EXPORT, name, p, row, r if row["exact"] else None, TQ, rates=rates,
+                        positions=pc["joints"] if pc is not None else None)
         except Exception as exc:      # the census result stands without the page's copy
             print(f"export of {name} failed: {exc!r}", flush=True)
     return row
@@ -205,9 +237,11 @@ def main(argv=None):
     args = ap.parse_args(argv)
     setup(args)
     names = args.cases or ([f"goal{i}@{p}" for i in range(10) for p in (90, 80, 70)]
-                           + [f"rest{i}" for i in range(15)] + list(RATE_CASES))
-    if any(n in RATE_CASES for n in names):
-        rates_homotopy()                  # built before the workers fork
+                           + [f"rest{i}" for i in range(15)] + list(RATE_CASES)
+                           + list(POSITION_CASES))
+    # Every arm the cases need is built before the workers fork.
+    for n in names:
+        homotopy_for(n)
     rows = []
     # Workers that may start processes of their own (Homotopy.parallel_routes): a
     # ProcessPoolExecutor's are not daemonic, unlike a Pool's.

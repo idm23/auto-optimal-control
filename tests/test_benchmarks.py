@@ -24,6 +24,54 @@ def test_benchmark_matches_literature(name, kernel_cache):
             assert r.details["residual"] < 1e-9 * r.details.get("unknowns scale", 1.0)
 
 
+def test_position_limits_cap_only_the_overshoot():
+    """``position_cases.limits``: a joint that swings past its start-to-goal range is capped
+    at its pct of the way from the range to its peak; a side that does not overshoot gets
+    a bound far away, and the start and goal always lie inside the limits."""
+    import numpy as np
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
+    from position_cases import LOOSE, limits
+
+    t = np.linspace(0, 1, 201)[:, None]
+    # joint 0 overshoots its goal 1.0 by 0.2; joint 1 moves monotonically from 0 to -1.
+    q = np.hstack([t + 0.8 * np.sin(np.pi * t) ** 2 * t * (1 - t) * 4,
+                   -t])
+    over = q[:, 0].max() - 1.0
+    q_min, q_max, binding = limits(q, 70)
+    assert binding.tolist() == [True, False]
+    assert np.isclose(q_max[0], 1.0 + 0.7 * over)
+    assert np.isclose(q_min[0], 0.0 - LOOSE) and np.isclose(q_max[1], 0.0 + LOOSE)
+    assert np.all(q_min <= np.minimum(q[0], q[-1])) and np.all(q_max >= np.maximum(q[0], q[-1]))
+
+
+def test_position_cases_repeat_overshooting_answers_with_limits():
+    """The census's position-limit cases (benchmarks/position_cases.json): each repeats a
+    census case (its params unchanged) with q_min, q_max appended, rate limits kept for
+    a rate case, and at least one binding joint."""
+    import json
+
+    import numpy as np
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
+    path = Path(__file__).resolve().parents[1] / "benchmarks" / "position_cases.json"
+    if not path.exists():
+        pytest.skip("no position cases generated")
+    rates = json.loads((path.parent / "rate_cases.json").read_text())
+    cases = json.loads(path.read_text())
+    assert cases
+    for name, case in cases.items():
+        p = np.asarray(case["params"])
+        assert name == "p" + case["base"] and case["joints"]
+        n_base = 30 if case["base"] in rates else 24
+        assert p.shape == (n_base + 12,)
+        if case["base"] in rates:
+            assert np.allclose(p[:30], rates[case["base"]]["params"])
+        q0, qf = p[:6], p[6:12]
+        q_min, q_max = p[n_base:n_base + 6], p[n_base + 6:]
+        assert np.all(q_min < np.minimum(q0, qf)) and np.all(q_max > np.maximum(q0, qf))
+
+
 def test_rate_cases_repeat_the_census_with_rates_capped():
     """The census's rate-limit cases (benchmarks/rate_cases.json): each census case
     once, its params (q0, qf, j_max, tau_max) unchanged and every joint's rate capped
