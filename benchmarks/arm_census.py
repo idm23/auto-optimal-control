@@ -9,7 +9,10 @@ Cases: 10 goals from rest at the origin, each with torque limits at 90%, 80% and
 and 15 rest-to-rest motions with fixed limits (``rest<i>``). Then each of these again
 with joint rate limits (order 2) at 90%, 80% or 70% of the jerk-limited motion's peak
 rates (``vgoal<i>@<pct>``, ``vrest<i>``), frozen in ``rate_cases.json``
-(``rate_cases.py``); their rows say which limits the answer holds, and which at once. Each row records the
+(``rate_cases.py``); their rows say which limits the answer holds, and which at once.
+The position cases (``position_cases.json``) cap the joints that overshoot, and the
+obstacle cases (``ograze<i>``, ``oblock<i>``, ``owall<i>``; ``obstacle_cases.json``) put
+a sphere or a wall in a rest case's way. Each row records the
 outcome, the time, and ``HomotopyResult.diagnostics``: failed evaluations by class,
 route steps by outcome, converged answers rejected by check, and rules fired.
 
@@ -64,6 +67,9 @@ HP = None            # the arm with position limits (order 3), for position_case
 HPV = None           # the arm with rate and position limits
 POSITION_CASES = json.loads((Path(__file__).resolve().parent / "position_cases.json").read_text()) \
     if (Path(__file__).resolve().parent / "position_cases.json").exists() else {}
+HO = {}              # the arm with an obstacle, by kind ("sphere", "box"), for obstacle_cases.json
+OBSTACLE_CASES = json.loads((Path(__file__).resolve().parent / "obstacle_cases.json").read_text()) \
+    if (Path(__file__).resolve().parent / "obstacle_cases.json").exists() else {}
 
 
 def _configure(h, args):
@@ -115,8 +121,18 @@ def positions_homotopy(rates=False):
     return HP
 
 
+def obstacle_homotopy(kind):
+    """The arm with one obstacle of ``kind`` (built on first use, configured as ``H``)."""
+    if kind not in HO:
+        HO[kind] = Homotopy(examples.six_joint_arm_min_time(obstacle=kind), cache_dir=ARGS.cache)
+        _configure(HO[kind], ARGS)
+    return HO[kind]
+
+
 def homotopy_for(name):
     """The Homotopy that solves census case ``name``."""
+    if name in OBSTACLE_CASES:
+        return obstacle_homotopy(OBSTACLE_CASES[name]["obstacle"])
     if name in POSITION_CASES:
         return positions_homotopy(rates=POSITION_CASES[name]["base"] in RATE_CASES)
     return rates_homotopy() if name in RATE_CASES else H
@@ -137,6 +153,8 @@ def setup(args):
 
 
 def params(name, free_cache={}):
+    if name in OBSTACLE_CASES:
+        return list(OBSTACLE_CASES[name]["params"])
     if name in POSITION_CASES:
         return list(POSITION_CASES[name]["params"])
     if name in RATE_CASES:
@@ -174,7 +192,8 @@ def run(name):
         if cap is not None and row["exact"] and row["sec"] > cap:
             # Over the cap is a failure, even if it solved in the end.
             row.update(exact=False, tf=None, msg=f"over the {cap:g} s cap (solved in {row['sec']} s)")
-        if row["exact"] and (name in RATE_CASES or name in POSITION_CASES):
+        if row["exact"] and (name in RATE_CASES or name in POSITION_CASES
+                             or name in OBSTACLE_CASES):
             # Which orders the answer holds, and whether at once (the case's group is
             # only its intent).
             from rate_cases import classify
@@ -186,8 +205,10 @@ def run(name):
         try:
             pc = POSITION_CASES.get(name)
             rates = name in RATE_CASES or (pc is not None and pc["base"] in RATE_CASES)
+            oc = OBSTACLE_CASES.get(name)
             export_case(EXPORT, name, p, row, r if row["exact"] else None, TQ, rates=rates,
-                        positions=pc["joints"] if pc is not None else None)
+                        positions=pc["joints"] if pc is not None else None,
+                        obstacle=oc["obstacle"] if oc is not None else None)
         except Exception as exc:      # the census result stands without the page's copy
             print(f"export of {name} failed: {exc!r}", flush=True)
     return row
@@ -199,7 +220,8 @@ def summary(rows):
     print(f"solved {len(ok)} of {len(rows)}; under 60 s: {sum(s < 60 for s in secs)}; "
           f"under 5 s: {sum(s < 5 for s in secs)}; "
           f"mean {sum(secs) / len(secs) if secs else float('nan'):.3f} s")
-    for tag in ("goal", "rest", "vgoal", "vrest"):
+    for tag in ("goal", "rest", "vgoal", "vrest", "pgoal", "prest", "pvgoal", "pvrest",
+                "ograze", "oblock", "owall"):
         part = [r for r in rows if r["name"].startswith(tag) and r["name"][len(tag):][:1].isdigit()]
         if part:
             ok_ = [r for r in part if r["exact"]]
@@ -238,7 +260,7 @@ def main(argv=None):
     setup(args)
     names = args.cases or ([f"goal{i}@{p}" for i in range(10) for p in (90, 80, 70)]
                            + [f"rest{i}" for i in range(15)] + list(RATE_CASES)
-                           + list(POSITION_CASES))
+                           + list(POSITION_CASES) + list(OBSTACLE_CASES))
     # Every arm the cases need is built before the workers fork.
     for n in names:
         homotopy_for(n)

@@ -185,8 +185,103 @@ def joint_limits(q, w, *, rates=False, positions=False):
     return constraints, params
 
 
+def link_origins(links, q):
+    """Each link's origin in the base frame at joint angles ``q``, as SymPy 3-vectors."""
+    R, p, out = sp.eye(3), sp.zeros(3, 1), []
+    for link, qi in zip(links, q):
+        ca, sa = _twist(link.alpha)
+        c, s = sp.cos(qi), sp.sin(qi)
+        p = p + R * sp.Matrix([link.a * c, link.a * s, link.d])
+        R = R * sp.Matrix([[c, -s * ca, s * sa], [s, c * ca, -c * sa], [0, sa, ca]])
+        out.append(p)
+    return out
+
+
+# Points on the six-joint arm that must clear an obstacle: (frame a, frame b, fraction,
+# radius). A point is ``(1 - fraction) O_a + fraction O_b`` with ``O_k`` the origin of
+# link ``k`` (``link_origins``, 1-based) and the radius the arm's half-width there, which
+# inflates the obstacle. The elbow, the middle of the forearm, the wrist and the tool.
+SIX_JOINT_BODY = (
+    ("elbow", 2, 2, 0.0, _R(7, 100)),
+    ("forearm", 2, 3, _R(1, 2), _R(6, 100)),
+    ("wrist", 3, 3, 0.0, _R(6, 100)),
+    ("tool", 6, 6, 0.0, _R(5, 100)),
+)
+BOX_POWER = 4                 # a box obstacle's superquadric exponent
+
+
+def body_points(links, q, body=SIX_JOINT_BODY):
+    """``[(name, point, radius)]``: the points of ``body`` at joint angles ``q`` (SymPy).
+    With NumPy angles, see :func:`body_points_numeric`."""
+    O = link_origins(links, q)
+    return [(name, (1 - f) * O[a - 1] + f * O[b - 1], r) for name, a, b, f, r in body]
+
+
+def body_points_numeric(links, q, body=SIX_JOINT_BODY):
+    """The points of ``body`` at NumPy joint angles ``q``, an array (points x 3)."""
+    O = [p for _, p in link_frames(links, q)]
+    return np.array([(1 - float(f)) * O[a - 1] + float(f) * O[b - 1] for _, a, b, f, _ in body])
+
+
+def obstacle_limits(links, q, kind, body=SIX_JOINT_BODY):
+    """Keep every point of ``body`` out of one obstacle: ``(constraints, params)``.
+
+    ``kind`` is ``"sphere"`` (params ``obs_cx, obs_cy, obs_cz, obs_r``) or ``"box"``,
+    a vertical box turned by ``obs_yaw`` about ``z``, with half-extents ``obs_a``
+    (along the turned ``x``), ``obs_b`` and ``obs_c`` (params ``obs_cx, obs_cy, obs_cz,
+    obs_a, obs_b, obs_c, obs_yaw``). Each point, of radius ``r``, gives one limit
+
+        sphere:  g = 1 - |p - c|^2 / (R + r)^2 <= 0
+        box:     g = 1 - sum_i (d_i / (e_i + r))^n <= 0,   n = BOX_POWER
+
+    with ``d`` the offset ``p - c`` in the box's axes and ``e`` its half-extents. The
+    box is a superquadric: smooth, its edges rounded. ``g`` is 1 at the centre and falls
+    to 0 on the inflated surface, so the route's offsets (``g - off <= 0``) grow the
+    obstacle from its core. The limits depend on the angles alone: with jerk control
+    they have order 3, like the angle limits of :func:`joint_limits`, and with a
+    smooth control law they are touched, never ridden.
+    """
+    c = sp.Matrix(sp.symbols("obs_cx obs_cy obs_cz", real=True))
+    if kind == "sphere":
+        R = sp.Symbol("obs_r", positive=True)
+        params = [*c, R]
+    elif kind == "box":
+        ext = sp.symbols("obs_a obs_b obs_c", positive=True)
+        yaw = sp.Symbol("obs_yaw", real=True)
+        params = [*c, *ext, yaw]
+    else:
+        raise ValueError(f"unknown obstacle kind {kind!r}")
+    constraints = []
+    for name, p, r in body_points(links, q, body):
+        d = p - c
+        if kind == "sphere":
+            g = 1 - (d.T * d)[0] / (R + r) ** 2
+        else:
+            cy, sy = sp.cos(yaw), sp.sin(yaw)
+            local = (cy * d[0] + sy * d[1], -sy * d[0] + cy * d[1], d[2])
+            g = 1 - sum((x / (e + r)) ** BOX_POWER for x, e in zip(local, ext))
+        constraints.append(PathConstraint(g, f"obs_{name}"))
+    return constraints, params
+
+
+def obstacle_values(links, q, kind, obs, body=SIX_JOINT_BODY):
+    """The obstacle limits ``g`` of :func:`obstacle_limits` at NumPy angles: ``q`` is
+    (samples x joints), ``obs`` the obstacle's params; returns (samples x points)."""
+    q = np.atleast_2d(q)
+    radii = np.array([float(r) for *_, r in body])
+    P = np.array([body_points_numeric(links, qi, body) for qi in q])     # samples x points x 3
+    d = P - np.asarray(obs[:3], dtype=float)
+    if kind == "sphere":
+        return 1 - (d ** 2).sum(-1) / (obs[3] + radii) ** 2
+    a, b, c, yaw = obs[3:7]
+    cy, sy = np.cos(yaw), np.sin(yaw)
+    local = np.stack([cy * d[..., 0] + sy * d[..., 1], -sy * d[..., 0] + cy * d[..., 1], d[..., 2]], -1)
+    ext = np.array([a, b, c])[None, None, :] + radii[None, :, None]
+    return 1 - ((local / ext) ** BOX_POWER).sum(-1)
+
+
 def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends=False,
-                     rate_limits=False, position_limits=False):
+                     rate_limits=False, position_limits=False, obstacle=None):
     """Rest to rest in minimum time, with bounded jerks and a limit on each joint's torque.
 
     ``min t_f`` subject to ``|j_i| <= j_max_i`` and ``|tau_i| <= tau_max_i``, from rest at
@@ -199,7 +294,9 @@ def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends
     ``moving_ends`` the motion runs between any two states instead of from
     rest to rest: the params begin ``q0, w0, a0, qf, wf, af``. With
     ``rate_limits`` or ``position_limits`` the joint limits of
-    :func:`joint_limits` follow, with their params last.
+    :func:`joint_limits` follow, with their params last. ``obstacle`` (``"sphere"`` or
+    ``"box"``) keeps the arm out of one obstacle (:func:`obstacle_limits`), its params
+    after all the others.
     """
     n = len(links)
     t = sp.Symbol("t", real=True)
@@ -213,6 +310,9 @@ def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends
         constraints += [PathConstraint(tau[i] - limits[i], f"tau{i + 1}_max"),
                         PathConstraint(-tau[i] - limits[i], f"tau{i + 1}_min")]
     more, more_params = joint_limits(q, w, rates=rate_limits, positions=position_limits)
+    if obstacle is not None:
+        obs, obs_params = obstacle_limits(links, q, obstacle)
+        more, more_params = more + obs, more_params + obs_params
     inertias_positive = all(sp.sympify(m).is_positive is True for link in links for m in link.inertia)
     certified = {
         "mass_matrix_positive_definite": (
@@ -224,7 +324,7 @@ def jerk_limited_arm(links, *, gravity=GRAVITY, name="arm_min_time", moving_ends
                    for i in range(n) for side in ("max", "min")}),
         "limits_time_reversible": (
             "Newton-Euler torques M(q) a + c(q, w) + G(q) with c quadratic in w: unchanged by "
-            "w -> -w; rate limits come in +- pairs, angle limits do not involve w",
+            "w -> -w; rate limits come in +- pairs, angle and obstacle limits do not involve w",
             {f"tau{i + 1}_{side}": f"tau{i + 1}_{side}" for i in range(n) for side in ("max", "min")}),
     }
     return OptimalControlProblem(

@@ -1,7 +1,7 @@
 # Arm census
 
 The six-joint arm benchmark: minimum-time, jerk-limited motions, each with a
-torque limit on every joint. There are four families of cases:
+torque limit on every joint. There are five families of cases:
 
 - **`goal<i>@<p>`**: from rest at the origin to one of ten random targets. The
   torque limits are set from the motion with no torque limits. Each joint's
@@ -32,6 +32,25 @@ torque limit on every joint. There are four families of cases:
     control law it is only touched, never ridden (Jacobson, Lele & Speyer 1971).
   - **Where they live:** the cases are frozen in `benchmarks/position_cases.json`, made
     by `benchmarks/position_cases.py`.
+- **`ograze<i>`, `oblock<i>`, `owall<i>`**: each rest case again, with one obstacle in
+  its way that the elbow, the middle of the forearm, the wrist and the tool must clear
+  (`robot.obstacle_limits`). Each point is a ball of the arm's half-width there (5 to
+  7 cm), which inflates the obstacle. Three rungs, each harder than the last:
+  - **`ograze`:** a sphere of radius 8 cm that the rest answer's tool path clips a fifth
+    of the way into (`g = 0.2`). This is a small correction, like the position cases.
+  - **`oblock`:** a sphere of radius 10 cm centred near the middle of the tool path, a
+    quarter of its inflated radius to one side (`g ≈ 0.94`). The answer must go around it.
+  - **`owall`:** a thin upright wall, 4 × 30 × 24 cm, across the tool path and facing
+    it, set off along its width and height so the path crosses it off-centre. The answer
+    must go over it or around a side. The wall is a superquadric of exponent 4: smooth,
+    with its edges rounded.
+  - **The order:** `g` depends on the angles alone, so with jerk control it has order 3,
+    like an angle limit, and is only touched, never ridden. Unlike an angle limit it
+    couples every joint through the arm's kinematics.
+  - **Where they live:** the cases are frozen in `benchmarks/obstacle_cases.json`, made
+    by `benchmarks/obstacle_cases.py`. The route grows each obstacle from its core (the
+    offsets of the limits fall from the rest answer's deepest point to zero), so it picks
+    the side by geometry, not by cost. Its answer is a local optimum.
 
 The data shown is from the census of 2026-11-25, on the branch that tests the held-set
 guards inside each step (R78, Lemma HE). Rules R1, R2, R15, R16, R20, R25, R26, R28,
@@ -52,6 +71,37 @@ of the solved cases is 4.454 s. Of the 27 position-limit cases, 26 solve, 16 of 
 under 5 s, and every one of the 26 touches the position limits it was given (Observation
 O8). Of the 90 older cases 87 solve, 73 under 5 s. Times are wall-clock seconds per case,
 to the millisecond.
+
+The 45 obstacle cases were added in the same configuration, on the same machine: 41 solve,
+all under 60 s, and 20 under 5 s, with a mean of 7.644 s. With them the page has 154 of
+162 solved, a mean of 5.303 s.
+
+- **Every wall solves (15 of 15)**, 6 under 5 s, with a mean of 10.8 s. **Blocks:** 14 of
+  15, 6 under 5 s, with a mean of 6.9 s. **Grazes:** 12 of 15, 8 under 5 s, with a mean of
+  4.6 s.
+- **The hardest rung is not the hardest to solve.** None of the four failures has to make
+  a large change. Grazes 3 and 10 are lost long before the cap: every route ends by itself,
+  its path steps mostly failing to settle on a structure ("no structure converged",
+  "violation too large"). Given 300 s, graze 3 stops again at 111 s and graze 10 at 17 s.
+  Graze 6 runs out of time and does no better with 300 s. Block 6 also runs out of time,
+  but given 300 s on a slower, shared machine it solves in 218 s, through the reversed
+  problem, 121 ms slower than rest 6.
+- **Each answer touches the obstacle, never rides it.** The touches are at isolated
+  instants, by one body point (31 answers), two (7) or three (3), as an order-3 limit
+  should be. Most touch with the tool or the wrist, and two walls and a block with the
+  elbow. Block 10 and wall 10 are solved through the reversed problem (R4).
+- **What the obstacle costs.** The median motion time rises 4 ms for a graze, 30 ms for a
+  block and 40 ms for a wall; the most is 298 ms (graze 2, whose sphere the forearm, wrist
+  and tool all have to clear). For rest cases 7, 8, 10 and 14 the obstacle costs nothing,
+  within 0.04 ms at every rung, though the motions move by up to 0.5 rad. The minimum time
+  is set by the joints on their torque limits, and the other joints go around the obstacle
+  for free.
+- **Two answers are faster than their rest case.** Grazes 1 and 4 take 0.53 and 0.10 ms
+  less than rest 1 and rest 4, from the same ends, with every limit held. The rest answers
+  are local optima, and the obstacle moved the route into a better one.
+- **No motion passes through an obstacle.** A check of every solved answer at twenty
+  times the page's sampling finds the deepest `g` at 9e-4, which is the rounding of the
+  exported angles.
 
 Rest 2 with rate and position limits now solves, in 2.5 s. Its answer had been found and
 then rejected for a violation it does not have. Riding a torque limit, a joint's jerk
@@ -97,6 +147,8 @@ winners are spread over every route, so none can be dropped.
 - **`vrest`:** 14 of 15: all but rest 4.
 - **`pgoal`:** all 6. **`prest`:** 10 of 11, all but rest 4. **`pvgoal`:** the one.
   **`pvrest`:** all 9.
+- **`ograze`:** 12 of 15, all but rests 3, 6 and 10. **`oblock`:** 14 of 15, all but
+  rest 6. **`owall`:** all 15.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit
 on another joint at the same instant (the nine new ones are not yet read for this): goals 3 and 4 at 90%, goals 0 and 1 at 80%, rest 2 and rest 9.
@@ -105,7 +157,10 @@ Goal 3 at 90% also holds `tau4_min` and `w4_min` together, and goal 1 at 80%
 
 Pick a case to watch it. Its traces turn red where the joint rides its limit: torques
 for every case, rates too for a rate-limited one, and for a position-limit case the
-capped joints' angles, red where they touch a limit. The page is drawn from the data in
+capped joints' angles, red where they touch a limit. An obstacle case draws the obstacle
+and the ball of each body point that must clear it, red while it touches. A panel shows
+each point's clearance over time, in units of the inflated obstacle's size, with a dot
+where it touches. The page is drawn from the data in
 `_static/census/data`. Every pull request that changes the solver or the census
 refreshes it before merging; the README's "Merging a pull request" has the command.
 Exporting a census adds every case it runs, new ones included:

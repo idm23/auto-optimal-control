@@ -464,7 +464,8 @@ def six_joint_arm():
     return jerk_controlled_arm(SIX_JOINT_LINKS, name="six_joint_arm")
 
 
-def six_joint_arm_min_time(moving_ends=False, rate_limits=False, position_limits=False):
+def six_joint_arm_min_time(moving_ends=False, rate_limits=False, position_limits=False,
+                           obstacle=None):
     """:func:`six_joint_arm` in minimum time with bounded jerks, torque limits as before.
 
     See :func:`~auto_optimal_control.robot.jerk_limited_arm`; ``moving_ends``
@@ -472,14 +473,20 @@ def six_joint_arm_min_time(moving_ends=False, rate_limits=False, position_limits
     ``rate_limits`` and ``position_limits`` add joint limits
     (:func:`~auto_optimal_control.robot.joint_limits`).
 
+    ``obstacle`` (``"sphere"`` or ``"box"``) keeps the elbow, forearm, wrist and tool
+    out of one obstacle (:func:`~auto_optimal_control.robot.obstacle_limits`).
+
     params: ``q0_1..6``, ``qf_1..6``, ``j_max1..6``, ``tau_max1..6``, then
-    ``w_max1..6`` and ``q_min1..6, q_max1..6`` when asked for.
+    ``w_max1..6`` and ``q_min1..6, q_max1..6`` when asked for, then the obstacle's.
     """
     name = "six_joint_arm_min_time" + "".join(
         tag for on, tag in ((moving_ends, "_moving"), (rate_limits, "_rates"),
                             (position_limits, "_positions")) if on)
+    if obstacle is not None:
+        name += f"_{obstacle}"
     return jerk_limited_arm(SIX_JOINT_LINKS, name=name, moving_ends=moving_ends,
-                            rate_limits=rate_limits, position_limits=position_limits)
+                            rate_limits=rate_limits, position_limits=position_limits,
+                            obstacle=obstacle)
 
 
 def goddard(dynamic_pressure=False):
