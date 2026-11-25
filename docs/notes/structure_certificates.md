@@ -2965,9 +2965,15 @@ passes of the arm's recursion). The integrator takes 12% and Python 13%.
 
 *Rule R86* (Lemma KD; `riding.py`, chosen when generating the kernels). Where
 $\partial^2 H / \partial u^2$ is diagonal, as in the arm's cost, the riding system is
-solved by eliminating the free controls. That leaves an $s \times s$ system for the
-multipliers, with $s$ = 1 or 2 limits ridden. The unknowns, their order and the
-"limits not independent" failure are those of the dense system.
+solved by eliminating the free controls when a single limit is ridden. That leaves one
+equation for its multiplier. The unknowns, their order and the "limits not independent"
+failure are those of the dense system.
+- **Sets of two or more limits keep the dense LU.** The first version used the
+  elimination for every set. Its $S = A_F R_F^{-1} A_F^\top$ squares the conditioning of
+  the limits' rows, and `test_arc_jacobians_of_the_arm_match_differences` (slow tests)
+  then put a 6-limit riding Jacobian $4.3 \times 10^{-5}$ from central differences,
+  against its bound of $4 \times 10^{-5}$. A single limit has no such loss: $S$ is a scalar.
+  The census's torque arcs are mostly of one limit (rest 4's both are).
 
 *Checks.*
 - At 3,624 pairs of a random state (costates up to 10) and a set of limits, the old and new
@@ -2977,7 +2983,7 @@ multipliers, with $s$ = 1 or 2 limits ridden. The unknowns, their order and the
 - Single routes on node-1: rest 4's evaluations take 7.4 s against 9.1 s, and vrest 12's
   8.8 s against 12.2 s.
 
-*Census, the 117 cases on node-1, against a baseline run there right after:*
+*Census, the 117 cases on node-1, against a baseline run there right after (measured with the first version, the elimination for every set):*
 - 113 solved in both, 90 under 5 s against 89, and 504.9 s against 505.7 s for the cases
   both solve. Final times agree to $7 \times 10^{-12}$.
 - By the baseline's time per case: under 2 s 0.986 of the time, 2 to 4 s 0.964, and 4 to

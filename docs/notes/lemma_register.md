@@ -1850,7 +1850,8 @@ jump, density, gap, order, bound, end, held sign).
 - **Cost.** $O(s^2 m + s^3)$ for the factors and $O(s m)$ for each further right-hand
   side, against $O(d^3)$ and $O(d^2)$ for a dense LU of the $d = m + s + |H|$ system
   (7 to 14 for the arm). A riding Jacobian solves it for every column of $z$ (Lemma SP).
-- **Used by.** R86.
+- **Used by.** R86, for a single limit ($s = 1$). For $s \ge 2$, forming $S$ squares the
+  conditioning of the rows of $A_F$, a loss the dense LU of the whole system avoids.
 
 ### Observation O8: the census's position limits are touched, as order 3 predicts (2026-11-22)
 

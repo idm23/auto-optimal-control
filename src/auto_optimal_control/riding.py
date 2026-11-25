@@ -254,7 +254,7 @@ static void {P}r_lx_of(int id, double t, const double* z, const double* p, const
    in the same order (u, mu, nu), as the dense system. The factors are kept in K:
    R's diagonal (m), the signed rows (s x m) and S's LU (s x s); in piv: which controls
    are held (m), then S's pivots (s). */
-static void {P}r_lu_solve(const double* K, int d, const int* piv, double* v) {{
+static void {P}r_kd_solve(const double* K, int d, const int* piv, double* v) {{
     int nh = 0;
     for (int i = 0; i < {m}; ++i) if (piv[i]) ++nh;
     const int s = d - {m} - nh;
@@ -294,7 +294,7 @@ static void {P}r_lu_solve(const double* K, int d, const int* piv, double* v) {{
 }}
 
 /* One system: the limits of the set, and the controls held at bounds (held[i] = -1, +1). */
-static int {P}r_system(int id, const double* R, const double* limits, const double* c0,
+static int {P}r_system_kd(int id, const double* R, const double* limits, const double* c0,
                        const double* lo, const double* hi, const int* held, double* K, int* piv,
                        double* v, int* dout) {{
     const int s = {P}r_size[id];
@@ -354,10 +354,10 @@ static int {P}r_system(int id, const double* R, const double* limits, const doub
         }}
     }}
     *dout = d;
-    {P}r_lu_solve(K, d, piv, v);
+    {P}r_kd_solve(K, d, piv, v);
     return 0;
 }}
-#else
+#endif
 /* Dense LU with partial pivoting; K has d rows of stride {dim}. */
 static int {P}r_lu(double* K, int d, int* piv) {{
     double largest = 0.0;
@@ -397,7 +397,7 @@ static void {P}r_lu_solve(const double* K, int d, const int* piv, double* v) {{
 }}
 
 /* One system: the limits of the set, and the controls held at bounds (held[i] = -1, +1). */
-static int {P}r_system(int id, const double* R, const double* limits, const double* c0,
+static int {P}r_system_dense(int id, const double* R, const double* limits, const double* c0,
                        const double* lo, const double* hi, const int* held, double* K, int* piv,
                        double* v, int* dout) {{
     const int s = {P}r_size[id];
@@ -433,7 +433,27 @@ static int {P}r_system(int id, const double* R, const double* limits, const doub
     {P}r_lu_solve(K, d, piv, v);
     return 0;
 }}
+
+/* Rule R86 (Lemma KD) for a set of one limit, where S is a scalar; a larger set keeps
+   the dense LU, since S = A_F R_F^-1 A_F^T squares the conditioning of the limits' rows,
+   which nearly dependent torque limits make poor. */
+static int {P}r_system(int id, const double* R, const double* limits, const double* c0,
+                       const double* lo, const double* hi, const int* held, double* K, int* piv,
+                       double* v, int* dout) {{
+#if {int(diagonal)}
+    if ({P}r_size[id] == 1)
+        return {P}r_system_kd(id, R, limits, c0, lo, hi, held, K, piv, v, dout);
 #endif
+    return {P}r_system_dense(id, R, limits, c0, lo, hi, held, K, piv, v, dout);
+}}
+
+/* A further right-hand side of the system r_system factored for set id. */
+static void {P}r_solve_set(int id, const double* K, int d, const int* piv, double* v) {{
+#if {int(diagonal)}
+    if ({P}r_size[id] == 1) {{ {P}r_kd_solve(K, d, piv, v); return; }}
+#endif
+    {P}r_lu_solve(K, d, piv, v);
+}}
 
 /* Whether the solution of a system is the one: controls within bounds, and multipliers
    of the bounds with the right signs. If not, which and to say what to change next. */
@@ -683,7 +703,7 @@ static int {P}r_sensitivity(int c, double t, const double* z, const double* p, c
             continue;
         }}
         for (int i = {m} + s; i < d; ++i) v[i] = 0.0;   /* a held control does not move */
-        {P}r_lu_solve(K, d, piv, v);
+        {P}r_solve_set(c, K, d, piv, v);
         for (int i = 0; i < d; ++i) D[i * {nz} + j] = v[i];
     }}
     return 0;
