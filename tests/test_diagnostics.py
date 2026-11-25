@@ -771,3 +771,38 @@ def test_touch_on_its_own_limits_arc_is_absorbed():
     # Off by default.
     h.absorb_touches = False
     assert len(h._merge_touching(arcs[:2], values)[0]) == 2
+
+
+def test_reversal_maps_an_order2_arcs_jump_by_its_measure():
+    """Lemma F2 (R4): an order-2 arc's jump (pi_1, pi_2) is its measure's mass and first
+    moment about the entry. Under t -> T - t the measure reflects, so the reflected arc's
+    jump, computed from the reflected measure, is what ``_reflected`` maps to; order-1
+    jumps and touches keep their values."""
+    import numpy as np
+    from auto_optimal_control.homotopy import Homotopy
+
+    T, a, b = 2.0, 0.3, 1.1
+    # An asymmetric measure on [a, b]: atoms at both ends and a density between.
+    tau = np.linspace(a, b, 4001)
+    dens = (tau - a) ** 2 * np.exp(-3 * (tau - a))
+    w = np.full_like(tau, (b - a) / (len(tau) - 1))
+    w[[0, -1]] /= 2
+    mass_c, mom_c = (dens * w).sum(), (dens * w * (tau - a)).sum()
+    nu_in, nu_out = 0.07, 0.31
+
+    def jump(entry, exit_, nu_at_entry, nu_at_exit, moment_about_entry):
+        return np.array([nu_at_entry + mass_c + nu_at_exit, moment_about_entry + nu_at_exit * (exit_ - entry)])
+
+    forward = jump(a, b, nu_in, nu_out, mom_c)
+    # The reversed arc on [T - b, T - a]: atoms swap ends, the density's moment about
+    # the reversed entry is the moment of the original about its exit.
+    reversed_ = jump(T - b, T - a, nu_out, nu_in, mass_c * (b - a) - mom_c)
+    arcs = [("boundary", 0), ("boundary", 1), ("touch", 2)]
+    values = [(T - b, T - a, reversed_), (0.2, 0.5, np.array([0.4])), (1.5, 0.9)]
+    f_arcs, f_vals = Homotopy._reflected(arcs, values, T, {0: 3, 1: 4, 2: 5})
+    assert [c for _, c in f_arcs] == [3, 4, 5]
+    lo, hi, pi = f_vals[0]
+    assert np.isclose(lo, a) and np.isclose(hi, b)
+    assert np.allclose(pi, forward)
+    assert np.allclose(f_vals[1][2], [0.4]) and np.isclose(f_vals[1][0], 1.5)
+    assert np.isclose(f_vals[2][0], 0.5) and f_vals[2][1] == 0.9

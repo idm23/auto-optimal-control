@@ -3884,6 +3884,31 @@ class Homotopy:
                 return None
         return out
 
+    @staticmethod
+    def _reflected(arcs, values, T, limit_map):
+        """Rule R4's map of a structure under ``t -> T - t`` (Lemmas F, F2).
+
+        Each limit goes to its image, junction times reflect, and an arc's entry and
+        exit swap. A jump is a functional of the arc's multiplier measure ``eta``:
+        - order 1: ``pi`` is its mass, which reflection keeps (F);
+        - order 2: ``(pi_1, pi_2)`` is its mass and its first moment about the entry,
+          ``int (tau - t_in) d eta``. Reflection keeps the mass; the moment about the
+          new entry is ``pi_1 (t_out - t_in) - pi_2`` (F2);
+        - a touch: its atom, which reflection keeps.
+        Returns ``(arcs, values)`` of the reflected structure."""
+        f_arcs, f_vals = [], []
+        for (kind, cc), val in zip(arcs, values):
+            f_arcs.append((kind, limit_map[cc]))
+            if kind == "boundary":
+                a, b, pi = val
+                pi = np.atleast_1d(np.asarray(pi, dtype=float)).copy()
+                if pi.size == 2 and np.isfinite(a) and np.isfinite(b):
+                    pi = np.array([pi[0], pi[0] * (b - a) - pi[1]])
+                f_vals.append((T - b, T - a, pi))
+            else:
+                f_vals.append((T - val[0], *val[1:]))
+        return f_arcs, f_vals
+
     def _through_reversal(self, params, costates, final_time, **options):
         """Rule R4 (Lemma F): solve the reversed problem and map its extremal back exactly.
 
@@ -3916,14 +3941,7 @@ class Homotopy:
         T = rr.solution.tf
         lam0 = -R * zT[n:]
         arcs, values = self._arcs_of(sh, v)
-        f_arcs, f_vals = [], []
-        for (kind, cc), val in zip(arcs, values):
-            f_arcs.append((kind, limit_map[cc]))
-            if kind == "boundary":
-                a, b, pi = val
-                f_vals.append((T - b, T - a, pi))
-            else:
-                f_vals.append((T - val[0], *val[1:]))
+        f_arcs, f_vals = self._reflected(arcs, values, T, limit_map)
         self.params = np.asarray(params, dtype=float)
         kx, px = self.exact_kernels, self.exact_params()
         entries, f_vals = self._mas_entries(f_arcs, f_vals)
