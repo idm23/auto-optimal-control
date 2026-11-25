@@ -645,3 +645,46 @@ def test_the_arm_solves_with_overlapping_limits(arm_kernels, kernel_cache):
     tr = r.shooting.trajectory(r.solution.v, n_points=2001)
     assert np.max(tr["g"]) < 1e-7
     assert r.objective > 360 * qf @ qf / T ** 5
+
+
+# -- obstacles ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind, obs", [("sphere", [0.3, -0.2, 0.4, 0.1]),
+                                       ("box", [-0.2, 0.35, 0.1, 0.02, 0.15, 0.12, 0.7])])
+def test_obstacle_limits_match_their_numeric_values(kind, obs):
+    """``obstacle_limits`` (SymPy, compiled into the problem) and ``obstacle_values``
+    (NumPy, used by the case generator and the census page) give the same ``g``, and the
+    body points agree with ``link_frames``."""
+    from auto_optimal_control.robot import (SIX_JOINT_BODY, body_points, body_points_numeric,
+                                            obstacle_limits, obstacle_values)
+
+    q = sp.symbols("q1:7", real=True)
+    constraints, params = obstacle_limits(SIX_JOINT_LINKS, q, kind)
+    assert [c.name for c in constraints] == [f"obs_{n}" for n, *_ in SIX_JOINT_BODY]
+    rng = np.random.default_rng(3)
+    for qv in rng.uniform(-2, 2, (3, 6)):
+        subs = dict(zip(q, qv)) | dict(zip(params, obs))
+        g = [float(c.expr.subs(subs)) for c in constraints]
+        assert obstacle_values(SIX_JOINT_LINKS, qv, kind, obs)[0] == pytest.approx(g, rel=1e-10, abs=1e-12)
+        sym = np.array([[float(v.subs(subs)) for v in p] for _, p, _ in body_points(SIX_JOINT_LINKS, q)])
+        assert body_points_numeric(SIX_JOINT_LINKS, qv) == pytest.approx(sym, abs=1e-12)
+
+
+def test_obstacle_g_is_zero_on_the_inflated_surface():
+    """A body point of radius ``r`` at distance ``R + r`` from a sphere's centre, or on a
+    box's face pushed out by ``r``, has ``g = 0``; deeper in, ``g > 0``."""
+    from auto_optimal_control.robot import SIX_JOINT_BODY, body_points_numeric, obstacle_values
+
+    q = np.array([0.3, -0.5, 0.8, 0.1, -0.4, 0.2])
+    P = body_points_numeric(SIX_JOINT_LINKS, q)
+    r = float(SIX_JOINT_BODY[-1][-1])
+    tool = P[-1]
+    R = 0.1
+    c = tool + np.array([0, 0, R + r])
+    assert obstacle_values(SIX_JOINT_LINKS, q, "sphere", [*c, R])[0, -1] == pytest.approx(0, abs=1e-12)
+    a, b, cc = 0.02, 0.15, 0.12
+    c = tool + np.array([a + r, 0, 0])               # yaw 0: the tool on the face x = -a - r
+    g = obstacle_values(SIX_JOINT_LINKS, q, "box", [*c, a, b, cc, 0.0])[0, -1]
+    assert g == pytest.approx(0, abs=1e-12)
+    assert obstacle_values(SIX_JOINT_LINKS, q, "box", [*(c - [0.01, 0, 0]), a, b, cc, 0.0])[0, -1] > 0

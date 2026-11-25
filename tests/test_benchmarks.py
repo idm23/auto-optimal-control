@@ -94,3 +94,30 @@ def test_rate_cases_repeat_the_census_with_rates_capped():
             assert case["pct"] == int(name.split("@")[1])
         assert np.allclose(p[24:], case["pct"] / 100 * np.asarray(case["peak"]))
         assert np.all(p[24:] > 0)
+
+
+def test_obstacle_cases_block_a_rest_answer_but_clear_its_ends():
+    """The census's obstacle cases (benchmarks/obstacle_cases.json): each repeats a rest
+    case (its params unchanged) with an obstacle's appended; the obstacle keeps every body
+    point of the start and goal poses clear and is entered by the rest answer."""
+    import json
+
+    import numpy as np
+
+    from auto_optimal_control.robot import SIX_JOINT_LINKS, obstacle_values
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
+    path = Path(__file__).resolve().parents[1] / "benchmarks" / "obstacle_cases.json"
+    if not path.exists():
+        pytest.skip("no obstacle cases generated")
+    from obstacle_cases import CLEAR
+    cases = json.loads(path.read_text())
+    assert cases
+    for name, case in cases.items():
+        p = np.asarray(case["params"])
+        kind, n = case["obstacle"], (4 if case["obstacle"] == "sphere" else 7)
+        assert name in {k + case["base"][4:] for k in ("ograze", "oblock", "owall")}
+        assert kind == ("box" if name.startswith("owall") else "sphere")
+        assert p.shape == (24 + n,) and case["g_base"] > 0
+        for q in (p[:6], p[6:12]):
+            assert obstacle_values(SIX_JOINT_LINKS, q, kind, p[24:]).max() < CLEAR

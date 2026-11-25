@@ -10,6 +10,7 @@
   --arm: #2f5d8a; --joint: #1d1d1f; --shadow: rgba(0,0,0,0.10); --trail: #c9a227;
   --start: rgba(47,93,138,0.25); --goal: #8a8a8f; --limit: #c0392b; --ok: #2e7d4f; --bad: #b3261e;
   --tau: #2f5d8a; --rate: #1f7a6d; --pos: #7a4fa0; --grid: #ececea; --accent: #2f5d8a;
+  --obs: #b8662c; --clear: #b8662c;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -17,6 +18,7 @@
     --arm: #7fb0e0; --joint: #ececef; --shadow: rgba(255,255,255,0.08); --trail: #e0c060;
     --start: rgba(127,176,224,0.25); --goal: #77777e; --limit: #ff6b5e; --ok: #5cc28a; --bad: #ff7a70;
     --tau: #7fb0e0; --rate: #5cc7b5; --pos: #b48ee0; --grid: #26262a; --accent: #7fb0e0;
+    --obs: #e39a5e; --clear: #e39a5e;
   }
 }
 :root[data-theme="dark"] {
@@ -24,6 +26,7 @@
   --arm: #7fb0e0; --joint: #ececef; --shadow: rgba(255,255,255,0.08); --trail: #e0c060;
   --start: rgba(127,176,224,0.25); --goal: #77777e; --limit: #ff6b5e; --ok: #5cc28a; --bad: #ff7a70;
   --tau: #7fb0e0; --rate: #5cc7b5; --pos: #b48ee0; --grid: #26262a; --accent: #7fb0e0;
+  --obs: #e39a5e; --clear: #e39a5e;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink);
@@ -40,8 +43,9 @@ h1 { font-size: 24px; margin: 0 0 4px; }
 .viewer h2 { font-size: 18px; margin: 0; }
 .viewer .meta { color: var(--muted); font-size: 13px; margin: 2px 0 8px; }
 #arm { width: 100%; aspect-ratio: 5 / 4; display: block; touch-action: none; cursor: grab; border-radius: 6px; }
-#tau, #rate, #pos { width: 100%; height: 330px; display: block; }
-#rate, #pos { margin-top: 10px; }
+#tau, #rate, #pos, #clear { width: 100%; height: 330px; display: block; }
+#rate, #pos, #clear { margin-top: 10px; }
+#clear { height: 230px; }
 [hidden] { display: none !important; }
 .families { color: var(--muted); font-size: 13px; margin: -10px 0 18px; }
 .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
@@ -73,8 +77,10 @@ input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); }
 Each case is a jerk-limited move with a torque limit on every joint; the <code>vgoal</code> and
 <code>vrest</code> cases repeat the others with a limit on every joint's rate as well, and the
 <code>p</code> cases (<code>pgoal</code>, <code>prest</code>, <code>pvgoal</code>, <code>pvrest</code>) cap the joints
-whose answer swings past its start-to-goal range with a position limit. A trace turns red where its
-joint rides its limit. Unsolved cases show the start pose (faint) and the goal pose (grey).</p>
+whose answer swings past its start-to-goal range with a position limit. The <code>o</code> cases put an
+obstacle in a rest motion's way: a sphere it grazes (<code>ograze</code>), a sphere squarely in its path
+(<code>oblock</code>) or a wall it must get over or around (<code>owall</code>); the elbow, forearm,
+wrist and tool must all clear it. A trace turns red where its joint rides its limit. Unsolved cases show the start pose (faint) and the goal pose (grey).</p>
 <div class="summary" id="summary"></div>
 <div class="families" id="families"></div>
 
@@ -96,10 +102,12 @@ joint rides its limit. Unsolved cases show the start pose (faint) and the goal p
     <canvas id="tau" aria-label="Joint torques against their limits"></canvas>
     <canvas id="rate" aria-label="Joint rates against their limits" hidden></canvas>
     <canvas id="pos" aria-label="Joint angles against their position limits" hidden></canvas>
+    <canvas id="clear" aria-label="Each body point's clearance from the obstacle" hidden></canvas>
     <div class="legend">
       <span><i class="sw" style="background:var(--tau)"></i>torque ÷ limit</span>
       <span id="rate-key" hidden><i class="sw" style="background:var(--rate)"></i>rate ÷ limit</span>
       <span id="pos-key" hidden><i class="sw" style="background:var(--pos)"></i>angle, between its limits</span>
+      <span id="clear-key" hidden><i class="sw" style="background:var(--clear)"></i>clearance from the obstacle</span>
       <span><i class="sw" style="background:var(--limit)"></i>on the limit</span>
       <span><i class="sw" style="background:var(--trail)"></i>tool path</span>
     </div>
@@ -116,7 +124,7 @@ const DATA = "data/";
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 let colors = {};
 function readColors() {
-  for (const k of ["arm", "joint", "shadow", "trail", "start", "goal", "limit", "tau", "rate", "pos", "grid", "muted", "line", "ink"])
+  for (const k of ["arm", "joint", "shadow", "trail", "start", "goal", "limit", "tau", "rate", "pos", "grid", "muted", "line", "ink", "obs", "clear"])
     colors[k] = css("--" + k);
 }
 readColors();
@@ -136,6 +144,10 @@ function project(p, w, h, scale) {
   const up = z * Math.cos(view.pitch) + yr * Math.sin(view.pitch);
   return [w / 2 + xr * scale, h * 0.56 - up * scale];
 }
+function depth(p) {   // distance away from the viewer, along the view direction
+  const [x, y, z] = p, yr = x * Math.sin(view.yaw) + y * Math.cos(view.yaw);
+  return yr * Math.cos(view.pitch) - z * Math.sin(view.pitch);
+}
 function sizeCanvas(cv) {
   const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
   const W = Math.max(1, Math.round(r.width * d)), H = Math.max(1, Math.round(r.height * d));
@@ -148,10 +160,69 @@ function frameAt(d, tau) {   // index and blend at fraction tau of the motion
 }
 function lerpPts(a, b, f) { return a.map((p, k) => p.map((v, j) => v + (b[k][j] - v) * f)); }
 
+// ---- obstacle ----------------------------------------------------------------
+// A sphere (cx, cy, cz, R) or a superquadric box (cx, cy, cz, a, b, c, yaw) of exponent
+// n: |x/a|^n + |y/b|^n + |z/c|^n <= 1 in the box's axes. Both are convex, so the
+// projection's outline is the convex hull of the projected surface.
+function obstacleSurface(o) {
+  if (o._surf) return o._surf;
+  const P = o.params, pts = [], N = 28;
+  const sp = (v, e) => Math.sign(v) * Math.abs(v) ** e;
+  for (let i = 0; i <= N; i++) {
+    const u = -Math.PI / 2 + Math.PI * i / N;
+    for (let j = 0; j < 2 * N; j++) {
+      const v = Math.PI * j / N;
+      if (o.kind === "sphere") {
+        pts.push([P[0] + P[3] * Math.cos(u) * Math.cos(v), P[1] + P[3] * Math.cos(u) * Math.sin(v), P[2] + P[3] * Math.sin(u)]);
+      } else {
+        const e = 2 / o.power, [a, b, c, yaw] = P.slice(3);
+        const x = a * sp(Math.cos(u), e) * sp(Math.cos(v), e), y = b * sp(Math.cos(u), e) * sp(Math.sin(v), e), z = c * sp(Math.sin(u), e);
+        const cy = Math.cos(yaw), sy = Math.sin(yaw);
+        pts.push([P[0] + cy * x - sy * y, P[1] + sy * x + cy * y, P[2] + z]);
+      }
+    }
+  }
+  return (o._surf = pts);
+}
+function hull(pts) {   // Andrew's monotone chain
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const q of p) { while (lo.length > 1 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.reverse()) { while (up.length > 1 && cross(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+function drawObstacle(ctx, o, w, h, sc, big, dpr) {
+  const P = o.params, c = [P[0], P[1], P[2]];
+  // its shadow on the floor
+  ctx.fillStyle = colors.shadow; ctx.beginPath();
+  hull(obstacleSurface(o).map(([x, y]) => project([x, y, 0], w, h, sc))).forEach(([u, v], k) => k ? ctx.lineTo(u, v) : ctx.moveTo(u, v));
+  ctx.closePath(); ctx.fill();
+  const H = hull(obstacleSurface(o).map(p => project(p, w, h, sc)));
+  ctx.beginPath(); H.forEach(([u, v], k) => k ? ctx.lineTo(u, v) : ctx.moveTo(u, v)); ctx.closePath();
+  ctx.globalAlpha = 0.28; ctx.fillStyle = colors.obs; ctx.fill(); ctx.globalAlpha = 1;
+  ctx.strokeStyle = colors.obs; ctx.lineWidth = (big ? 1.6 : 1) * dpr; ctx.stroke();
+  if (big && o.kind === "box") {   // its middle lines, for a sense of which way it faces
+    const [a, b, cc, yaw] = P.slice(3), cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const at = (x, y, z) => project([c[0] + cy * x - sy * y, c[1] + sy * x + cy * y, c[2] + z], w, h, sc);
+    ctx.globalAlpha = 0.5; ctx.lineWidth = dpr;
+    for (const [p, q] of [[at(0, -b, 0), at(0, b, 0)], [at(0, 0, -cc), at(0, 0, cc)]]) {
+      ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+function bodyAt(d, tau) {   // the body points that must clear the obstacle, and their g
+  if (!d.body_points) return null;
+  const [i, f] = frameAt(d, tau);
+  return { pts: lerpPts(d.body_points[i], d.body_points[i + 1], f),
+           g: d.clearance[i].map((g, k) => g + (d.clearance[i + 1][k] - g) * f) };
+}
+
 function reach(d) {   // the farthest any point gets from the base: the drawing's scale
   if (!d._reach) {
     let r = 0.3;
-    for (const P of [d.start, d.goal, ...(d.points || [])])
+    for (const P of [d.start, d.goal, ...(d.points || []), ...(d.obstacle ? [obstacleSurface(d.obstacle)] : [])])
       for (const [x, y, z] of P) r = Math.max(r, Math.hypot(x, y, z));
     d._reach = r;
   }
@@ -184,8 +255,9 @@ function drawArm(cv, d, tau, big) {
   ctx.clearRect(0, 0, w, h);
   const sc = Math.min(w, h) * (big ? 0.46 : 0.5) / reach(d);
   reach0 = reach(d); drawFloor(ctx, w, h, sc);
-  const lw = (big ? 7 : 4) * dpr;
+  const lw = (big ? 7 : 4) * dpr, o = d.obstacle;
   if (!d.points) {
+    if (o) drawObstacle(ctx, o, w, h, sc, big, dpr);
     drawPose(ctx, d.start, w, h, sc, colors.start, lw, false);
     ctx.setLineDash([4 * dpr, 4 * dpr]);
     drawPose(ctx, d.goal, w, h, sc, colors.goal, lw * 0.7, false);
@@ -195,12 +267,35 @@ function drawArm(cv, d, tau, big) {
   const [i, f] = frameAt(d, tau), pts = lerpPts(d.points[i], d.points[i + 1], f);
   // shadow
   drawPose(ctx, pts.map(([x, y]) => [x, y, 0]), w, h, sc, colors.shadow, lw, false);
-  // tool path
+  if (!o) {
+    drawPath(ctx, d, w, h, sc, big, dpr);
+    if (big) { ctx.setLineDash([4 * dpr, 4 * dpr]); drawPose(ctx, d.goal, w, h, sc, colors.goal, 1.5 * dpr, false); ctx.setLineDash([]); }
+    drawPose(ctx, pts, w, h, sc, colors.arm, lw, big);
+    return;
+  }
+  // With an obstacle: what lies behind it, the obstacle (see-through), then what is in front.
+  const oc = depth(o.params.slice(0, 3)), behind = p => depth(p) > oc;
+  const segs = pts.slice(1).map((p, k) => [pts[k], p]);
+  const drawSegs = (keep) => segs.forEach(([a, b]) => {
+    if (keep(behind([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]))) drawPose(ctx, [a, b], w, h, sc, colors.arm, lw, big);
+  });
+  const body = big ? bodyAt(d, tau) : null;
+  const drawBody = (keep) => body && body.pts.forEach((p, k) => {   // each point's half-width, red when it touches
+    if (!keep(behind(p))) return;
+    const [u, v] = project(p, w, h, sc), touching = body.g[k] > -0.02;
+    ctx.strokeStyle = touching ? colors.limit : colors.arm; ctx.lineWidth = (touching ? 2 : 1) * dpr;
+    ctx.globalAlpha = touching ? 0.9 : 0.45; ctx.beginPath(); ctx.arc(u, v, o.radii[k] * sc, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
+  });
+  drawPath(ctx, d, w, h, sc, big, dpr);
+  if (big) { ctx.setLineDash([4 * dpr, 4 * dpr]); drawPose(ctx, d.goal, w, h, sc, colors.goal, 1.5 * dpr, false); ctx.setLineDash([]); }
+  drawSegs(b => b); drawBody(b => b);
+  drawObstacle(ctx, o, w, h, sc, big, dpr);
+  drawSegs(b => !b); drawBody(b => !b);
+}
+function drawPath(ctx, d, w, h, sc, big, dpr) {   // the tool's path
   ctx.strokeStyle = colors.trail; ctx.lineWidth = (big ? 2 : 1.2) * dpr; ctx.beginPath();
   d.points.forEach((P, k) => { const [u, v] = project(P[P.length - 1], w, h, sc); k ? ctx.lineTo(u, v) : ctx.moveTo(u, v); });
   ctx.stroke();
-  if (big) { ctx.setLineDash([4 * dpr, 4 * dpr]); drawPose(ctx, d.goal, w, h, sc, colors.goal, 1.5 * dpr, false); ctx.setLineDash([]); }
-  drawPose(ctx, pts, w, h, sc, colors.arm, lw, big);
 }
 
 function drawTraces(cv, d, tau, series, limits, color) {
@@ -262,6 +357,42 @@ function drawPos(cv, d, tau) {
       ctx.strokeStyle = on ? colors.limit : colors.pos; ctx.lineWidth = (on ? 3 : 1.6) * dpr;
       ctx.beginPath(); ctx.moveTo(X(d.t[k - 1]), Y(qs[k - 1])); ctx.lineTo(X(d.t[k]), Y(qs[k])); ctx.stroke();
     }
+  });
+  const x = left + (w - left - right) * tau;
+  ctx.strokeStyle = colors.ink; ctx.lineWidth = dpr; ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); ctx.globalAlpha = 1;
+}
+
+function drawClear(cv, d, tau) {
+  // each body point's clearance from the obstacle, in units of its inflated size:
+  // (1 - g)^(1/n) - 1, n = 2 for a sphere (its distance over R + r) and the superquadric's
+  // exponent for a box. Zero is the surface (the grid line); red where the point touches it.
+  const o = d.obstacle;
+  if (!o) return;
+  const [w, h, dpr] = sizeCanvas(cv), ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = `${12 * dpr}px system-ui, sans-serif`; ctx.textBaseline = "middle";
+  if (!d.clearance || !d.t) { ctx.fillStyle = colors.muted; ctx.fillText("Not solved: " + (d.message || ""), 0, h / 2); return; }
+  const n = o.kind === "sphere" ? 2 : o.power, gap = 8 * dpr, rows = o.body.length;
+  const left = 64 * dpr, right = 8 * dpr, rh = (h - gap * (rows - 1)) / rows;
+  const T = d.t[d.t.length - 1], N = d.t.length;
+  const cl = g => Math.max(0, 1 - g) ** (1 / n) - 1;
+  o.body.forEach((name, r) => {
+    const top = r * (rh + gap), cs = d.clearance.map(row => cl(row[r]));
+    // a scale that keeps the detail near the surface: c / (c + 1/2), 0 at the surface, 1 far off
+    const sq = v => v >= 0 ? v / (v + 0.5) : v / 0.5, lo = Math.min(0, sq(Math.min(...cs)));
+    const X = t => left + (w - left - right) * t / T, Y = v => top + rh - (sq(v) - lo) / (1 - lo) * rh * 0.92 - rh * 0.04;
+    ctx.fillStyle = colors.muted; ctx.fillText(name, 0, top + rh / 2 - 7 * dpr);
+    ctx.fillText(`min ${Math.min(...cs).toFixed(3)}`, 0, top + rh / 2 + 8 * dpr);
+    ctx.strokeStyle = colors.grid; ctx.lineWidth = dpr;
+    ctx.beginPath(); ctx.moveTo(left, Y(0)); ctx.lineTo(w - right, Y(0)); ctx.stroke();
+    for (let k = 1; k < N; k++) {
+      const on = cs[k] < 2e-3 && cs[k - 1] < 2e-3;
+      ctx.strokeStyle = on ? colors.limit : colors.clear; ctx.lineWidth = (on ? 3 : 1.6) * dpr;
+      ctx.beginPath(); ctx.moveTo(X(d.t[k - 1]), Y(cs[k - 1])); ctx.lineTo(X(d.t[k]), Y(cs[k])); ctx.stroke();
+    }
+    const kmin = cs.indexOf(Math.min(...cs));   // the closest approach, marked
+    if (cs[kmin] < 2e-3) { ctx.fillStyle = colors.limit; ctx.beginPath(); ctx.arc(X(d.t[kmin]), Y(cs[kmin]), 3.5 * dpr, 0, 7); ctx.fill(); }
   });
   const x = left + (w - left - right) * tau;
   ctx.strokeStyle = colors.ink; ctx.lineWidth = dpr; ctx.globalAlpha = 0.5;
@@ -359,14 +490,21 @@ async function select(name, scroll) {
     + `<br>${current.setting ? `limits at ${current.setting} · ` : ""}torque limits [${lim}]`
     + (current.rate_limits ? `<br>rate limits [${current.rate_limits.map(v => v.toPrecision(3)).join(", ")}]` : "")
     + (current.position_limits ? `<br>position limits on joints ${current.position_limits.joints.map(j => j + 1).join(", ")}` : "")
+    + (current.obstacle ? `<br>${describeObstacle(current.obstacle)}` : "")
     + holds(current);
-  const rates = !!current.rate_limits, pos = !!current.position_limits;
+  const rates = !!current.rate_limits, pos = !!current.position_limits, obs = !!current.obstacle;
+  document.getElementById("clear").hidden = !obs; document.getElementById("clear-key").hidden = !obs;
   document.getElementById("rate").hidden = !rates; document.getElementById("rate-key").hidden = !rates;
   document.getElementById("pos").hidden = !pos; document.getElementById("pos-key").hidden = !pos;
   document.querySelectorAll(".card").forEach(e => e.classList.toggle("sel", e.dataset.name === name));
   if (location.hash.slice(1) !== name) history.replaceState(null, "", "#" + encodeURIComponent(name));
   if (scroll) document.getElementById("viewer").scrollIntoView({ behavior: "smooth", block: "start" });
   drawViewer();
+}
+function describeObstacle(o) {
+  const P = o.params, cm = v => `${Math.round(v * 100)}`, at = `at (${P.slice(0, 3).map(v => v.toFixed(2)).join(", ")}) m`;
+  return o.kind === "sphere" ? `a sphere of radius ${cm(P[3])} cm ${at}`
+    : `a wall ${cm(2 * P[3])} × ${cm(2 * P[4])} × ${cm(2 * P[5])} cm ${at}, its edges rounded (exponent ${o.power})`;
 }
 function holds(d) {   // which limits a rate case's answer holds, and which at one instant
   const o = d.orders;
@@ -376,7 +514,11 @@ function holds(d) {   // which limits a rate case's answer holds, and which at o
         : o["other joints"] ? "on different joints" : "on the same joint"}: `
       + o.together.map(([a, b]) => `${a} with ${b}`).join(", ")
     : (o["1"].length && o["2"].length ? "; never at one instant" : "");
-  const third = o["3"] === undefined ? "" : ` · ${o["3"].length ? "touches position limits " + o["3"].join(", ") : "no position limit"}`;
+  const t3 = (o["3"] || []).filter(n => !n.startsWith("obs_")), ob = (o["3"] || []).filter(n => n.startsWith("obs_")).map(n => n.slice(4));
+  const third = o["3"] === undefined ? "" : d.obstacle
+    ? ` · ${ob.length ? "touches the obstacle with the " + ob.join(", ") : "never touches the obstacle"}`
+      + (t3.length ? `, position limits ${t3.join(", ")}` : "")
+    : ` · ${t3.length ? "touches position limits " + t3.join(", ") : "no position limit"}`;
   return `<br>holds ${o["1"].length ? "torque limits " + o["1"].join(", ") : "no torque limit"} · `
     + `${o["2"].length ? "rate limits " + o["2"].join(", ") : "no rate limit"}${third}${both}`;
 }
@@ -385,6 +527,7 @@ function drawViewer() {
   drawTau(document.getElementById("tau"), current, vt);
   drawRate(document.getElementById("rate"), current, vt);
   drawPos(document.getElementById("pos"), current, vt);
+  drawClear(document.getElementById("clear"), current, vt);
   document.getElementById("scrub").value = Math.round(vt * 1000);
 }
 document.getElementById("play").onclick = e => { playing = !playing; e.target.textContent = playing ? "Pause" : "Play"; };
@@ -414,6 +557,7 @@ function tick(now) {
     drawTau(document.getElementById("tau"), current, Math.min(1, shown));
     drawRate(document.getElementById("rate"), current, Math.min(1, shown));
     drawPos(document.getElementById("pos"), current, Math.min(1, shown));
+    drawClear(document.getElementById("clear"), current, Math.min(1, shown));
     document.getElementById("scrub").value = Math.round(Math.min(1, shown) * 1000);
   }
   for (const n of visible) drawCard(cards.get(n));

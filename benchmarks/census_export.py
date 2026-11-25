@@ -19,7 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from auto_optimal_control.robot import SIX_JOINT_LINKS, link_frames
+from auto_optimal_control.robot import (BOX_POWER, SIX_JOINT_BODY, SIX_JOINT_LINKS, body_points_numeric,
+                                        link_frames, obstacle_values)
 
 N_SAMPLES = 160
 
@@ -40,7 +41,7 @@ def _describe(name):
 
 
 def export_case(out_dir, name, params, row, result=None, torques=None, rates=None,
-                positions=None):
+                positions=None, obstacle=None):
     """Write ``<out_dir>/<name>.json``.
 
     ``params`` is the case's parameter vector ([q0, qf, jerk limits, torque limits],
@@ -50,7 +51,10 @@ def export_case(out_dir, name, params, row, result=None, torques=None, rates=Non
     when exact, and ``torques(Q, W, A)`` the joint torques at sampled states. ``rates``
     and ``positions`` say which limits the case has (by default: rates when there are
     30 parameters, positions never); ``positions`` may be the list of joints whose
-    position limits bind."""
+    position limits bind. ``obstacle`` (``"sphere"`` or ``"box"``) says the case's last
+    params are an obstacle's (:func:`~auto_optimal_control.robot.obstacle_limits`): the
+    file then gives the obstacle, the body points that must clear it and, for a solved
+    case, each point's ``g`` along the motion (``clearance``)."""
     p = np.asarray(params, dtype=float)
     q0, qf, jerk, tau = p[:6], p[6:12], p[12:18], p[18:24]
     if rates is None:
@@ -70,7 +74,15 @@ def export_case(out_dir, name, params, row, result=None, torques=None, rates=Non
         data["position_limits"] = {"min": _round(pos[0]), "max": _round(pos[1]),
                                    "joints": list(positions) if positions is not True
                                    else list(range(6))}
-    if rates is not None or pos is not None:
+    obs = None
+    if obstacle is not None:
+        obs = p[-4:] if obstacle == "sphere" else p[-7:]
+        data["obstacle"] = {"kind": obstacle, "params": _round(obs, 5), "power": BOX_POWER,
+                            "radii": [float(r) for *_, r in SIX_JOINT_BODY],
+                            "body": [n for n, *_ in SIX_JOINT_BODY]}
+        data["start_body"] = _round(body_points_numeric(SIX_JOINT_LINKS, q0))
+        data["goal_body"] = _round(body_points_numeric(SIX_JOINT_LINKS, qf))
+    if rates is not None or pos is not None or obs is not None:
         data["orders"] = row.get("orders")
     if result is not None and row.get("exact"):
         tr = result.shooting.trajectory(result.solution.v, n_points=N_SAMPLES)
@@ -83,6 +95,9 @@ def export_case(out_dir, name, params, row, result=None, torques=None, rates=Non
             data["tau"] = _round(torques(Q, W, A))
         if rates is not None:
             data["w"] = _round(W)
+        if obs is not None:
+            data["body_points"] = [_round(body_points_numeric(SIX_JOINT_LINKS, q)) for q in Q]
+            data["clearance"] = _round(obstacle_values(SIX_JOINT_LINKS, Q, obstacle, obs))
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     tmp = out / f".{name}.json.tmp"
@@ -101,6 +116,7 @@ def write_manifest(out_dir):
         cases.append({"file": f.name, "name": d["name"], "family": d["family"],
                       "index": d["index"], "setting": d["setting"], "solved": d["solved"],
                       "seconds": d["seconds"], "tf": d["tf"], "rates": "rate_limits" in d,
-                      "positions": "position_limits" in d})
+                      "positions": "position_limits" in d,
+                      "obstacle": d.get("obstacle", {}).get("kind")})
     (out / "manifest.json").write_text(json.dumps({"cases": cases}, indent=1))
     return len(cases)
