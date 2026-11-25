@@ -276,6 +276,22 @@ def _is_zero(expr):
     return sp.simplify(expr) == 0
 
 
+# derive() simplifies the expressions it writes out: they read best that way, and on
+# the small expressions of most problems it costs little (the largest state or costate
+# rate of the examples and benchmarks has 153 operations written out, the cart-pole's).
+# On a large one, such as a low-thrust transfer in equinoctial elements (orbits.py),
+# simplify() runs for many minutes, mostly in trigsimp, while code generation shares
+# common subexpressions anyway; an expression above this many operations is kept as it is.
+SIMPLIFY_LIMIT_OPS = 400
+
+
+def _simplified(expr):
+    """``simplify(expr)``, or ``expr`` as it is above :data:`SIMPLIFY_LIMIT_OPS`."""
+    if sp.count_ops(expr) > SIMPLIFY_LIMIT_OPS:
+        return expr
+    return sp.simplify(expr)
+
+
 def _eliminate_unit_vector(H, cs):
     b = [sp.diff(H, u) for u in cs.controls]
     for bi in b:
@@ -285,7 +301,7 @@ def _eliminate_unit_vector(H, cs):
     # factor() exposes common factors (thrust, throttle, mass) that the
     # square root can then pull out by their sign assumptions.
     norm = sp.sqrt(sp.factor(sp.Add(*[bi ** 2 for bi in b])))
-    law = {u: sp.simplify(-bi / norm) for u, bi in zip(cs.controls, b)}
+    law = {u: _simplified(-bi / norm) for u, bi in zip(cs.controls, b)}
     # H is linear in u, so H(u*) = H(0) + b . u* = H(0) - ||b||.
     H_star = H.subs({u: 0 for u in cs.controls}) - norm
     return law, H_star
@@ -294,11 +310,11 @@ def _eliminate_unit_vector(H, cs):
 def _eliminate_box(H, cs):
     u = cs.control
     d1 = sp.diff(H, u)
-    d2 = sp.simplify(sp.diff(d1, u))
+    d2 = _simplified(sp.diff(d1, u))
     if d2 == 0:
         if not (cs.lower.is_finite and cs.upper.is_finite):
             raise ValueError(f"H is linear in {u}: both of its bounds must be finite")
-        S = sp.simplify(d1)
+        S = _simplified(d1)
         law = sp.Piecewise((cs.upper, S < 0), (cs.lower, True))
         return {u: law}, SwitchingFunction(u, S, cs.lower, cs.upper)
     if not _is_zero(sp.diff(d2, u)):
@@ -307,7 +323,7 @@ def _eliminate_box(H, cs):
         raise ValueError(
             f"cannot show d2H/d{u}2 = {d2} is positive. Declare the symbols it depends on "
             f"with positive=True if it is (a negative value means H has no minimum in {u})")
-    u_free = sp.simplify(u - d1 / d2)
+    u_free = _simplified(u - d1 / d2)
     law = u_free
     if cs.lower.is_finite is not False:
         law = sp.Max(law, cs.lower)
@@ -401,9 +417,9 @@ def _control_law(problem, H):
 
     law = _resolve(law, problem.controls)
     # Switching functions may still contain controls of other sets.
-    switching = [SwitchingFunction(sw.control, sp.simplify(sw.expr.subs(law)), sw.lower, sw.upper)
+    switching = [SwitchingFunction(sw.control, _simplified(sw.expr.subs(law)), sw.lower, sw.upper)
                  for sw in switching]
-    return {u: law[u] for u in problem.controls}, tuple(switching), sp.simplify(Hs)
+    return {u: law[u] for u in problem.controls}, tuple(switching), _simplified(Hs)
 
 
 def _boundary_conditions(problem, H_star, costates, taken):
@@ -895,8 +911,8 @@ def derive(problem, singular=False, simultaneous=None, outline_above=OUTLINE_ABO
 
     # dH/dx with the controls still symbolic, then u* substituted: correct
     # for interior, saturated and bang-bang controls alike.
-    state_dynamics = tuple(sp.simplify(f.subs(law)) for f in problem.dynamics)
-    costate_dynamics = tuple(sp.simplify(-sp.diff(H, s).subs(law)) for s in problem.states)
+    state_dynamics = tuple(_simplified(f.subs(law)) for f in problem.dynamics)
+    costate_dynamics = tuple(_simplified(-sp.diff(H, s).subs(law)) for s in problem.states)
 
     # Path-constraint penalties depend on the state only, so they leave the
     # control law alone and add w max(0, g) dg/dx to -lambda'.
@@ -938,7 +954,7 @@ def derive(problem, singular=False, simultaneous=None, outline_above=OUTLINE_ABO
         problem=problem, time=problem.time, states=problem.states, costates=costates,
         controls=problem.controls, params=problem.params, hamiltonian_full=H + penalty,
         control_law=law, switching_functions=switching, hamiltonian=H_star + penalty,
-        running_cost=sp.simplify(problem.running_cost.subs(law)) + penalty,
+        running_cost=_simplified(problem.running_cost.subs(law)) + penalty,
         state_dynamics=state_dynamics, costate_dynamics=costate_dynamics, boundary=boundary,
         path_constraints=constraints, penalty=penalty, singular_arcs=tuple(singular_arcs),
         singular_unsupported=tuple(singular_unsupported), boundary_sets=sets, riding=riding)
