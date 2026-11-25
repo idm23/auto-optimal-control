@@ -3010,3 +3010,67 @@ depend on the problem alone, and both were cached after the first solve.
 *Change* (engineering, no new rule). `Homotopy` builds both when it is constructed, with
 its kernels. On core the first case's time before its routes start is 0.06 s, against
 1.53 s.
+
+### Entry times solved inside every evaluation: Rule R87, tried
+
+*What it was.* Lemma JL puts Newton's radius in an order-1 entry time at $O(w)$. At the
+route's failed steps late in rest 4's walk, the guess's error is almost all in that
+time (O11). Nonlinear elimination removes the time from Newton's unknowns. Inside each
+evaluation, the entry time $t^*$ is solved from its rate row $dg/dt = 0$ by Newton along
+the free flow before the entry (closed form, Lemma T). The unknown is tied to it by the row
+$t_{\rm in} - t^*$, and $dt^*/dv$ comes from the implicit function theorem. The reduced
+map has the same zeros.
+
+*Checks.* The map's Jacobian against central differences, at the route's first five
+eliminated evaluations: worst column errors $10^{-6}$ to $2 \times 10^{-4}$ relative,
+at the differences' own error. At the route's failed guesses the reduced map does what
+JL says (Observation O12).
+
+*Rule R87* (tried, not kept; `MultiArcShooting.eliminate_entries`). Three versions, on
+rest 4's route 6 and vrest 12's route 7:
+
+| Version | rest 4 | vrest 12 |
+|---|---|---|
+| Without | 9.7 s, 714 Jacobians | 12.4 s |
+| Every entry on every leg | 12.3 s, 677 | 33.1 s |
+| Only a root within $2 \times 10^{-3}$ s of the unknown with $d^2g/dt^2 < 0$ (else the unknown and the rate row) | 11.2 s, 621 | over the 60 s cap |
+| The same, only on legs that move the weight | 11.5 s, 640 | over the 60 s cap |
+
+- **Census, the first version against R86's census:** 112 solved against 113, and 85 under
+  5 s against 90. On the 117 cases both ran, 500.2 s against 459.0 s.
+- **What goes wrong.**
+  - On a poor iterate, Newton along the free flow finds another root of $dg/dt$: a
+    turning point of $g$ off the limit, 0.4 to 90 ms from the unknown. The riding arc that
+    follows then fails (rest 4: 528 failed rides against 483).
+  - Bounded to the regular root near the unknown, the map is discontinuous where it falls
+    back. On vrest 12 the route then meets 118 failures in the settle: the riding arc
+    after a moved entry cannot be sampled (`sample_boundary` returns an error code).
+  - So the walk's steps that JL limits are rescued, but the route's path changes before
+    them.
+
+### A stale Jacobian's failed test, with the fresh Jacobian at the step's end: Rule R88, tried
+
+*What it was.* Traced on rest 4's route 6, the late walk's failed solves begin alike, with
+R87 or without it. R61's carried Jacobian takes a chord step that cuts the residual about
+tenfold, for example $4.2 \times 10^{-2}$ to $4.1 \times 10^{-3}$. Then R55's
+natural-monotonicity test rejects it ($\theta$ 1.0 to 1.3). That test is measured in the
+stale Jacobian's norm, whose weak direction (cond $10^7$) dominates it. The chord then
+takes a fresh Jacobian back at the guess, outside Newton's radius (O12). That Newton step
+leaves the riding domain, and its damped steps never get below the guess's residual.
+
+*Rule R88* (tried, not kept; `MultiArcShooting.stale_step_drop = 0.1`). A stale
+Jacobian's step that fails the test but leaves the residual below a tenth of its value is
+kept, and the fresh Jacobian is taken at its end.
+
+*Result: mixed.*
+- **Single routes on node-1, six at a time:** rest 4 674 Jacobians against 714 (13.3 s
+  against 13.8 s), but vrest 12 goes over the 60 s cap (16.7 s without).
+- **Census on node-1, against R86's census, over its 117 cases:**
+  - 112 solved against 113, and 92 under 5 s against 90. 450.1 s against 457.7 s for the
+    cases both solve.
+  - Vgoal 4 at 70% takes 39.4 s against 45.9 s, and pvrest 10 33.2 s against 38.3 s.
+    Pvrest 12 goes over the cap (47.1 s).
+  - The cases that cross 5 s were all within 0.5 s of it, both ways (vrest 3 4.67 s
+    against 5.17 s, pvrest 3 5.51 s against 4.93 s).
+
+Like R82 to R85, it changes which steps succeed, and the paths move both ways.
