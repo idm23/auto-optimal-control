@@ -11,6 +11,8 @@ from auto_optimal_control.policy import SecondaryCost
 
 CLASSES = {"negative_width", "riding_failed", "free_failed", "singular_failed",
            "bad_final_time", "violated", "other"}
+# A segment integrated backward (rule R10b) tags its failure (MultiArcShooting._segment).
+CLASSES |= {f"{c} backward" for c in ("riding_failed", "free_failed", "singular_failed")}
 
 
 @pytest.fixture(scope="module")

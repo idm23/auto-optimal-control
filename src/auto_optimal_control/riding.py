@@ -181,6 +181,10 @@ def riding_kernels(pmp, P, make_function, mapping):
     roots = ", ".join(str(r) for r in system.root_of)
     signs = ", ".join(str(float(s)) for s in system.sign_of)
     dim = m + mset + (m if bounded else 0)
+    # Lemma KD: with d2H/du2 diagonal, the riding system is solved by eliminating the
+    # free controls (an s x s system for the multipliers) instead of a dense LU.
+    diagonal = m > 0 and all(sp.simplify(sp.diff(H, a, b)) == 0
+                             for i, a in enumerate(u) for b in u[i + 1:])
 
     def roots_of(s):
         return sorted({system.root_of[c] for c in s})
@@ -242,6 +246,118 @@ static void {P}r_lx_of(int id, double t, const double* z, const double* p, const
     }}
 }}
 
+#if {int(diagonal)}
+/* Lemma KD: d2H/du2 = R is diagonal, so the system is solved by eliminating the free
+   controls: with F the free controls, the multipliers solve the s x s system
+   S mu = A_F R_F^-1 f_F + A_H u_H - g, S = A_F R_F^-1 A_F^T, and then
+   u_F = R_F^-1 (f_F - A_F^T mu) and nu_H = f_H - R_H u_H - A_H^T mu. The same unknowns,
+   in the same order (u, mu, nu), as the dense system. The factors are kept in K:
+   R's diagonal (m), the signed rows (s x m) and S's LU (s x s); in piv: which controls
+   are held (m), then S's pivots (s). */
+static void {P}r_kd_solve(const double* K, int d, const int* piv, double* v) {{
+    int nh = 0;
+    for (int i = 0; i < {m}; ++i) if (piv[i]) ++nh;
+    const int s = d - {m} - nh;
+    const double* r = K;
+    const double* a = K + {m};
+    const double* S = K + {m} + s * {m};
+    const int* sp = piv + {m};
+    double u[{m}], nu[{m}], w[{mset}];
+    int h = {m} + s;
+    for (int i = 0; i < {m}; ++i) u[i] = piv[i] ? v[h++] : 0.0;
+    for (int q = 0; q < s; ++q) {{
+        double x = -v[{m} + q];
+        for (int i = 0; i < {m}; ++i)
+            x += a[q * {m} + i] * (piv[i] ? u[i] : v[i] / r[i]);
+        w[q] = x;
+    }}
+    for (int c = 0; c < s; ++c) {{
+        double t_ = w[sp[c]];
+        w[sp[c]] = w[c];
+        w[c] = t_;
+        for (int q = c + 1; q < s; ++q) w[q] -= S[q * s + c] * w[c];
+    }}
+    for (int c = s - 1; c >= 0; --c) {{
+        for (int j = c + 1; j < s; ++j) w[c] -= S[c * s + j] * w[j];
+        w[c] /= S[c * s + c];
+    }}
+    nh = 0;
+    for (int i = 0; i < {m}; ++i) {{
+        double at = 0.0;
+        for (int q = 0; q < s; ++q) at += a[q * {m} + i] * w[q];
+        if (piv[i]) nu[nh++] = v[i] - r[i] * u[i] - at;
+        else u[i] = (v[i] - at) / r[i];
+    }}
+    for (int i = 0; i < {m}; ++i) v[i] = u[i];
+    for (int q = 0; q < s; ++q) v[{m} + q] = w[q];
+    for (int i = 0; i < nh; ++i) v[{m} + s + i] = nu[i];
+}}
+
+/* One system: the limits of the set, and the controls held at bounds (held[i] = -1, +1). */
+static int {P}r_system_kd(int id, const double* R, const double* limits, const double* c0,
+                       const double* lo, const double* hi, const int* held, double* K, int* piv,
+                       double* v, int* dout) {{
+    const int s = {P}r_size[id];
+    int d = {m} + s;
+    for (int i = 0; i < {m}; ++i) if (held[i]) ++d;
+    if (d > {dim}) return 4;
+    double* r = K;
+    double* a = K + {m};
+    double* S = K + {m} + s * {m};
+    int* sp = piv + {m};
+    for (int i = 0; i < {m}; ++i) {{
+        r[i] = R[i * {m} + i];
+        if (!(r[i] > 0.0)) return 4;
+        piv[i] = held[i] != 0;
+        v[i] = -c0[i];
+    }}
+    for (int i = 0; i < s; ++i) {{
+        const int c = {P}r_set[id][i];
+        const int k = {P}r_root[c];
+        const double sign = {P}r_sign[c];
+        for (int j = 0; j < {m}; ++j) {{
+            a[i * {m} + j] = sign * limits[k * {m} + j];
+        }}
+        v[{m} + i] = -sign * limits[{nr * m} + k];
+    }}
+    int row = {m} + s;
+    for (int i = 0; i < {m}; ++i) {{
+        if (!held[i]) continue;
+        v[row] = held[i] > 0 ? hi[i] : lo[i];
+        ++row;
+    }}
+    double big = 0.0;
+    for (int q = 0; q < s; ++q)
+        for (int l = 0; l < s; ++l) {{
+            double x = 0.0;
+            for (int i = 0; i < {m}; ++i)
+                if (!held[i]) x += a[q * {m} + i] * a[l * {m} + i] / r[i];
+            S[q * s + l] = x;
+            if (fabs(x) > big) big = fabs(x);
+        }}
+    for (int c = 0; c < s; ++c) {{
+        int best = c;
+        for (int q = c + 1; q < s; ++q) if (fabs(S[q * s + c]) > fabs(S[best * s + c])) best = q;
+        if (!(fabs(S[best * s + c]) > 1e-13 * big))
+            return 4;                                      /* limits not independent */
+        sp[c] = best;
+        if (best != c)
+            for (int j = c; j < s; ++j) {{  /* as the dense LU: the solve swaps as it goes */
+                double t_ = S[c * s + j];
+                S[c * s + j] = S[best * s + j];
+                S[best * s + j] = t_;
+            }}
+        for (int q = c + 1; q < s; ++q) {{
+            double w_ = S[q * s + c] / S[c * s + c];
+            S[q * s + c] = w_;
+            if (w_ != 0.0) for (int j = c + 1; j < s; ++j) S[q * s + j] -= w_ * S[c * s + j];
+        }}
+    }}
+    *dout = d;
+    {P}r_kd_solve(K, d, piv, v);
+    return 0;
+}}
+#endif
 /* Dense LU with partial pivoting; K has d rows of stride {dim}. */
 static int {P}r_lu(double* K, int d, int* piv) {{
     double largest = 0.0;
@@ -281,7 +397,7 @@ static void {P}r_lu_solve(const double* K, int d, const int* piv, double* v) {{
 }}
 
 /* One system: the limits of the set, and the controls held at bounds (held[i] = -1, +1). */
-static int {P}r_system(int id, const double* R, const double* limits, const double* c0,
+static int {P}r_system_dense(int id, const double* R, const double* limits, const double* c0,
                        const double* lo, const double* hi, const int* held, double* K, int* piv,
                        double* v, int* dout) {{
     const int s = {P}r_size[id];
@@ -316,6 +432,27 @@ static int {P}r_system(int id, const double* R, const double* limits, const doub
     if (rc) return rc;
     {P}r_lu_solve(K, d, piv, v);
     return 0;
+}}
+
+/* Rule R86 (Lemma KD) for a set of one limit, where S is a scalar; a larger set keeps
+   the dense LU, since S = A_F R_F^-1 A_F^T squares the conditioning of the limits' rows,
+   which nearly dependent torque limits make poor. */
+static int {P}r_system(int id, const double* R, const double* limits, const double* c0,
+                       const double* lo, const double* hi, const int* held, double* K, int* piv,
+                       double* v, int* dout) {{
+#if {int(diagonal)}
+    if ({P}r_size[id] == 1)
+        return {P}r_system_kd(id, R, limits, c0, lo, hi, held, K, piv, v, dout);
+#endif
+    return {P}r_system_dense(id, R, limits, c0, lo, hi, held, K, piv, v, dout);
+}}
+
+/* A further right-hand side of the system r_system factored for set id. */
+static void {P}r_solve_set(int id, const double* K, int d, const int* piv, double* v) {{
+#if {int(diagonal)}
+    if ({P}r_size[id] == 1) {{ {P}r_kd_solve(K, d, piv, v); return; }}
+#endif
+    {P}r_lu_solve(K, d, piv, v);
 }}
 
 /* Whether the solution of a system is the one: controls within bounds, and multipliers
@@ -566,7 +703,7 @@ static int {P}r_sensitivity(int c, double t, const double* z, const double* p, c
             continue;
         }}
         for (int i = {m} + s; i < d; ++i) v[i] = 0.0;   /* a held control does not move */
-        {P}r_lu_solve(K, d, piv, v);
+        {P}r_solve_set(c, K, d, piv, v);
         for (int i = 0; i < d; ++i) D[i * {nz} + j] = v[i];
     }}
     return 0;
