@@ -2995,3 +2995,18 @@ failure are those of the dense system.
 The census gains much less than the routes' evaluations do. A case's time includes the
 other routes' processes on the machine, and the exact solve and Python glue, which R86 does
 not touch. R86 joins the release as a cheaper kernel with the same answers.
+
+### The problem's own symbolic work, at construction
+
+*What it was.* Three census cases spent about 2.3 s outside their winning route: vgoal 0
+at 90% (3.73 s, against 1.36 s for its route), pgoal 2 at 70% (5.75 s against 3.42 s)
+and pvgoal 5 at 70% (5.70 s against 3.31 s). Each is the first case its Homotopy solves:
+rate limits, position limits, and both. The goal cases' Homotopy had already solved a
+free problem in `params`, outside the timer. Profiled on core, that first solve spends
+0.86 s on R23's closed-form certificate (`closed_form.certify`, SymPy) and 0.6 s on the
+ends' functions (`_limits_broken_at_the_ends`, SymPy `free_symbols` on the torques). Both
+depend on the problem alone, and both were cached after the first solve.
+
+*Change* (engineering, no new rule). `Homotopy` builds both when it is constructed, with
+its kernels. On core the first case's time before its routes start is 0.06 s, against
+1.53 s.
