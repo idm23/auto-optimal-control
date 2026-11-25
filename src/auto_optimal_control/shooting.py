@@ -797,6 +797,11 @@ class MultiArcShooting(SingleShooting):
     #: changes (an event per control) rather than step across the kink in the flow.
     #: The flow is continuous there, so the STM carries straight through.
     held_events_default = True
+    #: Rule R78 (Lemma HE): test the held-set guards at this many points inside each
+    #: step, on the interpolant, as well as at its end. A control that reaches its bound
+    #: and leaves it within one step has two roots there, which the ends cancel; the
+    #: held set then stays fixed and the flow leaves the riding law. 0: the ends only.
+    held_interior = 0
     #: Free arcs of integrator chains in closed form, with an exact STM, where the
     #: problem is certified for it (rule R23, Lemma T; ``closed_form.py``).
     closed_free_default = True
@@ -1179,6 +1184,8 @@ class MultiArcShooting(SingleShooting):
                        or self.max_nfev)
                 extra = ({"tangent_rtol": self.tangent_rtol}
                          if jac and self.tangent_rtol is not None else {})
+                if self.held_events and self.held_interior:
+                    extra["held_interior"] = int(self.held_interior)
                 r = k.propagate_boundary(c, ta, z, tb, p, stm=jac, cost=cost, max_nfev=cap,
                                          held_events=self.held_events,
                                          **tolerance, **extra, **self.options)

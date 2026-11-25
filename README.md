@@ -984,7 +984,7 @@ always shows what `main` does:
    python benchmarks/arm_census.py census.jsonl --workers 1 --parallel-routes \
        --cap 60 --rule R1=on --rule R2=on --rule R15=on --rule R16=on \
        --rule R20=on --rule R25=on --rule R26=on --rule R29=on --rule R32=on \
-       --rule R41=on --rule R43=on --rule R48=on --rule R50=on --rule R54=on --rule R55=on --rule R60=on --rule R61=on --rule R63=on --rule R64=on --rule R65=on --rule R66=on --rule R28=on --rule R72=on --rule R74=on --rule R75=on --export /tmp/census_data
+       --rule R41=on --rule R43=on --rule R48=on --rule R50=on --rule R54=on --rule R55=on --rule R60=on --rule R61=on --rule R63=on --rule R64=on --rule R65=on --rule R66=on --rule R28=on --rule R72=on --rule R74=on --rule R75=on --rule R78=on --export /tmp/census_data
    rm -r docs/_static/census/data && mv /tmp/census_data docs/_static/census/data
    ```
 

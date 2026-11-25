@@ -33,9 +33,9 @@ torque limit on every joint. There are four families of cases:
   - **Where they live:** the cases are frozen in `benchmarks/position_cases.json`, made
     by `benchmarks/position_cases.py`.
 
-The data shown is from the census of 2026-11-24, on the branch that maps an order-2 arc's
-jump through the reversal (Lemma F2, in R4). Rules R1, R2, R15, R16, R20, R25, R26, R28,
-R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72, R74 and R75 are turned on
+The data shown is from the census of 2026-11-25, on the branch that tests the held-set
+guards inside each step (R78, Lemma HE). Rules R1, R2, R15, R16, R20, R25, R26, R28,
+R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72, R74, R75 and R78 are turned on
 (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
@@ -47,11 +47,23 @@ ends (R72). The census runs its
 cases in its main process, so the routes are the only other processes. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-112 of the 117 cases solve, all under 60 s, and 93 of them under 5 s. The mean solve time
-of the solved cases is 4.511 s. Of the 27 position-limit cases, 25 solve, 17 of them
-under 5 s, and every one of the 25 touches the position limits it was given (Observation
-O8). The 90 older cases are as before: 87 solve, 76 under 5 s. Times are wall-clock
-seconds per case, to the millisecond.
+113 of the 117 cases solve, all under 60 s, and 89 of them under 5 s. The mean solve time
+of the solved cases is 4.454 s. Of the 27 position-limit cases, 26 solve, 16 of them
+under 5 s, and every one of the 26 touches the position limits it was given (Observation
+O8). Of the 90 older cases 87 solve, 73 under 5 s. Times are wall-clock seconds per case,
+to the millisecond.
+
+Rest 2 with rate and position limits now solves, in 2.5 s. Its answer had been found and
+then rejected for a violation it does not have. Riding a torque limit, a joint's jerk
+reached its bound and left it within one integration step. Tested only at the steps'
+ends, that change of the held set was missed, so the residual without the STM integrated
+a flow off the riding law, while the residual with the STM, whose steps are shorter, saw
+it. Newton converged one and the checks judged the other. The guards are now tested at
+four points inside each step as well (R78, Lemma HE). The 112 cases solved on both pages
+take 500.8 s against 505.2 s. Single cases move both ways, as when any rule changes the
+route's numerics: rest 5 with rate and position limits from 24.3 to 14.3 s and vrest 12
+from 40.3 to 26.6 s, but vrest 13 from 4.0 to 6.0 s. Four cases that were just under 5 s
+are now just over.
 
 Rest 10 with rate and position limits is the first case solved through the reversed
 problem (R4). Its reversed problem solved before, but the extremal mapped back did not
@@ -84,7 +96,7 @@ winners are spread over every route, so none can be dropped.
   0 and 3).
 - **`vrest`:** 14 of 15: all but rest 4.
 - **`pgoal`:** all 6. **`prest`:** 10 of 11, all but rest 4. **`pvgoal`:** the one.
-  **`pvrest`:** 8 of 9, all but rest 2.
+  **`pvrest`:** all 9.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit
 on another joint at the same instant (the nine new ones are not yet read for this): goals 3 and 4 at 90%, goals 0 and 1 at 80%, rest 2 and rest 9.
