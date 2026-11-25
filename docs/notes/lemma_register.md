@@ -1596,6 +1596,163 @@ jump, density, gap, order, bound, end, held sign).
   54.5 s, every one faster (0.57× to 0.94×), with the same final times.
 - **Used by.** R75.
 
+### HE. A held-set change inside one step — proved, with a census case
+
+- **Setting.** With held-set events (R22), a riding arc is integrated with its held
+  set fixed between events. Each control's guard (its gap to its bound, or a held
+  control's multiplier) marks where the set changes, and the step restarts there.
+- **Statement.**
+  - **The defect.** Let a guard be positive at both ends of an accepted step, but
+    negative inside it: a control reaches its bound and leaves it within one step.
+    Then it has an even number of roots in the step, and a test at the step's ends
+    sees none. The held set stays fixed through the excursion. Its control leaves the
+    box, so the flow integrated is not the riding law's.
+  - **The fix.** Test the guards also at $n$ points inside each step, on the
+    interpolant. An excursion that contains one of those points is then found.
+  - **Its reach.** That is every excursion longer than $h/(n+1)$ in a step of length
+    $h$. Testing more points never loses a root that the ends find.
+- **Proof.** A continuous guard with the same sign at both ends of an interval
+  crosses zero an even number of times there. The scan reports a root only between
+  test points of opposite sign. With more test points every sign change between the
+  ends is still bracketed, and an excursion that contains a test point makes a
+  bracket of its own. $\square$
+- **Why it matters.** The residual and its Jacobian integrate the same arc with
+  different steps. With the STM the steps are shorter, because its entries are under
+  error control too. One evaluation can then see an excursion that the other steps
+  over. Newton converges the Jacobian evaluation's residual, while the acceptance
+  checks sample the plain one. A solution can be rejected for a flow it does not have.
+- **Seen.** Rest 2 with rate and position limits (route 2), on census page 122.
+  - The exact solve converged: residual $6.8 \times 10^{-12}$ evaluated with the
+    Jacobian, but $7.2 \times 10^{-3}$ evaluated without it.
+  - The split was one stretch of the `tau1_max` arc, on $[0.502, 0.631]$. There
+    control 1 reaches its bound at 0.532 and leaves it.
+  - With the STM the integration saw both changes. Without it there were 122
+    evaluations, no reset, and an end state $4.85 \times 10^{-4}$ away from the
+    riding law's, which the integration without events also gives.
+  - The trajectory checks then saw `w3_min` violated by $2.1 \times 10^{-6}$ and
+    rejected the solution.
+  - With R78 the case solves in 7.2 s, at the final time of the solution that was
+    rejected.
+- **Tested.** On the two-link arm at rtol $10^{-6}$, so that steps are long:
+  - 800 draws of riding arcs, each half a second long.
+  - Ends only: one arc lost both resets and ended $1.2 \times 10^{-2}$ from the law,
+    and on two arcs the state alone and the state with its STM saw different resets.
+  - With 4 interior points: every arc within $10^{-5}$ of the law, with the same
+    resets in both.
+  - At rtol $10^{-10}$ no arc of the 564 is affected. The interior tests cost 19%
+    more evaluations of the riding right-hand side there.
+- **Used by.** R78.
+
+### Observation O9: what is still not analytic, and where the time goes (2026-11-25)
+
+- **The map of the arm's problem.**
+  - **Joints:** six chains $q' = w$, $w' = a$, $a' = j$, with the jerks in a box.
+  - **Cost:** $1 + \sum r_i j_i^2 / 2$.
+  - **Limits:** torques $\tau = M(q) a + c(q, w) + G(q)$ at order 1, rates at order
+    2, angles at order 3.
+
+  | Piece | Status | By |
+  |---|---|---|
+  | Free arcs: flow, costates, STM, cost | closed form | T |
+  | Arcs riding rate (or angle) limits, alone or together | closed form | T″ |
+  | Touches, jumps, junction rows | algebraic in the closed forms | J, Q, H2 |
+  | Arcs riding a torque limit (alone or with rate limits) | integrated | none |
+
+- **Measured on single routes, each alone on its machine**, with every segment
+  timed:
+
+  | Case (route), machine | Route time | Riding torque limits | Free arcs | Rate-only arcs |
+  |---|---|---|---|---|
+  | vrest 12 (2), node-1 | 29.0 s | 70% | 1.4% | 0.9% |
+  | rest 4 (6), node-1 | 8.5 s | 67% | 1.9% | none |
+  | vgoal 4 at 70% (4), core | 34.8 s | 46% | 1.6% | 1.0% |
+  | vgoal 3 at 80% (5), core | 47.3 s, unsolved there | 63% | 1.3% | 0.9% |
+
+  Core runs Python more slowly than node-1, so its glue takes a larger share.
+  Vgoal 3 at 80% solves on node-1's route 5 in 15.8 s but not on core's: the
+  routes are sensitive to the machines' small numerical differences.
+
+  - Residuals without the STM are called 4 to 6 times as often as Jacobians (the
+    chord steps of AC). The two halves of the torque riding cost about the same.
+  - The rest of each route is Python glue and the closed forms' own calls.
+- **Torque arcs are long and never saturated.**
+  - In the answers they cover 51 to 80% of $t_f$ (vrest 12: 1.358 s of 1.692 s).
+  - Riding them leaves 2 to 5 jerks free: every jerk is held at a bound or pinned
+    by a ridden row for at most 1% of a torque arc's time.
+  - So the state flow on them always depends on the costates, and no reduction to
+    the state alone applies.
+- **Where the routes spend their steps** (vrest 12, route 2: 522 step lines):
+  - **Halving cascades at three points, about 110 steps.** At $s = 0.457$ they are
+    coincident rate touches (Lemma RS). At $s = 0.847$ and $0.92$, Newton's iterates
+    give arcs that run far past $t_f$, such as `tau1_max` on $[0.21, 6.27]$. 337 of
+    358 riding failures are of this kind, in the annealing stage.
+  - **R2's one-by-one offset moves, about 120 steps.**
+  - **The rest** are 1 to 3 steps per change of structure.
+  - Time is spent where the torque arcs are: 25.7 of 28.5 s at structures with two
+    torque arcs.
+- **Consequence.** The work left to remove is torque riding, times the number of
+  evaluations. Analysis can still reduce the evaluations (steps that fail, iterates
+  that leave the domain), not the integration itself: no torque arc of this arm has
+  a closed form, since one joint riding $\tau = T$ is a pendulum-type equation.
+
+### RS. Reflection symmetry of decoupled chains — proved
+
+- **Statement.** Take Lemma T's chains, $s_0' = s_1, \dots, s_{L-1}' = u$, and any cost
+  $L(u)$. Map
+  $$\tilde s_m(t) = (-1)^{m+1} s_m(T - t) + \delta_{m0}\,c, \qquad \tilde u(t) = (-1)^{L+1} u(T - t).$$
+  - **What it preserves.** The dynamics, the cost, and any box symmetric under
+    $u \mapsto (-1)^{L+1} u$ (every box when $L$ is odd, as for the jerk chain,
+    where $\tilde u(t) = u(T - t)$).
+  - **Ends.** With $c = q_0 + q_f$ it maps rest-to-rest motions from $q_0$ to $q_f$
+    to themselves.
+  - **Limits it keeps.** Two-sided limits on odd-index states (rates); limits
+    symmetric about 0 on even-index states above 0 (accelerations); and angle
+    limits centered on $(q_0 + q_f)/2$.
+  - **The conclusion.** Where the problem's minimizer is unique, it is symmetric.
+    Each chain's $s_1$ (the joint rate) is even about $T/2$, so its extremum is at
+    $T/2$, for every joint at once.
+- **Proof.** Differentiating, $\tilde s_m' = (-1)^{m+2} s_{m+1}(T - t) = \tilde s_{m+1}$,
+  and the last equation gives $\tilde u$. The cost is a time integral of $L$, so it is
+  invariant. The ends and the limits are checked term by term. A unique minimizer
+  equals its image. $\square$
+- **What breaks it.** Torque limits: $q \mapsto c - q$ changes $M(q)$, $c$ and
+  $G$. So do angle limits that are not centered, and ends that are not at rest.
+- **Consequence for the route.** Until a torque arc is born, the route's path
+  problems are of this kind: their offsets move the limits' levels, not the
+  symmetry.
+  - Every rate-limit touch is then born at $t = T/2$, coincident in time.
+  - Lemma D's random offsets separate these births in $s$, but not in $t$.
+  - Vrest 12's first cascade is this: `w3_max` and `w4_max` touched at $0.65661 =
+    t_f/2$, then `w1_max` failing to be born at the same instant, for 40 steps.
+  - It costs little, since only closed-form arcs are integrated before a torque arc
+    is born (1.7 s of 28.5 s). It is a known degeneracy for any rule that seeds
+    coincident touches.
+- **Used by.** None yet; it explains the cascade.
+
+### Observation O10: torque limits are not acceleration limits at a frozen pose (2026-11-25)
+
+- **The idea tested.** At a frozen pose $\bar q$, each torque limit becomes an
+  acceleration limit
+  $(-T_i - G_i(\bar q))/M_{ii}(\bar q) \le a_i \le (T_i - G_i(\bar q))/M_{ii}(\bar q)$.
+  That is a limit on one chain state, so every arc of the resulting decoupled
+  problem would be closed form (T″). Solved with the same machinery, it could seed
+  the true problem near its structure.
+- **Measured** with $\bar q = (q_0 + q_f)/2$:
+
+  | Case | Surrogate $t_f$ | True $t_f$ |
+  |---|---|---|
+  | vrest 12 | 2.134 | 1.692 (26% shorter) |
+  | rest 1 | 2.463 | 1.684 (46% shorter) |
+
+  The surrogate's structure is the base joint's acceleration limits alone, with none
+  of the true rate arcs. Four other cases had no surrogate answer.
+- **Why.** The true answers reshape the arm. The shoulder and elbow fold it in to
+  cut the base joint's inertia $M_{11}(q)$, which is also why so many answers swing
+  past their start-to-goal range (Observation O8's cases). The couplings in $\tau_1$
+  are what makes the motion fast, not a perturbation of it.
+- **Consequence.** No seed from a single pose. An analytic surrogate would have to
+  carry $M(q)$ along the motion, which makes it the true problem.
+
 ### Observation O8: the census's position limits are touched, as order 3 predicts (2026-11-22)
 
 - **The cases.** 27 census answers swing a joint past its start-to-goal range: 17

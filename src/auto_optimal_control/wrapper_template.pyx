@@ -1823,7 +1823,8 @@ def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, c
                        method="DOP853", double rtol=1e-10, double atol=1e-12, first_step=None,
                        double max_step=np.inf, Py_ssize_t max_nfev=0, stm_rtol=None,
                        held_events=False, Py_ssize_t max_held_resets=64, tangent_rtol=None,
-                       Py_ssize_t tangent_depth=4, int tangent_order=6):
+                       Py_ssize_t tangent_depth=4, int tangent_order=6,
+                       Py_ssize_t held_interior=0):
     """Integrate along a boundary arc of constraint ``c`` from ``t0`` to ``t1``.
 
     The arc's control holds ``g^(q) = 0``, so ``g`` stays at zero if ``N = 0``
@@ -1833,7 +1834,10 @@ def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, c
     there instead of crossing the kink in the flow; the flow is continuous
     through it, so ``z`` and the STM do not jump. More than ``max_held_resets``
     changes, or a change the riding cannot follow, falls back to the integration
-    without events. ``max_nfev`` is as in :func:`propagate`. Returns a dict with
+    without events. The guards are tested at each step's end, and with
+    ``held_interior`` also at that many points inside it on the interpolant (rule R78,
+    Lemma HE): a control that reaches its bound and leaves it within one step has
+    two roots there, which the ends alone cancel. ``max_nfev`` is as in :func:`propagate`. Returns a dict with
     ``t``, ``z``, ``stm`` (NZ, NZ) or None, ``cost`` or None, ``dz_dt1``,
     ``nfev``, ``status`` and ``held_resets`` (None without events).
 
@@ -1845,7 +1849,7 @@ def propagate_boundary(c, double t0, z0, double t1, params=None, *, stm=False, c
     if held_events and NH:
         r = _propagate_held(_exact(c), t0, z0, t1, params, stm, cost, method, rtol, atol,
                             first_step, max_step, max_nfev, stm_rtol, max_held_resets,
-                            tangent_rtol, tangent_depth, tangent_order)
+                            tangent_rtol, tangent_depth, tangent_order, held_interior)
         if r is not None:
             return r
     return _propagate_on(_exact(c), 0, t0, z0, t1, params, stm, cost, method, rtol, atol,
@@ -1897,7 +1901,7 @@ cdef int _held_reset(Py_ssize_t event, double t, double* y, Py_ssize_t n, void* 
 def _propagate_held(int c, double t0, z0, double t1, params, stm, cost, method, double rtol,
                     double atol, first_step, double max_step, Py_ssize_t max_nfev, stm_rtol,
                     Py_ssize_t max_resets, tangent_rtol=None, Py_ssize_t tangent_depth=4,
-                    int tangent_order=6):
+                    int tangent_order=6, Py_ssize_t n_interior=0):
     """:func:`propagate_boundary` with held-set events, or None to integrate without."""
     cdef _b_ctx ctx
     cdef fni_options opt
@@ -1922,7 +1926,7 @@ def _propagate_held(int c, double t0, z0, double t1, params, stm, cost, method, 
     ctx.singular = 0
     ctx.calls = 0
     ctx.max_calls = max_nfev
-    _setup_options(&opt, rtol, atol, first_step, max_step, 0)
+    _setup_options(&opt, rtol, atol, first_step, max_step, n_interior)
     cdef double[::1] rvec, avec
     if stm and stm_rtol is not None:
         tolerances = _tolerances(ny, NZ * NZ, rtol, atol, float(stm_rtol))

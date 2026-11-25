@@ -292,6 +292,43 @@ def test_held_set_events_follow_the_riding_in_fewer_steps(clipped_two_ways):
     assert ks.propagate_boundary(0, 0.0, z, 0.1, p, held_events=True)["held_resets"] is None
 
 
+@pytest.mark.slow
+def test_held_guards_tested_inside_steps_find_a_saturation_within_one_step(clipped_two_ways):
+    """Rule R78 (Lemma HE): a control that reaches its bound and leaves it within one step
+    gives its guard two roots there, which the step's ends cancel. The held set then
+    stays fixed, and the flow leaves the riding law: here by 1e-2 on one arc, at a
+    tolerance whose steps are long enough. With the guards also tested inside each step,
+    the flow is the riding law's, and the state alone and the state with its STM, which
+    step differently, see the same held-set changes."""
+    _, kn = clipped_two_ways
+    p = np.array([1, 1, 1, 1, 1.5, 1, 1.0, 2.2, 2.0])
+    rng = np.random.default_rng(3)
+    loose = dict(rtol=1e-6, atol=1e-6, held_events=True)
+    lost = compared = 0
+    for arc in range(4):
+        for _ in range(200):
+            z = rng.uniform(-1.5, 1.5, kn.N_Z)
+            z[kn.N_STATES:] *= rng.choice([0.01, 0.05, 0.3])
+            try:
+                kn.boundary_control(arc, 0.3, z, p)
+                # Without events the riding program is solved at every evaluation: the law.
+                ref = kn.propagate_boundary(arc, 0.3, z, 0.8, p, rtol=1e-13, atol=1e-14)
+            except RuntimeError:
+                continue
+            ends = kn.propagate_boundary(arc, 0.3, z, 0.8, p, **loose)
+            inner = kn.propagate_boundary(arc, 0.3, z, 0.8, p, held_interior=4, **loose)
+            inner_stm = kn.propagate_boundary(arc, 0.3, z, 0.8, p, held_interior=4, stm=True,
+                                              **loose)
+            if None in (ends["held_resets"], inner["held_resets"], inner_stm["held_resets"]):
+                continue                   # fell back to the integration without events
+            compared += 1
+            assert inner["held_resets"] == inner_stm["held_resets"]
+            assert np.abs(inner["z"] - ref["z"]).max() < 1e-5
+            lost += (inner["held_resets"] > ends["held_resets"]
+                     and np.abs(ends["z"] - ref["z"]).max() > 1e-3)
+    assert compared > 400 and lost >= 1
+
+
 def test_the_decoupled_tangent_gives_the_riding_stm(clipped_two_ways):
     """Rule R75: with ``tangent_rtol`` the boundary arc's state is integrated alone (the
     same as without the STM, bit for bit) and its STM comes from FNI's decoupled

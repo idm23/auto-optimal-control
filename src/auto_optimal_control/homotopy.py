@@ -329,6 +329,9 @@ class Homotopy:
         #: Rule R75 (Lemma DT): riding arcs' STMs in path problems from FNI's decoupled
         #: tangent propagator at this tolerance (None: integrated with the state).
         self.tangent_rtol = None
+        #: Rule R78 (Lemma HE): held-set guards also tested at this many points inside
+        #: each step of a riding arc (0: at the step's end only).
+        self.held_interior = 0
         #: With parallel routes, the answer a route accepted is taken as it is (its exact
         #: shooting rebuilt here), not solved again in the parent.
         self.trust_routes = True
@@ -1334,6 +1337,8 @@ class Homotopy:
         """A :class:`MultiArcShooting`, with :attr:`riding_nfev` on its boundary arcs when
         they are solved at run time."""
         shoot = MultiArcShooting(kernels, params, arcs, **options)
+        if getattr(self, "held_interior", 0):
+            shoot.held_interior = int(self.held_interior)     # rule R78 (Lemma HE)
         if getattr(self, "handover_ties", False) and self._ties:
             shoot.tied = self._tied_events(shoot)
         system = getattr(kernels, "system", None)
