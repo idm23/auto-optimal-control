@@ -33,8 +33,8 @@ torque limit on every joint. There are four families of cases:
   - **Where they live:** the cases are frozen in `benchmarks/position_cases.json`, made
     by `benchmarks/position_cases.py`.
 
-The data shown is from the census of 2026-11-22, on the branch that adds the position-limit
-cases (Observation O8). Rules R1, R2, R15, R16, R20, R25, R26, R28,
+The data shown is from the census of 2026-11-24, on the branch that maps an order-2 arc's
+jump through the reversal (Lemma F2, in R4). Rules R1, R2, R15, R16, R20, R25, R26, R28,
 R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72, R74 and R75 are turned on
 (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
@@ -47,11 +47,20 @@ ends (R72). The census runs its
 cases in its main process, so the routes are the only other processes. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-111 of the 117 cases solve, all under 60 s, and 92 of them under 5 s. The mean solve time
-of the solved cases is 4.281 s. Of the 27 position-limit cases, 24 solve, 16 of them
-under 5 s, and every one of the 24 touches the position limits it was given. The 90 older
-cases are as before: 87 solve, 76 under 5 s. Times are wall-clock seconds
-per case, to the millisecond.
+112 of the 117 cases solve, all under 60 s, and 93 of them under 5 s. The mean solve time
+of the solved cases is 4.511 s. Of the 27 position-limit cases, 25 solve, 17 of them
+under 5 s, and every one of the 25 touches the position limits it was given (Observation
+O8). The 90 older cases are as before: 87 solve, 76 under 5 s. Times are wall-clock
+seconds per case, to the millisecond.
+
+Rest 10 with rate and position limits is the first case solved through the reversed
+problem (R4). Its reversed problem solved before, but the extremal mapped back did not
+propagate: R4 kept each arc's jump as it was, which is right at order 1 but not at order
+2. There the jump's second coefficient is the multiplier measure's first moment about the
+arc's entry, and reflection measures it from the other end (Lemma F2). With the jump
+mapped, the extremal propagates and is accepted. The 111 cases solved before take 472.5 s
+against 475.2 s, within the page-to-page noise; the mean rises only because rest 10's
+32.7 s is now counted.
 
 Four changes made this. First, four routes start at once and the other three after 6 s
 (R72, Observation O7): fewer busy cores run faster (O4), and most cases are won by one of
@@ -75,7 +84,7 @@ winners are spread over every route, so none can be dropped.
   0 and 3).
 - **`vrest`:** 14 of 15: all but rest 4.
 - **`pgoal`:** all 6. **`prest`:** 10 of 11, all but rest 4. **`pvgoal`:** the one.
-  **`pvrest`:** 7 of 9, all but rest 2 and rest 10.
+  **`pvrest`:** 8 of 9, all but rest 2.
 
 Of the rate-limited answers solved before R43, six hold a torque limit and a rate limit
 on another joint at the same instant (the nine new ones are not yet read for this): goals 3 and 4 at 90%, goals 0 and 1 at 80%, rest 2 and rest 9.

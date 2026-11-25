@@ -205,6 +205,36 @@ margin is zero exactly when the corner is the only control that holds $g$.
 - **To formalize.** Direct computation. A good first target.
 - **Used by.** R4.
 
+### F2. Time reversal of an order-2 arc's jump, and of a touch — proved
+
+- **Statement.** Under Lemma F's reversal $t \to T - t$, an order-2 arc on
+  $[t_{\rm in}, t_{\rm out}]$ with multiplier measure $\eta$ (atoms at its ends
+  included) maps to the arc on $[T - t_{\rm out}, T - t_{\rm in}]$ with the reflected
+  measure. Its jump $(\pi_1, \pi_2) = (\nu_{\rm in} - \mu'(t_{\rm in}^+),\, \mu(t_{\rm in}^+))$
+  maps to
+  $$(\tilde\pi_1, \tilde\pi_2) = (\pi_1,\; \pi_1 (t_{\rm out} - t_{\rm in}) - \pi_2).$$
+  An order-1 arc's jump and a touch's atom (any order) are unchanged.
+- **Proof.** Take $\mu(t) = \int_{(t, t_{\rm out}]} (\tau - t)\, d\eta(\tau)$ (H2's
+  potential).
+  - Then $-\mu'(t_{\rm in}^+)$ is the mass of $\eta$ on $(t_{\rm in}, t_{\rm out}]$.
+    So $\pi_1$ is the total mass $M$, and $\pi_2 = \int (\tau - t_{\rm in})\, d\eta$ is
+    the first moment about the entry.
+  - Reflection preserves the measure and swaps the ends. The mass stays $M$, and the
+    moment about the new entry is
+    $\int (t_{\rm out} - \tau)\, d\eta = M (t_{\rm out} - t_{\rm in}) - \pi_2$.
+  - An order-1 jump is the mass (F). A touch is one atom. $\square$
+- **The gap it closes.** R4 kept every jump as it was, which is right only at order
+  1, or for an arc symmetric in time ($\pi_2 = M w / 2$). On a rate-limited problem the
+  mapped extremal then had the wrong costate after each order-2 entry. Its riding was
+  infeasible there, and the map failed (`boundary_multiplier` code 4).
+- **Seen.** Pvrest 10 (torque, rate and position limits), route 6.
+  - The reversed problem solved, but the mapped extremal did not propagate.
+  - With F2 it propagates and is accepted, so the case solves through R4.
+  - A unit test checks the map against an explicit asymmetric measure (atoms at both
+    ends, a density between).
+- **Depends on.** F, H2.
+- **Used by.** R4.
+
 ### G. Cyclic coordinates — proved
 
 - **Statement.** If $x_k$ appears nowhere in the dynamics, costs or limits,
