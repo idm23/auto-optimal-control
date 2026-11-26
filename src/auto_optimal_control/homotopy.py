@@ -96,7 +96,8 @@ from auto_optimal_control.pipeline import (PREDICT, SETTLE, SETTLE_START, STEP_A
                                            SettleContext, StepContext, Turn, default_pipelines,
                                            failure_pipelines, settle_pipelines, EXACT_REJECTED,
                                            ExactContext, exact_pipelines)
-from auto_optimal_control.shooting import MultiArcShooting, ShootingError, SingleShooting, sample_segment
+from auto_optimal_control.shooting import (MultiArcShooting, ShootingError, SingleShooting, _chains_of,
+                                           sample_segment)
 
 # The path of the continuation is followed to 1e-6: a rough Jacobian steers Newton as well.
 PATH_JACOBIAN_RTOL = 1e-7
@@ -560,6 +561,13 @@ class Homotopy:
         self._seed_key = self._seed = None
         t, x, p = problem.time, problem.states, problem.params
         self._terminal = sp.lambdify((t, x, p), problem.terminal_cost, "numpy")
+        # The symbolic work that depends on the problem alone, not on a solve's parameters,
+        # is done here with the kernels: the ends' functions, and R23's closed-form
+        # certificate of the free arcs (Lemma T). On first use it fell inside the first
+        # solve, about 1.5 s on the arm.
+        self._end_functions()
+        if MultiArcShooting.closed_free_default:
+            _chains_of(self.kr)
 
     def _say(self, *args):
         if self.verbose:
@@ -651,17 +659,12 @@ class Homotopy:
             running, xf = float(r["cost"]), r["z"][:shooting.kernels.N_STATES]
         return running + float(self._terminal(tf, list(xf), list(self.params)))
 
-    def _limits_broken_at_the_ends(self):
-        """Path constraints the fixed initial or final state already violates.
-
-        No motion can satisfy them, whatever the search does; finding that
-        out by searching takes minutes on a large problem. Only ends with
-        every state fixed are checked, and only time-invariant limits.
-        """
-        problem, kr = self.problem, self.kr
-        if not self.nc:
-            return []
+    def _end_functions(self):
+        """``(start, at_end)``: the fixed initial and final states as functions of the
+        parameters, each None where an end is not fixed in every state, or both None if
+        some limit depends on time. Built once per problem."""
         if self._ends is None:
+            problem = self.problem
             t, x, p = problem.time, problem.states, problem.params
             final = {}
             for psi in problem.terminal_constraints:
@@ -677,7 +680,19 @@ class Homotopy:
                 start = sp.lambdify([p], [problem.initial_state[s] for s in x], "numpy")
             ok = not any(t in c.expr.free_symbols for c in problem.path_constraints)
             self._ends = (start, at_end) if ok else (None, None)
-        start, at_end = self._ends
+        return self._ends
+
+    def _limits_broken_at_the_ends(self):
+        """Path constraints the fixed initial or final state already violates.
+
+        No motion can satisfy them, whatever the search does; finding that
+        out by searching takes minutes on a large problem. Only ends with
+        every state fixed are checked, and only time-invariant limits.
+        """
+        kr = self.kr
+        if not self.nc:
+            return []
+        start, at_end = self._end_functions()
         params = self.regularized_params(1.0 if self.bang_bang else None, np.zeros(self.nc))
         broken = []
         for label, end in (("the initial state", start), ("the final state", at_end)):

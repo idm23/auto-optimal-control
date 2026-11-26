@@ -1831,7 +1831,34 @@ jump, density, gap, order, bound, end, held sign).
   free arc, so a secant (or a bracket) finds its root whatever the ramp's slope. That
   repairs a guess whose error lies in the entry times. Most of the route's failed guesses
   have their error elsewhere (O11).
-- **Used by.** None (R84 tried).
+- **Used by.** None (R84 and R87 tried). Observation O12 confirms the consequence on the
+  route's own guesses.
+
+### Observation O12: the walk's failed guesses are outside Newton's radius, and the reduced map is not (2026-11-25)
+
+Rest 4's route 6, at failed path steps on its walk of the weight. At each step the true
+solution at the step's target was reached by substeps, as in O11. Measured on core.
+
+- **Not the Jacobian's error.** With the route's loose path Jacobian (`PATH_JACOBIAN_RTOL`,
+  R75's tangent) and with a tight one (the variational equations at the integration's
+  tolerance):
+  - The two agree to $2 \times 10^{-7}$ relative, or $1.6 \times 10^{-7}$ after
+    equilibrating rows and columns. Their Newton steps from the guess agree to
+    $10^{-7}$.
+  - $\mathrm{cond}\,J$ is $2 \times 10^7$ to $7 \times 10^8$, and $10^4$ to
+    $4 \times 10^5$ equilibrated.
+  - The Newton step from the guess is 30 to 2,000 times longer than the guess's error
+    (0.6 against $3 \times 10^{-4}$ late in the walk) and points away from the truth:
+    cos −0.2 to −0.4. Damped down to 1/16, it lowers the residual at none of the late
+    guesses.
+- **The reduced map (Lemma JL: each order-1 entry's time solved from its rate row),
+  with the Jacobian at the guess.** On the late guesses (four of seven), Newton converges
+  quadratically in 4 steps: for example $5.1 \times 10^{-2}$, $3.5 \times 10^{-4}$,
+  $1.9 \times 10^{-8}$, $1.7 \times 10^{-12}$. The route's own chord on that map succeeds
+  from 5 of the 7 guesses, where on the full map it succeeds from none.
+- **Consequence.** Lemma JL's defect is what stops these steps, and the elimination
+  removes it there. As a rule on the whole route (R87, `structure_certificates.md`) it
+  changes the route's path elsewhere, and loses.
 
 ### KD. With a diagonal control Hessian, the riding system is an $s \times s$ system — proved (elementary)
 
