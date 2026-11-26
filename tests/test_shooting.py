@@ -107,7 +107,8 @@ def test_line_newton_reaches_the_answer_and_fails_cleanly(compiled):
     guess = shoot.guess_multipliers([1.15 / (umax * ts), 0.9 / umax], tf=1.1 * 2 * ts)
     plain = shoot.solve_newton(guess, tol=1e-9, max_iterations=12, polish=0)
     searched = shoot.solve_line_newton(guess, tol=1e-9)
-    assert searched.residual_norm <= plain.residual_norm * (1 + 1e-12)
+    # Both may reach the answer; below the tolerance their residuals are rounding.
+    assert searched.residual_norm <= max(plain.residual_norm, 1e-12)
     stuck = shoot.solve_line_newton(exact.v * 3.0, tol=1e-12, max_iterations=1, max_halvings=1)
     assert not stuck.success
 
