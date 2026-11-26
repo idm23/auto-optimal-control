@@ -489,6 +489,10 @@ class Homotopy:
         #: an extremal with a strictly convex Hamiltonian; it stands in for an arc too
         #: short to solve, and grows back into one when a violation appears beside it.
         self.collapsed_touches = False
+        #: Rule R90: a path solve whose chord fails close to the solution (below
+        #: ``path_fallback``) tries Newton with fresh Jacobians and a line search before
+        #: MINPACK.
+        self.path_newton = False
         #: The exact solve starts with Newton steps (fresh Jacobians) from the path
         #: solution, and falls back to MINPACK only if they do not reach the tolerance.
         self.exact_newton = True
@@ -2654,6 +2658,16 @@ class Homotopy:
                     r = sh.solve_chord(guess, tol=path_tol)
             if r.success or not r.residual_norm < self.path_fallback:
                 return sh, r
+            if getattr(self, "path_newton", False):
+                # Rule R90 (Lemma AC): the chord failed on its carried Jacobian's
+                # contraction; Newton with a fresh Jacobian at each iterate and a line
+                # search on ||R|| takes a few Jacobians where MINPACK's Broyden updates
+                # take a hundred evaluations or more. MINPACK follows if it fails.
+                state["solves"] += 1
+                nr = sh.solve_line_newton(guess, tol=path_tol)
+                if nr.success:
+                    self.diagnostics.fired("R90")
+                    return sh, nr
         r = sh.solve(guess, tol=path_tol, options=options)
         if (not r.success and r.residual_norm < 1e-2 and arcs and sh.tangent_junctions):
             # A control at its bound at a junction jumps there: H continuity, not tangency.

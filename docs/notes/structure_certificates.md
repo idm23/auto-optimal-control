@@ -3074,3 +3074,73 @@ kept, and the fresh Jacobian is taken at its end.
     against 5.17 s, pvrest 3 5.51 s against 4.93 s).
 
 Like R82 to R85, it changes which steps succeed, and the paths move both ways.
+
+### Newton with a line search before MINPACK: Rule R90
+
+*What it was.* When a path solve's chord fails with its residual below `path_fallback`
+($10^{-2}$), MINPACK's `hybr` takes over from the same guess. On the slow routes that
+fallback is a large share of the time (each route alone, on core):
+
+| Route | MINPACK | Route | MINPACK succeeded |
+|---|---|---|---|
+| vgoal 4 at 70%, route 4 | 11.8 s | 29.0 s | 14 of 16 |
+| vrest 12, route 7 | 6.0 s | 17.2 s | 7 of 12 |
+| vrest 1, route 6 | 2.9 s | 14.2 s | 1 of 4 |
+| pvrest 1, route 5 | 3.2 s | 16.2 s | 1 of 3 |
+| vgoal 3 at 70%, route 5 (45 s) | 10.9 s | | 6 of 38 |
+
+Each call takes 80 to 240 evaluations: its Broyden updates of a stiff shooting map are
+poor, and it rarely asks for the exact Jacobian.
+
+*Rule R90* (`Homotopy.path_newton`, Lemma AC). Before MINPACK, Newton's method runs from
+the same guess, with a fresh Jacobian at every accepted iterate and a backtracking line
+search on $\|R\|$, Armijo's test, evaluated on the residual alone
+(`MultiArcShooting.solve_line_newton`). If it does not reach the path's tolerance in 12
+iterations, MINPACK runs as before. The chord failed on its carried Jacobian's
+contraction. A fresh Jacobian restores Newton's rate inside its radius, and its direction
+descends $\|R\|^2$, so the line search globalizes it.
+
+*Replayed at every fallback of two routes* (the route kept MINPACK's answer):
+
+| Route | MINPACK | The damped solver | R90's Newton |
+|---|---|---|---|
+| vgoal 4 at 70%, route 4 | 11.8 s, 14 of 16 | 5.2 s, 13 | 3.5 s, 13 |
+| vrest 12, route 7 | 5.5 s, 6 of 11 | 9.4 s, 4 | 2.2 s, 5 |
+
+The damped solver is `solve_damped`, Levenberg-Marquardt with the exact Jacobian.
+
+*Census on node-1, the 117 cases without obstacles, against the same tree with R90 off:*
+- **Solved:** 114 against 113. Prest 4 solves for the first time, in 31.4 s (route 4,
+  $t_f = 1.8102$).
+- **Time:** the cases both solve take 481.6 s against 505.5 s.
+- **Gains:** pvrest 10 takes 14.9 s against 38.2 s, vgoal 3 at 80% 23.7 s against
+  29.4 s, vgoal 4 at 70% 37.6 s against 40.9 s, pvrest 5 14.1 s against 16.8 s, and
+  pvrest 13 5.19 s against 7.21 s.
+- **Losses:** pvrest 12 takes 52.5 s against 46.6 s, and rest 11 5.01 s against 4.89 s.
+- **Under 5 s:** 93 against 94. Rest 11 is the one case that crossed.
+
+### Junctions out of order, retired before violations are judged: Rule R89, tried
+
+*What it was.* On vgoal 0 at 70%'s route 6 (Observation O13), a step's solution has
+`tau3_min`'s exit before its entry. R30's order monitor is off in the census, so the
+violation monitor judges that solution and repairs its violations. Each repair converges
+back to the same solution, about 150 rounds in 10 s. Later on the same route, a
+violation of `w4_min` lies on a segment that runs backwards between two crossed exits.
+
+*Rule R89* (tried, not kept; `Homotopy.dead_arcs_first`). When a step's solution has
+junctions out of order, or a boundary arc narrower than $10^{-6} T$, the violation
+monitor passes. The dead-arc monitor then sorts the events and retires the arc
+(`_retire`) before any violation is judged. The argument is V1's: the monitors judge a
+motion, and junctions out of order are none.
+
+*Census on node-1, the 117 cases without obstacles, against the same tree without it:*
+- **Solved:** 111 against 113. Goal 4 at 70% fails (56.2 s against 2.75 s), and so does
+  vgoal 4 at 70% (40.9 s without).
+- **Under 5 s:** 89 against 94.
+- **Gains:** vgoal 3 at 80% (24.4 s against 29.4 s), vrest 5 (8.1 s against 10.6 s) and
+  pvrest 13 (5.2 s against 7.2 s).
+
+Crossed junctions on the path are mostly transient. R10 lets the residual through them,
+and the next step or R41's reorder puts them back in order. Retiring at the first
+crossing changes the structure where the route did not need to. On vgoal 0 at 70% itself
+the loop ends, but the route stalls later on a touch (O13) and the case stays unsolved.
