@@ -3047,6 +3047,15 @@ rest 4's route 6 and vrest 12's route 7:
     after a moved entry cannot be sampled (`sample_boundary` returns an error code).
   - So the walk's steps that JL limits are rescued, but the route's path changes before
     them.
+- **On the weight's own walk only (2026-11-26).** The rule acted only on legs that move
+  the weight with the offsets fixed: the corner routes' last leg, where vgoal 3 at 80%
+  and vgoal 4 at 70% spend most of their time. The tightening paths are then unchanged.
+  Census on node-1 with R90, over the 117 cases, against the page of 2026-11-26:
+  - 113 solved against 114: vgoal 4 at 70% goes over the cap (38.0 s without).
+  - 91 under 5 s against 94. 501.2 s against 475.9 s for the cases both solve.
+  - Vgoal 3 at 80% takes 29.9 s against 24.1 s, and pvrest 5 17.7 s against 13.5 s.
+  - So the walk itself goes elsewhere with the reduced map: the answers it reaches are
+    found later, or not at all.
 
 ### A stale Jacobian's failed test, with the fresh Jacobian at the step's end: Rule R88, tried
 
