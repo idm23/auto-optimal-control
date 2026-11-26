@@ -1860,6 +1860,54 @@ solution at the step's target was reached by substeps, as in O11. Measured on co
   removes it there. As a rule on the whole route (R87, `structure_certificates.md`) it
   changes the route's path elsewhere, and loses.
 
+### Observation O13: where the four unsolved cases stop (2026-11-26)
+
+Each route of prest 4, vrest 4, vgoal 0 at 70% and vgoal 3 at 70%, alone and narrated,
+then probed where it stops. Measured on node-1 and core.
+
+- **Prest 4: a split that is nearly degenerate at the policy's weight.** Route 3 reaches
+  the weight (forward and reversed). The exact answer is rejected by Lemma H: on the
+  `tau1_min` arc $[1.1708, 1.3684]$, $\mu$ falls from 0.0102 to 0 at 1.1817, is negative
+  to 1.20 (down to $-7 \times 10^{-4}$), rises to $1.2 \times 10^{-3}$ at 1.274 and falls
+  to 0 at the exit.
+  - Joint 2's jerk leaves its bound (+30) at 1.1818, where $\mu$ reaches 0. They coincide
+    to $10^{-4}$ at every weight on the walk. The held control's law is
+    $-R^{-1}(G^\top\lambda + \mu a)_2$ with $R^{-1} = 1/w$, so it is released at a
+    multiplier of order $w$, near zero. This is Lemma U's case with $\mu(t_s) \approx 0$.
+  - On the path ($s \approx 0.59$), R5's split converges ($3 \times 10^{-10}$), but its
+    gap closes to $7 \times 10^{-5}$. The first piece's tail $[t_s, t_{\rm out}]$
+    carries $\mu \approx -7 \times 10^{-6}$, no force, so its exit time is almost free.
+    R28 refuses the split for that rise. With R28's tolerance loosened, the next step's
+    residual falls only in proportion to the step (6.1 at $10^{-2}$, 0.08 at
+    $1.6 \times 10^{-4}$): the split's Jacobian is nearly singular.
+  - At the weight, the split's seed has a residual of 23. A multiplier of $10^{-3}$ moves
+    the controls by $10^{-3} a / w$, so the gap cannot be jumped open there.
+- **Vrest 4: a riding failure with the margin open.** Route 5's walk brings in a
+  `w3_max` touch $10^{-5}$ after `tau1_max`'s exit. Both orders converge. From then on,
+  every guess fails to ride `tau1_min` after the `w2_max` touch, at any step down to
+  $1.4 \times 10^{-4}$. Along the last solution the margin of Lemma K is at least 0.38
+  of the jerks' reach on that arc, so the failure is not Lemma I's edge. R9 does not
+  change it.
+- **Vgoal 0 at 70%: two loops in settle.** On route 6:
+  - A step's solution has `tau3_min`'s exit before its entry. With R30 off, the
+    violation monitor repairs that solution, and each repair converges back to it:
+    about 150 rounds in 10 s. Rule R89 (`structure_certificates.md`) ends this loop, but
+    loses on the census.
+  - Then, at $s \approx 0.856$, a `tau4_min` touch is born, settles, and is undone at
+    the next step, as the step halves towards it until the route stalls.
+- **Vgoal 3 at 70%: MINPACK's fallbacks.** On route 5, 38 path solves fall back to
+  MINPACK in 45 s and take 10.9 s, and 6 of them succeed. Several stop at once, with the
+  residual unchanged ($4.1 \times 10^{-4}$ after 13 evaluations).
+- **Consequence.** Three different events, none with a lemma yet:
+  - a split whose piece ends at its own control's release with $\mu \approx 0$ (prest 4);
+  - riding that fails with the margin open (vrest 4);
+  - a touch that is born and undone at the same $s$ (vgoal 0 at 70%).
+
+  Rule R90 (`structure_certificates.md`) solves prest 4 on another route (route 4, in
+  31.4 s): its path solves stop failing where MINPACK did, and that route reaches an
+  answer that passes. It does not reach the event above. The other three cases are
+  still unsolved.
+
 ### KD. With a diagonal control Hessian, the riding system is an $s \times s$ system — proved (elementary)
 
 - **Setting.** A riding solve (riding.py) for a set of $s$ limits, with the controls in
