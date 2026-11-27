@@ -30,7 +30,7 @@ Each case starts at the perigee of its orbit (the longitude `L` = 0) and ends an
 on the target orbit (`L` free). The final time is searched in 0.3 to 4 times Edelbaum's
 estimate `dv / T`, and the costates in a box of half-width `1 / T`: a minimum-time
 costate says how the arrival time moves with the elements, so it grows as the thrust
-falls. The rule configuration is the arm census's, with a cap of 300 s a case.
+falls. The rules are the arm census's of 2026-11-25 (before R90), with a cap of 300 s a case.
 
 ## Results
 

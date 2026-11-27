@@ -17,7 +17,7 @@ Each case is two-body; ``j`` before its name (``jraise3``) adds the Earth's J2. 
 speed is that of a 3000 s ion engine throughout. The final time is searched in [0.3, 4]
 times Edelbaum's estimate ``dv / T`` and the costates in a box of half-width ``1 / T``
 (a minimum-time costate is how the arrival time moves with the elements). The page's
-rule configuration is the arm census's (``RULES``).
+rule configuration (``RULES``) is the arm census's of 2026-11-25, before R90.
 
 ``--cap`` is the wall-clock budget of a case (``Homotopy.solve_seconds``) and a case over
 it is a failure. ``--export`` writes each case for the census page
