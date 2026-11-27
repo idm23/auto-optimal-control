@@ -257,6 +257,7 @@ class SingleShooting:
     # -- the system ---------------------------------------------------------
 
     def _propagate(self, z0, tf, stm):
+        self._check_deadline()
         if not tf > self.t0:
             raise ShootingError(f"final time {tf} is not after the initial time {self.t0}",
                                 "bad_final_time")
@@ -332,6 +333,17 @@ class SingleShooting:
     #: A dict that every instance's failed evaluations are also counted in (the
     #: solver sets it for the length of a solve; see ``Homotopy.diagnostics``).
     sink = None
+
+    #: A ``time.perf_counter()`` value past which every propagation fails at once
+    #: (``"deadline"``), so that a solve over its budget stops inside a root-finder or a
+    #: continuation, not only between them (the solver sets it for the length of a
+    #: solve from ``Homotopy.solve_seconds``).
+    deadline = None
+
+    @staticmethod
+    def _check_deadline():
+        if SingleShooting.deadline is not None and time.perf_counter() > SingleShooting.deadline:
+            raise ShootingError("past the solve's deadline", "deadline")
 
     def _failed(self, exc):
         """Count a failed evaluation by its class (see :class:`ShootingError`)."""
@@ -674,18 +686,22 @@ class SingleShooting:
                                 residual_norm=err, success=bool(err < tol), nfev=nfev,
                                 result=None, max_violation=0.0)
 
-    def multistart(self, sample, n_tries=50, seed=0, **solve_options):
+    def multistart(self, sample, n_tries=50, seed=0, deadline=None, **solve_options):
         """Solve from random guesses ``sample(rng) -> v`` until one succeeds.
 
         ``seed`` is an int or a ``numpy.random.Generator`` (to continue one
         stream across calls). Returns ``(solution, tries)``. The solution is
         the first success, or else the smallest residual found. A ``sample`` that raises
         :class:`ShootingError` (for example in :meth:`guess_multipliers`)
-        skips that draw.
+        skips that draw. No draw starts after ``deadline`` (a
+        ``time.perf_counter()`` value), when one is given.
         """
         rng = np.random.default_rng(seed)
         best, tries = None, 0
         for tries in range(1, n_tries + 1):
+            if deadline is not None and tries > 1 and time.perf_counter() > deadline:
+                tries -= 1
+                break
             try:
                 guess = sample(rng)
             except (ShootingError, RuntimeError, ValueError, np.linalg.LinAlgError):
@@ -723,10 +739,14 @@ class SingleShooting:
         return np.maximum(g.max(axis=0), 0.0)
 
     def trajectory(self, v, **kwargs):
-        """The extremal at ``v``, sampled; see ``Kernels.trajectory``."""
+        """The extremal at ``v``, sampled; see ``Kernels.trajectory``. It integrates with
+        this shooting's options (method, tolerances, switch handling) unless ``kwargs``
+        say otherwise: at the kernels' looser defaults a bang-bang extremal whose
+        switching function nearly grazes zero gained a switch and missed its target
+        (a minimum-fuel orbit raise, by 0.018 in ``p``)."""
         x0, lam0, _, tf = self.unpack(v)
         return self.kernels.trajectory(self.t0, np.concatenate([x0, lam0]), tf, self.params,
-                                       **kwargs)
+                                       **{**self.options, **kwargs})
 
 
 class MultiArcShooting(SingleShooting):
@@ -1741,6 +1761,7 @@ class MultiArcShooting(SingleShooting):
         return R, J, segments
 
     def _evaluate(self, v, jac, record=False):
+        self._check_deadline()
         if not self._legacy:
             return self._evaluate_events(v, jac, record)
         k, p = self.kernels, self.params

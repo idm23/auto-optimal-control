@@ -1,5 +1,7 @@
 """SingleShooting: unknown layout, exact Jacobian, solving, continuation."""
 
+import time
+
 import numpy as np
 import pytest
 import sympy as sp
@@ -148,6 +150,46 @@ def test_zermelo_solve(compiled):
     assert abs(k.hamiltonian(0.0, sol.z0, p)) < 1e-10
 
 
+def test_trajectory_integrates_with_the_shootings_options(compiled):
+    """trajectory() is the shooting's own integration, at its tolerances, not the
+    kernels' defaults: replayed at the defaults, a minimum-fuel orbit raise solved at
+    rtol 1e-12 gained a switch and missed its target by 0.018."""
+    k = compiled["zermelo"][2]
+    p = [1.0, 1.0, 1.0, 0.5]
+    sol = SingleShooting(k, p).solve(SingleShooting(k, p).pack([-0.7, -0.7], [-0.7, -0.7], tf=1.0))
+    loose = SingleShooting(k, p, rtol=1e-4, atol=1e-4)
+    x0, lam0, _, tf = loose.unpack(sol.v)
+    own = loose._propagate(np.concatenate([x0, lam0]), tf, stm=False)["z"]
+    np.testing.assert_allclose(loose.trajectory(sol.v, n_points=5)["z"][-1], own, rtol=0, atol=1e-13)
+    # The loose tolerances matter here, so the check above could fail; an explicit
+    # argument still wins.
+    tight = loose.trajectory(sol.v, n_points=5, rtol=1e-12, atol=1e-12)["z"][-1]
+    assert np.abs(tight - own).max() > 1e-9
+
+
+def test_past_the_deadline_every_propagation_fails_and_a_solve_stops(compiled):
+    """SingleShooting.deadline (set by Homotopy.solve from solve_seconds) fails every
+    propagation once passed, so a root-find stops instead of carrying a solve past its
+    cap; before it, nothing changes."""
+    k = compiled["zermelo"][2]
+    p = [1.0, 1.0, 1.0, 0.5]
+    shoot = SingleShooting(k, p)
+    guess = shoot.pack([-0.7, -0.7], [-0.7, -0.7], tf=1.0)
+    saved = SingleShooting.deadline
+    try:
+        SingleShooting.deadline = time.perf_counter() + 3600
+        assert shoot.solve(guess).success
+        SingleShooting.deadline = 0.0
+        with pytest.raises(ShootingError) as err:
+            shoot.residual(guess)
+        assert err.value.failure == "deadline"
+        late = SingleShooting(k, p)
+        sol = late.solve(guess)
+        assert not sol.success and late.failures.get("deadline", 0) > 0
+    finally:
+        SingleShooting.deadline = saved
+
+
 def test_free_initial_state(free_start):
     shoot = SingleShooting(free_start, [1.0])
     assert shoot.n_free == 1 and shoot.n_unknowns == 1 + 1 + 1     # x0, lam0, nu
@@ -187,6 +229,13 @@ def test_multistart_and_continuation(compiled):
     sol, tries = shoot.multistart(lambda rng: shoot.pack(rng.uniform(-5, 5, 1)), n_tries=5)
     assert sol.success and tries == 1
     assert abs(sol.lam0[0] - exact(1.0)) < 1e-10
+    # Past its deadline it makes one draw and stops (a minimum-time orbit transfer of
+    # a hundred revolutions spent hours on 200 failing draws under a 300 s cap).
+    def no_guess(rng):
+        raise ShootingError("no guess")
+
+    assert shoot.multistart(no_guess, n_tries=50) == (None, 50)
+    assert shoot.multistart(no_guess, n_tries=50, deadline=0.0) == (None, 1)
 
     ws = [10.0, 100.0, 1000.0]
     path = continuation(lambda w, g: SingleShooting(k, [T, w, a]).solve(g), 1.0, ws, sol.v)

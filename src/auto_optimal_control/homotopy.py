@@ -3855,10 +3855,14 @@ class Homotopy:
         self.diagnostics = Diagnostics()
         self._ties = set()                 # R39's hand-overs belong to one solve
         sink, SingleShooting.sink = SingleShooting.sink, self.diagnostics.evaluations
+        deadline = SingleShooting.deadline
         budget = self.active_set_seconds
         if self.solve_seconds is not None:
             self._solve_end = time.perf_counter() + self.solve_seconds
             self.active_set_seconds = min(budget, self.solve_seconds)
+            # Every propagation fails past the budget, so one long draw or root-find
+            # cannot carry the solve far beyond it (a 300 s cap ran to 551 s).
+            SingleShooting.deadline = self._solve_end
         try:
             if self._stages is None:
                 r = self._solve(params, costates, final_time, **options)
@@ -3874,6 +3878,7 @@ class Homotopy:
                 r = self._lexicographic(params, costates, final_time, **options)
         finally:
             SingleShooting.sink = sink
+            SingleShooting.deadline = deadline
             self.active_set_seconds = budget
             self._solve_end = None
         r.policy = self.policy_text
@@ -4076,9 +4081,12 @@ class Homotopy:
                 if candidate.success:
                     sol = candidate
         for e0 in eps_start if sol is None else ():
+            if self._solve_end is not None and tries and time.perf_counter() > self._solve_end:
+                break
             shoot = SingleShooting(kr, self.regularized_params(e0, zero), **self.options)
             sol, n = shoot.multistart(self._sampler(shoot, costates, final_time),
-                                      n_tries=n_tries, seed=rng, tol=tol)
+                                      n_tries=n_tries, seed=rng, deadline=self._solve_end,
+                                      tol=tol)
             tries += n
             if sol is not None and sol.success:
                 eps0 = e0

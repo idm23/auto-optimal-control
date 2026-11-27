@@ -121,3 +121,59 @@ def test_obstacle_cases_block_a_rest_answer_but_clear_its_ends():
         assert p.shape == (24 + n,) and case["g_base"] > 0
         for q in (p[:6], p[6:12]):
             assert obstacle_values(SIX_JOINT_LINKS, q, kind, p[24:]).max() < CLEAR
+
+
+def test_orbit_census_cases_ladder_down_in_thrust_between_fixed_orbits():
+    """The orbit census (benchmarks/orbit_census.py): each family's thrust falls down its
+    ladder, a ``j`` case is its two-body case with the Earth's J2, the parameters start on
+    the family's orbit and end on its target, and the search boxes hold the estimate."""
+    import numpy as np
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
+    from orbit_census import FAMILIES, case, case_names
+    from orbitprop import EARTH, equinoctial_to_keplerian
+
+    names = case_names()
+    assert len(names) == len(set(names)) == 2 * sum(len(t) for _, t in FAMILIES.values())
+    for fam, ((start, target), ladder) in FAMILIES.items():
+        assert list(ladder) == sorted(ladder, reverse=True)
+        for i in range(len(ladder)):
+            two, j2 = case(f"{fam}{i}"), case(f"j{fam}{i}")
+            assert two["family"] == j2["family"] == fam and two["T"] == ladder[i]
+            assert two["params"][2] == 0 and j2["params"][2] == EARTH.J[2]
+            assert two["params"][3:] == j2["params"][3:]
+            a, e, inc, *_ = equinoctial_to_keplerian(two["params"][3:9])
+            assert np.allclose([a, e, np.degrees(inc)], start)
+            a, e, inc, *_ = equinoctial_to_keplerian([*two["params"][9:14], 0.0])
+            assert np.allclose([a, e, np.degrees(inc)], target, atol=1e-12)
+            lo, hi = two["final_time"]
+            assert lo < two["tf_estimate"] < hi
+    with pytest.raises(KeyError):
+        case("jump3")
+
+
+def test_orbit_export_draws_the_orbits_in_earth_radii():
+    """The census page's geometry (benchmarks/orbit_export.py) agrees with orbitprop's:
+    positions, the thrust frame, and the start and target orbits."""
+    import numpy as np
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
+    from orbit_export import frames, keplerian, orbit_curve, positions
+    from orbitprop import equinoctial_to_cartesian, keplerian_to_equinoctial
+
+    rng = np.random.default_rng(3)
+    z = np.array([keplerian_to_equinoctial(rng.uniform(1.1, 7), rng.uniform(0, 0.7),
+                                           rng.uniform(0, 1.2), *rng.uniform(0, 6, 3))
+                  for _ in range(20)])
+    r = positions(z)
+    _, _, wh, ir, it = frames(z)
+    for zi, ri, w, a, b in zip(z, r, wh, ir, it):
+        rc, vc = equinoctial_to_cartesian(zi, 1.0)
+        assert np.allclose(ri, rc)
+        assert np.allclose(a, rc / np.linalg.norm(rc))
+        assert np.allclose(w, np.cross(rc, vc) / np.linalg.norm(np.cross(rc, vc)))
+        assert np.allclose(b, np.cross(w, a))
+    a, e, _ = keplerian(z)
+    assert np.allclose(a * (1 - e ** 2), z[:, 0])
+    ring = orbit_curve(keplerian_to_equinoctial(2.0, 0, 0.3, 0, 0, 0)[:5])
+    assert np.allclose(np.linalg.norm(ring, axis=1), 2.0)
