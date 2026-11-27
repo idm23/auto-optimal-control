@@ -1753,6 +1753,181 @@ jump, density, gap, order, bound, end, held sign).
 - **Consequence.** No seed from a single pose. An analytic surrogate would have to
   carry $M(q)$ along the motion, which makes it the true problem.
 
+### Observation O11: what stops Newton on the weight's walk (2026-11-25)
+
+- **Where the time goes.** Single routes, each alone, with every evaluation timed
+  (homebox-core):
+
+  | Case (route) | Route | Jacobians | Residuals | Failed evaluations |
+  |---|---|---|---|---|
+  | rest 4 (6) | 15.6 s | 715 (5.6 s) | 2,366 (4.6 s) | 519 (2.4 s) |
+  | vrest 12 (7) | 19.1 s | 530 (8.4 s) | 2,225 (6.7 s) | 219 (1.5 s) |
+
+  - Rest 4 reaches its final structure (`tau1_max`, `tau1_min`) after 1 s and 70
+    residuals. The other 14 s are the same structure, with no event on it, along the
+    walk of $s$ from 0.34 to 1 (V2: nothing to settle).
+  - Over $s \in [0.7, 1]$ the steps are 0.003 to 0.007, and the controller cycles:
+    a step fails, the half step converges, it grows by 1.5 and fails again (Lemma S (1)).
+- **Iterates outside the domain are a symptom.** Out-of-domain iterates (junctions out of
+  order, or past $t_f$) cost 10% of vrest 12's evaluation time and 1% of rest 4's.
+  - Of rest 4's 483 failed rides, 255 fail at the entry: the riding law is undefined
+    there, with relative margins down to $-1.4 \times 10^3$, median $-0.008$.
+  - The answer's `tau1_max` entry is near the edge: relative margin 0.07, falling to 0
+    about 0.03 s earlier.
+  - Riding past the edge on R14's held set (R81, in `structure_certificates.md`) makes
+    69 to 296 of them ride through, but the route takes the same steps and fails them
+    all the same.
+- **The failed steps are Newton's, from a good predictor.** On rest 4, at failed steps
+  late in the walk, the true solution at the step's target was reached by 12 substeps
+  and the residual scanned along the segment to the guess:
+  - The guess's error is 97% in one unknown, `tau1_max`'s entry time ($3.3 \times 10^{-4}$).
+  - The nonlinearity grows exactly as $\alpha^2$: $7.4 \times 10^{-4}$ at $\alpha = 0.01$,
+    7.4 at $\alpha = 1$. It is smooth, not a kink.
+  - Newton's natural-norm ratio reaches 0.08 at $\alpha = 0.01$, a step of
+    $3 \times 10^{-6}$ s in $t_{\rm in}$.
+  - It shows in the rows after the arc: `tau1_min`'s entry row and terminal rows 12 and 13.
+    The arc's own entry row stays linear.
+  - The entry is regular: $g \approx -510\,\delta t^2$ before it. The Jacobian's smallest
+    singular value ($1.9 \times 10^{-2}$, against $6.7 \times 10^5$) is `tau1_max`'s exit
+    time, not its entry.
+- **Multiple shooting does not help.** The same scan with 2, 4 and 8 nodes per stretch
+  cuts the raw nonlinearity tenfold per doubling. In Newton's norm the ratio at
+  $\alpha = 1$ is 81 (single), 103, 43 and 16. With nodes it sits in one row, joint 2's
+  acceleration at the first node inside the arc. There its linear term along the error is
+  $-6.7 \times 10^{-6}$, against a quadratic term of $2.1 \times 10^{-2}$.
+- **Consequence.** The walk is limited by a local defect at the torque arc's entry
+  (Lemma JL), not by the length of the arcs. Projecting the entry times onto their rate
+  rows rescues the steps whose error lies in them (5 of 7 scanned on rest 4). Done before
+  every retry on the route (R84), it rescues few and costs more than it saves.
+- **What the step controller can and cannot gain** (`structure_certificates.md`, R82 and
+  R85). Dropping the lower-order guesses after a failed one, and a cubic predictor, each
+  speed most slow routes. But each also sends a few routes onto much longer paths
+  (goal 4 at 70%: 47.0 s against 2.9 s; vrest 10: 27.8 s against 11.7 s), and on the census
+  neither is a net gain. What decides those routes is a handful of steps beside changes
+  of structure, where Lemma S's single smooth stretch does not hold.
+
+### JL. The entry time is Newton's worst unknown where a jerk ramps into the entry — sketch, with a census scan
+
+- **Setting.** An order-1 arc's entry, under C1–C2, with tangential junctions (Lemma J:
+  the control is continuous there). A free control $u_k = -s_k^2 S_k / w$ is on its ramp
+  as the arc is entered: joint 1's jerk on the census's torque arcs (O3).
+- **Statement.**
+  - Moving the entry time by $\delta$ moves the motion after it by first-order terms:
+    the costate jump's dependence on $x(t_{\rm in})$, and the rate row's $\ddot g$.
+  - At second order it moves it by $\tfrac12 G (\dot u^- - \dot u^+)\,\delta^2$, through the
+    jump of the control's derivative at the entry.
+  - On the ramp $\dot u_k^- = -s_k^2 \dot S_k / w$, while the riding law's $\dot u^+$ is
+    $O(1)$. So the second-order term overtakes the first at $|\delta| = O(w)$, and that
+    is Newton's radius in $t_{\rm in}$. It is Lemma W (2)'s mechanism, but the ramp ends at
+    the junction, so its effect does not average out over a short ramp.
+- **Proof sketch.** Write the motion after the entry as $\Phi_b(t, t_{\rm in})$ applied to
+  $\Phi_f(t_{\rm in}, t_0) z_0$ with the jump. Differentiate twice in $t_{\rm in}$: the
+  first derivative carries $F_f - F_b$ at the junction, which Lemma J's continuity makes
+  vanish in its control part. The second carries $\dot F_f - \dot F_b$, whose control part
+  is $G(\dot u^- - \dot u^+)$.
+- **Gap.** The size of the first-order terms that remain is not bounded. The scan above
+  measures the ratio, and the radius it implies is only checked on rest 4's walk.
+- **Consequence.** The rate row restricted to $t_{\rm in}$ is a scalar function along the
+  free arc, so a secant (or a bracket) finds its root whatever the ramp's slope. That
+  repairs a guess whose error lies in the entry times. Most of the route's failed guesses
+  have their error elsewhere (O11).
+- **Used by.** None (R84 and R87 tried). Observation O12 confirms the consequence on the
+  route's own guesses.
+
+### Observation O12: the walk's failed guesses are outside Newton's radius, and the reduced map is not (2026-11-25)
+
+Rest 4's route 6, at failed path steps on its walk of the weight. At each step the true
+solution at the step's target was reached by substeps, as in O11. Measured on core.
+
+- **Not the Jacobian's error.** With the route's loose path Jacobian (`PATH_JACOBIAN_RTOL`,
+  R75's tangent) and with a tight one (the variational equations at the integration's
+  tolerance):
+  - The two agree to $2 \times 10^{-7}$ relative, or $1.6 \times 10^{-7}$ after
+    equilibrating rows and columns. Their Newton steps from the guess agree to
+    $10^{-7}$.
+  - $\mathrm{cond}\,J$ is $2 \times 10^7$ to $7 \times 10^8$, and $10^4$ to
+    $4 \times 10^5$ equilibrated.
+  - The Newton step from the guess is 30 to 2,000 times longer than the guess's error
+    (0.6 against $3 \times 10^{-4}$ late in the walk) and points away from the truth:
+    cos −0.2 to −0.4. Damped down to 1/16, it lowers the residual at none of the late
+    guesses.
+- **The reduced map (Lemma JL: each order-1 entry's time solved from its rate row),
+  with the Jacobian at the guess.** On the late guesses (four of seven), Newton converges
+  quadratically in 4 steps: for example $5.1 \times 10^{-2}$, $3.5 \times 10^{-4}$,
+  $1.9 \times 10^{-8}$, $1.7 \times 10^{-12}$. The route's own chord on that map succeeds
+  from 5 of the 7 guesses, where on the full map it succeeds from none.
+- **Consequence.** Lemma JL's defect is what stops these steps, and the elimination
+  removes it there. As a rule on the whole route (R87, `structure_certificates.md`) it
+  changes the route's path elsewhere, and loses.
+
+### Observation O13: where the four unsolved cases stop (2026-11-26)
+
+Each route of prest 4, vrest 4, vgoal 0 at 70% and vgoal 3 at 70%, alone and narrated,
+then probed where it stops. Measured on node-1 and core.
+
+- **Prest 4: a split that is nearly degenerate at the policy's weight.** Route 3 reaches
+  the weight (forward and reversed). The exact answer is rejected by Lemma H: on the
+  `tau1_min` arc $[1.1708, 1.3684]$, $\mu$ falls from 0.0102 to 0 at 1.1817, is negative
+  to 1.20 (down to $-7 \times 10^{-4}$), rises to $1.2 \times 10^{-3}$ at 1.274 and falls
+  to 0 at the exit.
+  - Joint 2's jerk leaves its bound (+30) at 1.1818, where $\mu$ reaches 0. They coincide
+    to $10^{-4}$ at every weight on the walk. The held control's law is
+    $-R^{-1}(G^\top\lambda + \mu a)_2$ with $R^{-1} = 1/w$, so it is released at a
+    multiplier of order $w$, near zero. This is Lemma U's case with $\mu(t_s) \approx 0$.
+  - On the path ($s \approx 0.59$), R5's split converges ($3 \times 10^{-10}$), but its
+    gap closes to $7 \times 10^{-5}$. The first piece's tail $[t_s, t_{\rm out}]$
+    carries $\mu \approx -7 \times 10^{-6}$, no force, so its exit time is almost free.
+    R28 refuses the split for that rise. With R28's tolerance loosened, the next step's
+    residual falls only in proportion to the step (6.1 at $10^{-2}$, 0.08 at
+    $1.6 \times 10^{-4}$): the split's Jacobian is nearly singular.
+  - At the weight, the split's seed has a residual of 23. A multiplier of $10^{-3}$ moves
+    the controls by $10^{-3} a / w$, so the gap cannot be jumped open there.
+- **Vrest 4: a riding failure with the margin open.** Route 5's walk brings in a
+  `w3_max` touch $10^{-5}$ after `tau1_max`'s exit. Both orders converge. From then on,
+  every guess fails to ride `tau1_min` after the `w2_max` touch, at any step down to
+  $1.4 \times 10^{-4}$. Along the last solution the margin of Lemma K is at least 0.38
+  of the jerks' reach on that arc, so the failure is not Lemma I's edge. R9 does not
+  change it.
+- **Vgoal 0 at 70%: two loops in settle.** On route 6:
+  - A step's solution has `tau3_min`'s exit before its entry. With R30 off, the
+    violation monitor repairs that solution, and each repair converges back to it:
+    about 150 rounds in 10 s. Rule R89 (`structure_certificates.md`) ends this loop, but
+    loses on the census.
+  - Then, at $s \approx 0.856$, a `tau4_min` touch is born, settles, and is undone at
+    the next step, as the step halves towards it until the route stalls.
+- **Vgoal 3 at 70%: MINPACK's fallbacks.** On route 5, 38 path solves fall back to
+  MINPACK in 45 s and take 10.9 s, and 6 of them succeed. Several stop at once, with the
+  residual unchanged ($4.1 \times 10^{-4}$ after 13 evaluations).
+- **Consequence.** Three different events, none with a lemma yet:
+  - a split whose piece ends at its own control's release with $\mu \approx 0$ (prest 4);
+  - riding that fails with the margin open (vrest 4);
+  - a touch that is born and undone at the same $s$ (vgoal 0 at 70%).
+
+  Rule R90 (`structure_certificates.md`) solves prest 4 on another route (route 4, in
+  31.4 s): its path solves stop failing where MINPACK did, and that route reaches an
+  answer that passes. It does not reach the event above. The other three cases are
+  still unsolved.
+
+### KD. With a diagonal control Hessian, the riding system is an $s \times s$ system — proved (elementary)
+
+- **Setting.** A riding solve (riding.py) for a set of $s$ limits, with the controls in
+  $H$ held at bounds and the rest, $F$, free:
+  $$R u + A^\top \mu + E_H^\top \nu = f, \qquad A u = g, \qquad E_H u = h,$$
+  with $R = \partial^2 H / \partial u^2$. In the arm's cost $1 + \sum_i r_i j_i^2 / 2$,
+  $R = \mathrm{diag}(r)$ with every $r_i > 0$.
+- **Statement.** With $R$ diagonal and $r_F > 0$, the system has a unique solution
+  exactly when $S = A_F R_F^{-1} A_F^\top$ is nonsingular. It is
+  $$S \mu = A_F R_F^{-1} f_F + A_H h - g, \quad u_H = h, \quad u_F = R_F^{-1}(f_F - A_F^\top \mu), \quad \nu = f_H - R_H h - A_H^\top \mu.$$
+- **Proof.** The held rows give $u_H$. The free rows of the first block give $u_F$ in
+  terms of $\mu$, since $R_F$ is diagonal and positive. Putting that into $A u = g$
+  gives the system in $\mu$. The held rows of the first block then give $\nu$. Each
+  step is forced, so the solution is unique exactly when $S$ is nonsingular. $\square$
+- **Cost.** $O(s^2 m + s^3)$ for the factors and $O(s m)$ for each further right-hand
+  side, against $O(d^3)$ and $O(d^2)$ for a dense LU of the $d = m + s + |H|$ system
+  (7 to 14 for the arm). A riding Jacobian solves it for every column of $z$ (Lemma SP).
+- **Used by.** R86, for a single limit ($s = 1$). For $s \ge 2$, forming $S$ squares the
+  conditioning of the rows of $A_F$, a loss the dense LU of the whole system avoids.
+
 ### Observation O8: the census's position limits are touched, as order 3 predicts (2026-11-22)
 
 - **The cases.** 27 census answers swing a joint past its start-to-goal range: 17

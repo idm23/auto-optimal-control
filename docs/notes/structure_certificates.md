@@ -2845,3 +2845,311 @@ and 6, where it was 1 to 4.
 - Census page 119: the same 76 cases under 5 s, and a mean of 3.437 s against 3.551 s.
 - Page 118's configuration repeated (page 120) differs from it by 1% in total, so the 3%
   is the schedule's.
+
+### Riding past the edge of the holdable set: Rule R81, tried
+
+*What it was.* On rest 4's route 6, 255 of 483 failed rides fail at the arc's entry:
+the predicted entry state is past the edge of the holdable set, so the riding law has no
+value there (Observation O11).
+
+*Rule R81* (tried, not kept). Past the edge, a single limit is ridden on R14's held set:
+every control at the corner but the one with the largest $|a_k|$, which the limit fixes
+and which leaves its box by $-m/|a_k|$. At the edge this is the corner, the only riding
+control, so the flow is continuous there. The acceptance's bound check rejects any answer
+that uses it.
+
+*Result: dropped.*
+- **Unbounded,** the integration rides far past the edge and its motion runs away. Each
+  such evaluation uses its whole budget: the route stalled at 66 s, against 8.5 s.
+- **Within a band** of 5% or 25% of the reach $\sum_k |a_k| r_k$, the route takes the same
+  steps as without it (713 Jacobians against 712), with dearer failures: 20.9 s and 47.3 s.
+- **Replayed on the recorded failures,** the band lets 69 (5%) to 296 (100%) of the 483
+  rides through, but the steps still fail. Those iterates are outside Newton's region,
+  and a defined residual there does not bring them back.
+
+### Lemma J's multiplier row at every entry: Rule R83, tried
+
+*What it was.* With tangential junctions, every order-1 entry on the route takes the rate
+row $\dot g = 0$ under the arriving control (13,777 of 13,777 entry rows on rest 4's
+route 6). Its gradient in the costates comes only through the arriving controls that are
+interior, which near a torque entry is joint 1's jerk on its ramp.
+
+*Rule R83* (tried, not kept). Off the corner, the entry takes Lemma J's row
+$\mu(t_{\rm in}^+) = \pi$ instead. Both rows hold at every answer.
+
+*Result: mixed, single routes.* On node-1, against the same routes there without it,
+vrest 1 took 12.4 s against 16.1 s, and vrest 12 was unsolved at 60 s, against 22.6 s.
+Rest 4 took 739 Jacobians, against 712 on core. The rate row is not what limits the walk: the scans of O11 find the
+defect downstream of the entry.
+
+### Entry times projected before a retry: Rule R84, tried
+
+*What it was.* At the failed steps late in rest 4's walk, 97% of the predictor's error is
+in `tau1_max`'s entry time, where Newton's model holds only for steps of about
+$3 \times 10^{-6}$ s (Lemma JL).
+
+*Rule R84* (tried, not kept). When the chord from a guess fails with a finite residual,
+each order-1 entry's rate row is solved for its own time (a secant, every other unknown
+fixed), and the chord is run once more.
+
+*Result: dropped.* On the scanned steps, the projected guesses converge in 3 to 16
+evaluations where the guesses did not (5 of 7). On the routes, the rule fired 1 to 3 times
+per route. Its attempts cost more than it saved, and the paths changed: rest 4 took
+1,096 Jacobians against 712 (on core), vrest 12 719 against 532 and vrest 1 439 against
+357 (both on node-1). Most of
+the route's failed guesses have their error elsewhere.
+
+### One predictor per step: Rule R82, tried
+
+*What it was.* A failed path step tries every guess the predictor pipeline offers: R48's
+quadratic, then the secant, then the last solution. On rest 4's route 6, of the 50 steps
+whose first guess ran Newton without converging, the later guesses rescued 2 and took
+4.6 s of the route's 15.4 s. On ten other slow cases' winning routes they took 0.2 to
+1.5 s and rescued 0 to 3 steps.
+
+*Rule R82* (tried, not kept). When Newton from the step's first guess does not converge
+(a finite residual), the step is halved without the others. Lemma S's argument: on a
+stretch of one structure, below the path's own scale, a lower-order predictor has the
+larger error, so it is outside Newton's radius whenever the higher one is.
+
+*Census, the 117 cases on node-1, against a baseline run there (113 solved, 89 under
+5 s, mean 4.472 s, as page 124):*
+- **As stated:** 113 solved, 92 under 5 s, mean 5.007 s. Goal 0 at 70%, vrest 13, rest 5,
+  prest 5, pvgoal 5 at 70% and pvrest 13 drop under 5 s, and rest 4 takes 8.5 s against
+  12.2 s. But goal 4 at 70% takes 47.0 s against 2.9 s: its route 1, which never moves the
+  weight, loses the last solution after a failed secant, and every forward route fails.
+  Vrest 12 takes 42.1 s against 26.3 s, and vrest 10 27.8 s against 11.7 s.
+- **Only after a failed quadratic** (`single_predictor="quadratic"`): 112 solved, 91 under
+  5 s. Goal 4 at 70% is back, but pvrest 12 goes over the cap (54.4 s before), and vrest
+  12 and vrest 10 still lose 15 and 17 s. The cases solved by both take 462.9 s against
+  450.9 s.
+- **Core, the rule as stated, in the other order:** 111 solved against 112, 86 under 5 s
+  against 81, and 567.6 s against 563.3 s for the cases both solve.
+
+The rescues the rule removes sit right after a change of structure, where the secant runs
+through the point of the change, and on route 7's walk. Lemma S's hypothesis, one smooth
+stretch behind every base point, fails there, and those few steps decide the route.
+
+### A cubic predictor on the weight's walk: Rule R85, tried
+
+*What it was.* Along rest 4's walk the entry times are smooth in $s$: resampled at 24
+points per failed step to $10^{-10}$, `tau1_max`'s $dt_{\rm in}/ds$ falls monotonically,
+by about 40% across one step (Observation O11). The quadratic predictor's error in them is
+curvature, and Newton tolerates little error there (Lemma JL).
+
+*Rule R85* (tried, not kept). On a leg that moves the weight, the cubic through the last
+four solutions of one structure is tried before R48's quadratic (Lemma S (2): steps scale
+as $(\rho / C)^{1/q}$).
+
+*Result: mixed, single winning routes on node-1, each with and without it, six at a time:*
+
+| Case (route) | Jacobians without | with R85 | Time without | with R85 |
+|---|---|---|---|---|
+| rest 4 (6) | 716 | 577 | 14.1 s | 11.8 s |
+| vgoal 3 at 80% (5) | 676 | 619 | 19.0 s | 18.7 s |
+| vrest 12 (7) | 539 | 522 | 15.8 s | 17.0 s |
+| goal 0 at 70% (5) | 250 | 261 | 7.9 s | 8.4 s |
+| vrest 1 (6) | 363 | 385 | 11.3 s | 14.2 s |
+| vrest 10 (7) | 212 | 506 | 6.4 s | 14.2 s |
+
+As with R82, R83 and R84, a change to the route's numerics moves single routes both ways
+(Observation O9): a few steps near changes of structure decide where a route goes.
+
+### The riding system by elimination of the free controls: Rule R86
+
+*What it was.* In rest 4's route 6, profiled with `perf` on node-1, the riding kernels take
+62% of the solve. A fifth of that is spent assembling and factoring the dense KKT system
+of each riding solve (`r_system`, `r_lu`, `r_lu_solve`), at every right-hand side and for
+every column of a riding Jacobian. The limits' rows and $L_x$ take another 30% (tape
+passes of the arm's recursion). The integrator takes 12% and Python 13%.
+
+*Rule R86* (Lemma KD; `riding.py`, chosen when generating the kernels). Where
+$\partial^2 H / \partial u^2$ is diagonal, as in the arm's cost, the riding system is
+solved by eliminating the free controls when a single limit is ridden. That leaves one
+equation for its multiplier. The unknowns, their order and the "limits not independent"
+failure are those of the dense system.
+- **Sets of two or more limits keep the dense LU.** The first version used the
+  elimination for every set. Its $S = A_F R_F^{-1} A_F^\top$ squares the conditioning of
+  the limits' rows, and `test_arc_jacobians_of_the_arm_match_differences` (slow tests)
+  then put a 6-limit riding Jacobian $4.3 \times 10^{-5}$ from central differences,
+  against its bound of $4 \times 10^{-5}$. A single limit has no such loss: $S$ is a scalar.
+  The census's torque arcs are mostly of one limit (rest 4's both are).
+
+*Checks.*
+- At 3,624 pairs of a random state (costates up to 10) and a set of limits, the old and new
+  kernels succeed on the same pairs. Right-hand sides, Jacobians, controls and multipliers
+  agree to a median relative difference of $7 \times 10^{-10}$ (at most $8 \times 10^{-8}$,
+  at the most ill-conditioned dense systems). The calls take 0.21 s against 0.6 s.
+- Single routes on node-1: rest 4's evaluations take 7.4 s against 9.1 s, and vrest 12's
+  8.8 s against 12.2 s.
+
+*Census, the 117 cases on node-1, against a baseline run there right after (measured with the first version, the elimination for every set):*
+- 113 solved in both, 90 under 5 s against 89, and 504.9 s against 505.7 s for the cases
+  both solve. Final times agree to $7 \times 10^{-12}$.
+- By the baseline's time per case: under 2 s 0.986 of the time, 2 to 4 s 0.964, and 4 to
+  8 s 0.985.
+- The slow cases move both ways with their paths: vgoal 3 at 80% 22.9 s against 26.3 s,
+  and pvrest 12 47.1 s against 52.8 s, but vrest 1 15.5 s against 12.7 s, and pvrest 10
+  38.3 s against 33.5 s.
+
+The census gains much less than the routes' evaluations do. A case's time includes the
+other routes' processes on the machine, and the exact solve and Python glue, which R86 does
+not touch. R86 joins the release as a cheaper kernel with the same answers.
+
+### The problem's own symbolic work, at construction
+
+*What it was.* Three census cases spent about 2.3 s outside their winning route: vgoal 0
+at 90% (3.73 s, against 1.36 s for its route), pgoal 2 at 70% (5.75 s against 3.42 s)
+and pvgoal 5 at 70% (5.70 s against 3.31 s). Each is the first case its Homotopy solves:
+rate limits, position limits, and both. The goal cases' Homotopy had already solved a
+free problem in `params`, outside the timer. Profiled on core, that first solve spends
+0.86 s on R23's closed-form certificate (`closed_form.certify`, SymPy) and 0.6 s on the
+ends' functions (`_limits_broken_at_the_ends`, SymPy `free_symbols` on the torques). Both
+depend on the problem alone, and both were cached after the first solve.
+
+*Change* (engineering, no new rule). `Homotopy` builds both when it is constructed, with
+its kernels. On core the first case's time before its routes start is 0.06 s, against
+1.53 s.
+
+### Entry times solved inside every evaluation: Rule R87, tried
+
+*What it was.* Lemma JL puts Newton's radius in an order-1 entry time at $O(w)$. At the
+route's failed steps late in rest 4's walk, the guess's error is almost all in that
+time (O11). Nonlinear elimination removes the time from Newton's unknowns. Inside each
+evaluation, the entry time $t^*$ is solved from its rate row $dg/dt = 0$ by Newton along
+the free flow before the entry (closed form, Lemma T). The unknown is tied to it by the row
+$t_{\rm in} - t^*$, and $dt^*/dv$ comes from the implicit function theorem. The reduced
+map has the same zeros.
+
+*Checks.* The map's Jacobian against central differences, at the route's first five
+eliminated evaluations: worst column errors $10^{-6}$ to $2 \times 10^{-4}$ relative,
+at the differences' own error. At the route's failed guesses the reduced map does what
+JL says (Observation O12).
+
+*Rule R87* (tried, not kept; `MultiArcShooting.eliminate_entries`). Three versions, on
+rest 4's route 6 and vrest 12's route 7:
+
+| Version | rest 4 | vrest 12 |
+|---|---|---|
+| Without | 9.7 s, 714 Jacobians | 12.4 s |
+| Every entry on every leg | 12.3 s, 677 | 33.1 s |
+| Only a root within $2 \times 10^{-3}$ s of the unknown with $d^2g/dt^2 < 0$ (else the unknown and the rate row) | 11.2 s, 621 | over the 60 s cap |
+| The same, only on legs that move the weight | 11.5 s, 640 | over the 60 s cap |
+
+- **Census, the first version against R86's census:** 112 solved against 113, and 85 under
+  5 s against 90. On the 117 cases both ran, 500.2 s against 459.0 s.
+- **What goes wrong.**
+  - On a poor iterate, Newton along the free flow finds another root of $dg/dt$: a
+    turning point of $g$ off the limit, 0.4 to 90 ms from the unknown. The riding arc that
+    follows then fails (rest 4: 528 failed rides against 483).
+  - Bounded to the regular root near the unknown, the map is discontinuous where it falls
+    back. On vrest 12 the route then meets 118 failures in the settle: the riding arc
+    after a moved entry cannot be sampled (`sample_boundary` returns an error code).
+  - So the walk's steps that JL limits are rescued, but the route's path changes before
+    them.
+- **On the weight's own walk only (2026-11-26).** The rule acted only on legs that move
+  the weight with the offsets fixed: the corner routes' last leg, where vgoal 3 at 80%
+  and vgoal 4 at 70% spend most of their time. The tightening paths are then unchanged.
+  Census on node-1 with R90, over the 117 cases, against the page of 2026-11-26:
+  - 113 solved against 114: vgoal 4 at 70% goes over the cap (38.0 s without).
+  - 91 under 5 s against 94. 501.2 s against 475.9 s for the cases both solve.
+  - Vgoal 3 at 80% takes 29.9 s against 24.1 s, and pvrest 5 17.7 s against 13.5 s.
+  - So the walk itself goes elsewhere with the reduced map: the answers it reaches are
+    found later, or not at all.
+
+### A stale Jacobian's failed test, with the fresh Jacobian at the step's end: Rule R88, tried
+
+*What it was.* Traced on rest 4's route 6, the late walk's failed solves begin alike, with
+R87 or without it. R61's carried Jacobian takes a chord step that cuts the residual about
+tenfold, for example $4.2 \times 10^{-2}$ to $4.1 \times 10^{-3}$. Then R55's
+natural-monotonicity test rejects it ($\theta$ 1.0 to 1.3). That test is measured in the
+stale Jacobian's norm, whose weak direction (cond $10^7$) dominates it. The chord then
+takes a fresh Jacobian back at the guess, outside Newton's radius (O12). That Newton step
+leaves the riding domain, and its damped steps never get below the guess's residual.
+
+*Rule R88* (tried, not kept; `MultiArcShooting.stale_step_drop = 0.1`). A stale
+Jacobian's step that fails the test but leaves the residual below a tenth of its value is
+kept, and the fresh Jacobian is taken at its end.
+
+*Result: mixed.*
+- **Single routes on node-1, six at a time:** rest 4 674 Jacobians against 714 (13.3 s
+  against 13.8 s), but vrest 12 goes over the 60 s cap (16.7 s without).
+- **Census on node-1, against R86's census, over its 117 cases:**
+  - 112 solved against 113, and 92 under 5 s against 90. 450.1 s against 457.7 s for the
+    cases both solve.
+  - Vgoal 4 at 70% takes 39.4 s against 45.9 s, and pvrest 10 33.2 s against 38.3 s.
+    Pvrest 12 goes over the cap (47.1 s).
+  - The cases that cross 5 s were all within 0.5 s of it, both ways (vrest 3 4.67 s
+    against 5.17 s, pvrest 3 5.51 s against 4.93 s).
+
+Like R82 to R85, it changes which steps succeed, and the paths move both ways.
+
+### Newton with a line search before MINPACK: Rule R90
+
+*What it was.* When a path solve's chord fails with its residual below `path_fallback`
+($10^{-2}$), MINPACK's `hybr` takes over from the same guess. On the slow routes that
+fallback is a large share of the time (each route alone, on core):
+
+| Route | MINPACK | Route | MINPACK succeeded |
+|---|---|---|---|
+| vgoal 4 at 70%, route 4 | 11.8 s | 29.0 s | 14 of 16 |
+| vrest 12, route 7 | 6.0 s | 17.2 s | 7 of 12 |
+| vrest 1, route 6 | 2.9 s | 14.2 s | 1 of 4 |
+| pvrest 1, route 5 | 3.2 s | 16.2 s | 1 of 3 |
+| vgoal 3 at 70%, route 5 (45 s) | 10.9 s | | 6 of 38 |
+
+Each call takes 80 to 240 evaluations: its Broyden updates of a stiff shooting map are
+poor, and it rarely asks for the exact Jacobian.
+
+*Rule R90* (`Homotopy.path_newton`, Lemma AC). Before MINPACK, Newton's method runs from
+the same guess, with a fresh Jacobian at every accepted iterate and a backtracking line
+search on $\|R\|$, Armijo's test, evaluated on the residual alone
+(`MultiArcShooting.solve_line_newton`). If it does not reach the path's tolerance in 12
+iterations, MINPACK runs as before. The chord failed on its carried Jacobian's
+contraction. A fresh Jacobian restores Newton's rate inside its radius, and its direction
+descends $\|R\|^2$, so the line search globalizes it.
+
+*Replayed at every fallback of two routes* (the route kept MINPACK's answer):
+
+| Route | MINPACK | The damped solver | R90's Newton |
+|---|---|---|---|
+| vgoal 4 at 70%, route 4 | 11.8 s, 14 of 16 | 5.2 s, 13 | 3.5 s, 13 |
+| vrest 12, route 7 | 5.5 s, 6 of 11 | 9.4 s, 4 | 2.2 s, 5 |
+
+The damped solver is `solve_damped`, Levenberg-Marquardt with the exact Jacobian.
+
+*Census on node-1, the 117 cases without obstacles, against the same tree with R90 off:*
+- **Solved:** 114 against 113. Prest 4 solves for the first time, in 31.4 s (route 4,
+  $t_f = 1.8102$).
+- **Time:** the cases both solve take 481.6 s against 505.5 s.
+- **Gains:** pvrest 10 takes 14.9 s against 38.2 s, vgoal 3 at 80% 23.7 s against
+  29.4 s, vgoal 4 at 70% 37.6 s against 40.9 s, pvrest 5 14.1 s against 16.8 s, and
+  pvrest 13 5.19 s against 7.21 s.
+- **Losses:** pvrest 12 takes 52.5 s against 46.6 s, and rest 11 5.01 s against 4.89 s.
+- **Under 5 s:** 93 against 94. Rest 11 is the one case that crossed.
+
+### Junctions out of order, retired before violations are judged: Rule R89, tried
+
+*What it was.* On vgoal 0 at 70%'s route 6 (Observation O13), a step's solution has
+`tau3_min`'s exit before its entry. R30's order monitor is off in the census, so the
+violation monitor judges that solution and repairs its violations. Each repair converges
+back to the same solution, about 150 rounds in 10 s. Later on the same route, a
+violation of `w4_min` lies on a segment that runs backwards between two crossed exits.
+
+*Rule R89* (tried, not kept; `Homotopy.dead_arcs_first`). When a step's solution has
+junctions out of order, or a boundary arc narrower than $10^{-6} T$, the violation
+monitor passes. The dead-arc monitor then sorts the events and retires the arc
+(`_retire`) before any violation is judged. The argument is V1's: the monitors judge a
+motion, and junctions out of order are none.
+
+*Census on node-1, the 117 cases without obstacles, against the same tree without it:*
+- **Solved:** 111 against 113. Goal 4 at 70% fails (56.2 s against 2.75 s), and so does
+  vgoal 4 at 70% (40.9 s without).
+- **Under 5 s:** 89 against 94.
+- **Gains:** vgoal 3 at 80% (24.4 s against 29.4 s), vrest 5 (8.1 s against 10.6 s) and
+  pvrest 13 (5.2 s against 7.2 s).
+
+Crossed junctions on the path are mostly transient. R10 lets the residual through them,
+and the next step or R41's reorder puts them back in order. Retiring at the first
+crossing changes the structure where the route did not need to. On vgoal 0 at 70% itself
+the loop ends, but the route stalls later on a touch (O13) and the case stays unsolved.

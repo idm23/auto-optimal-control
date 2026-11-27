@@ -52,10 +52,10 @@ torque limit on every joint. There are five families of cases:
     offsets of the limits fall from the rest answer's deepest point to zero), so it picks
     the side by geometry, not by cost. Its answer is a local optimum.
 
-The data shown is from the census of 2026-11-25, on the branch that tests the held-set
-guards inside each step (R78, Lemma HE). Rules R1, R2, R15, R16, R20, R25, R26, R28,
-R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72, R74, R75 and R78 are turned on
-(the release's configuration), with
+The data shown is from the census of 2026-11-26, on the branch whose path solves try
+Newton with a line search before MINPACK (R90). Rules R1, R2, R15, R16, R20, R25, R26,
+R28, R29, R32, R41, R43, R48, R50, R54, R55, R60, R61, R63, R64, R65, R66, R72, R74, R75,
+R78 and R90 are turned on (the release's configuration), with
 held-set events (R22) and closed-form free arcs (R23) on by default.
 R15's portfolio has seven routes: two draws of the offsets, each also at ten times the
 secondary weight (R24); the first draw at a hundred times it, once lowering the weight
@@ -66,19 +66,23 @@ ends (R72). The census runs its
 cases in its main process, so the routes are the only other processes. Each case has 60 s in all (`--cap 60`, the reversed problem
 included); a case that takes longer counts as unsolved.
 
-113 of the 117 cases solve, all under 60 s, and 89 of them under 5 s. The mean solve time
-of the solved cases is 4.454 s. Of the 27 position-limit cases, 26 solve, 16 of them
-under 5 s, and every one of the 26 touches the position limits it was given (Observation
-O8). Of the 90 older cases 87 solve, 73 under 5 s. Times are wall-clock seconds per case,
-to the millisecond.
+114 of the 117 cases solve, all under 60 s, and 94 of them under 5 s. The mean solve time
+of the solved cases is 4.507 s. Every one of the 27 position-limit cases solves, 18 of
+them under 5 s; on the page of 2026-11-25, 26 solved, and every one touches the position
+limits it was given (Observation O8). Of the 90 older cases 87 solve, 76 under 5 s. Vgoal
+0 and vgoal 3 at 70% and vrest 4 are the three left (Observation O13). Times are
+wall-clock seconds per case, to the millisecond.
 
-The 45 obstacle cases were added in the same configuration, on the same machine: 41 solve,
-all under 60 s, and 20 under 5 s, with a mean of 7.644 s. With them the page has 154 of
-162 solved, a mean of 5.303 s.
+The 45 obstacle cases, in the same configuration on the same machine: 41 solve, all under
+60 s, and 20 under 5 s, with a mean of 6.857 s. With them the page has 155 of 162 solved,
+114 under 5 s, with a mean of 5.129 s.
 
-- **Every wall solves (15 of 15)**, 6 under 5 s, with a mean of 10.8 s. **Blocks:** 14 of
-  15, 6 under 5 s, with a mean of 6.9 s. **Grazes:** 12 of 15, 8 under 5 s, with a mean of
-  4.6 s.
+- **Walls:** 14 of 15, 6 under 5 s, with a mean of 9.1 s. **Blocks:** 14 of 15, 6 under
+  5 s, with a mean of 6.6 s. **Grazes:** 13 of 15, 8 under 5 s, with a mean of 4.7 s.
+  The four left are grazes 3 and 6, block 6 and wall 11. Graze 10 now solves, in 12.2 s,
+  through the reversed problem (R4), as block 10 and wall 10 do.
+- The rest of this list is from the page of 2026-11-25, when walls solved 15 of 15 and
+  grazes 12.
 - **The hardest rung is not the hardest to solve.** None of the four failures has to make
   a large change. Grazes 3 and 10 are lost long before the cap: every route ends by itself,
   its path steps mostly failing to settle on a structure ("no structure converged",
@@ -102,6 +106,14 @@ all under 60 s, and 20 under 5 s, with a mean of 7.644 s. With them the page has
 - **No motion passes through an obstacle.** A check of every solved answer at twenty
   times the page's sampling finds the deepest `g` at 9e-4, which is the rounding of the
   exported angles.
+
+Rest 4 with a position limit now solves, in 32.0 s, and so does graze 10. When a path
+solve's chord failed close to its answer, MINPACK took over: 80 to 240 evaluations per
+solve, up to 12 s of a slow route. Newton with a fresh Jacobian at each iterate and a line
+search now goes first (R90), and MINPACK only if it fails. Of the 117 cases, the 113 solved
+on both pages take 481.8 s against 515.9 s. Rest 10 with rate and position limits falls
+from 38.4 to 14.8 s, and vgoal 3 at 80% from 29.5 to 24.1 s, but rest 12 with rate and
+position limits rises from 46.0 to 53.8 s.
 
 Rest 2 with rate and position limits now solves, in 2.5 s. Its answer had been found and
 then rejected for a violation it does not have. Riding a torque limit, a joint's jerk

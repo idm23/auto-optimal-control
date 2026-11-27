@@ -93,6 +93,28 @@ def test_newton_polishes_a_near_guess_past_the_tolerance(compiled):
     assert not far.success
 
 
+def test_line_newton_reaches_the_answer_and_fails_cleanly(compiled):
+    """solve_line_newton (Rule R90): from a guess near the answer it converges to it with
+    fresh Jacobians, and from one it cannot improve along Newton's direction it fails
+    cleanly, leaving MINPACK to the caller, at least as low as solve_newton gets."""
+    k = compiled["min_time"][2]
+    shoot = SingleShooting(k, MIN_TIME)
+    umax, a = MIN_TIME[0], MIN_TIME[1]
+    ts = np.sqrt(a / umax)
+    exact = shoot.solve(shoot.guess_multipliers([1.0 / (umax * ts), 1.0 / umax], tf=2 * ts))
+    assert exact.success
+    sol = shoot.solve_line_newton(exact.v * (1 + 1e-5), tol=1e-9)
+    assert sol.success and sol.residual_norm < 1e-9
+    np.testing.assert_allclose(sol.v, exact.v, rtol=1e-8)
+    guess = shoot.guess_multipliers([1.15 / (umax * ts), 0.9 / umax], tf=1.1 * 2 * ts)
+    plain = shoot.solve_newton(guess, tol=1e-9, max_iterations=12, polish=0)
+    searched = shoot.solve_line_newton(guess, tol=1e-9)
+    # Both may reach the answer; below the tolerance their residuals are rounding.
+    assert searched.residual_norm <= max(plain.residual_norm, 1e-12)
+    stuck = shoot.solve_line_newton(exact.v * 3.0, tol=1e-12, max_iterations=1, max_halvings=1)
+    assert not stuck.success
+
+
 def test_chord_and_newton_stop_where_the_start_cannot_be_propagated(compiled):
     """A start whose propagation fails has no Jacobian. _safe's stand-in (a large
     residual, the identity) read as one gives the step -R, moving every unknown by
@@ -109,7 +131,7 @@ def test_chord_and_newton_stop_where_the_start_cannot_be_propagated(compiled):
 
     shoot.residual_jacobian = fails
     shoot.residual = fails
-    for solve in (shoot.solve_chord, shoot.solve_newton):
+    for solve in (shoot.solve_chord, shoot.solve_newton, shoot.solve_line_newton):
         calls.clear()
         sol = solve(v)
         assert not sol.success and sol.nfev == 1 and len(calls) == 1
