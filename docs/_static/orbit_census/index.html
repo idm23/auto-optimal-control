@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit transfer census</title>
+<style>
+:root {
+  --bg: #fbfbfa; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #e4e4e2; --grid: #ececea;
+  --earth: #d9e4ee; --earth-line: #b7c7d6; --path0: #2f5d8a; --path1: #c9a227; --start: #2f5d8a;
+  --target: #8a8a8f; --craft: #1d1d1f; --thrust: #c0392b; --ok: #2e7d4f; --bad: #b3261e; --accent: #2f5d8a;
+  --series: #2f5d8a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141416; --panel: #1c1c1f; --ink: #ececef; --muted: #9a9aa2; --line: #2c2c31; --grid: #26262a;
+    --earth: #22303d; --earth-line: #34495c; --path0: #7fb0e0; --path1: #e0c060; --start: #7fb0e0;
+    --target: #77777e; --craft: #ececef; --thrust: #ff6b5e; --ok: #5cc28a; --bad: #ff7a70; --accent: #7fb0e0;
+    --series: #7fb0e0;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141416; --panel: #1c1c1f; --ink: #ececef; --muted: #9a9aa2; --line: #2c2c31; --grid: #26262a;
+  --earth: #22303d; --earth-line: #34495c; --path0: #7fb0e0; --path1: #e0c060; --start: #7fb0e0;
+  --target: #77777e; --craft: #ececef; --thrust: #ff6b5e; --ok: #5cc28a; --bad: #ff7a70; --accent: #7fb0e0;
+  --series: #7fb0e0;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+main { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+.lede { color: var(--muted); margin: 0 0 18px; max-width: 760px; }
+.summary { display: flex; gap: 24px; flex-wrap: wrap; margin: 0 0 18px; }
+.stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 13px; }
+.families { color: var(--muted); font-size: 13px; margin: -10px 0 18px; }
+.viewer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 14px; margin-bottom: 22px; }
+@media (max-width: 760px) { .viewer { grid-template-columns: 1fr; } }
+.viewer h2 { font-size: 18px; margin: 0; }
+.viewer .meta { color: var(--muted); font-size: 13px; margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
+#orbit { width: 100%; aspect-ratio: 1 / 1; display: block; touch-action: none; cursor: grab; border-radius: 6px; }
+#series { width: 100%; height: 520px; display: block; }
+[hidden] { display: none !important; }
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+button, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button.on { background: var(--accent); color: var(--panel); border-color: var(--accent); }
+input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.hint { color: var(--muted); font-size: 12px; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.filters .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px;
+  cursor: pointer; transition: border-color .15s; }
+.card:hover, .card.sel { border-color: var(--accent); }
+.card canvas { width: 100%; aspect-ratio: 1 / 1; display: block; }
+.card .row { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 13px; }
+.card .name { font-weight: 600; }
+.card .st { font-size: 12px; font-variant-numeric: tabular-nums; }
+.card .sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ok { color: var(--ok); } .bad { color: var(--bad); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.sw { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+.empty { color: var(--muted); padding: 30px 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Orbit transfer census</h1>
+<p class="lede">Minimum-time low-thrust transfers around the Earth, as the solver finds them, in
+modified equinoctial elements with the thrust direction a unit vector. Each family runs down a ladder of
+falling thrust, so of more and more revolutions: <code>raise</code> lifts a circular equatorial orbit from
+1.1 to 1.3 Earth radii, <code>incl</code> does the same with a 10° plane change, and <code>gto</code> goes from
+a geostationary transfer orbit to the geostationary orbit. A <code>j</code> in front of a name adds the
+Earth's J2. The engine is a 3000 s ion engine throughout. The spiral runs from blue to gold; the red arrow
+is the thrust.</p>
+<div class="summary" id="summary"></div>
+<div class="families" id="families"></div>
+
+<section class="viewer" id="viewer" hidden>
+  <div>
+    <h2 id="v-name"></h2>
+    <div class="meta" id="v-meta"></div>
+    <canvas id="orbit" aria-label="The transfer around the Earth"></canvas>
+    <div class="controls">
+      <button id="play">Pause</button>
+      <input type="range" id="scrub" min="0" max="1000" value="0" aria-label="Time">
+      <select id="speed" aria-label="Speed">
+        <option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="3">3×</option>
+      </select>
+    </div>
+    <div class="hint">Drag the view to turn it. Playback runs at a fixed pace, whatever the transfer's length.</div>
+  </div>
+  <div>
+    <canvas id="series" aria-label="The elements, the mass and the steering over the transfer"></canvas>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--start)"></i>start orbit</span>
+      <span><i class="sw" style="background:var(--target)"></i>target orbit</span>
+      <span><i class="sw" style="background:linear-gradient(90deg,var(--path0),var(--path1))"></i>transfer</span>
+      <span><i class="sw" style="background:var(--thrust)"></i>thrust direction</span>
+    </div>
+  </div>
+</section>
+
+<div class="filters" id="filters"></div>
+<div class="grid" id="grid"></div>
+</main>
+
+<script>
+"use strict";
+const DATA = "data/";
+const PLAY_SECONDS = 14;   // one playback of a transfer at 1x
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let colors = {};
+function readColors() {
+  for (const k of ["ink", "muted", "line", "grid", "earth", "earth-line", "path0", "path1", "start", "target",
+                   "craft", "thrust", "series", "panel"])
+    colors[k] = css("--" + k);
+}
+readColors();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readColors(); redrawAll(); });
+
+const cache = new Map();
+function load(file) {
+  if (!cache.has(file)) cache.set(file, fetch(DATA + file).then(r => r.json()));
+  return cache.get(file);
+}
+
+// ---- projection (orthographic, z up) -----------------------------------------
+const view = { yaw: -0.6, pitch: 1.0 };
+function project(p, w, h, sc) {
+  const [x, y, z] = p, c = Math.cos(view.yaw), s = Math.sin(view.yaw);
+  const xr = x * c - y * s, yr = x * s + y * c;
+  const up = z * Math.cos(view.pitch) + yr * Math.sin(view.pitch);
+  return [w / 2 + xr * sc, h / 2 - up * sc];
+}
+function depth(p) {   // distance away from the viewer, along the view direction
+  const [x, y, z] = p, yr = x * Math.sin(view.yaw) + y * Math.cos(view.yaw);
+  return yr * Math.cos(view.pitch) - z * Math.sin(view.pitch);
+}
+function sizeCanvas(cv) {
+  const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  const W = Math.max(1, Math.round(r.width * d)), H = Math.max(1, Math.round(r.height * d));
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  return [W, H, d];
+}
+function hexRgb(c) {
+  const m = c.match(/^#([0-9a-f]{6})$/i);
+  if (!m) return [128, 128, 128];
+  const v = parseInt(m[1], 16); return [v >> 16, (v >> 8) & 255, v & 255];
+}
+function mix(a, b, f) {
+  const A = hexRgb(a), B = hexRgb(b);
+  return `rgb(${A.map((v, k) => Math.round(v + (B[k] - v) * f)).join(",")})`;
+}
+function reach(d) {
+  let m = 1;
+  for (const set of [d.start_orbit, d.target_orbit, d.r || []])
+    for (const p of set) m = Math.max(m, Math.hypot(p[0], p[1], p[2]));
+  return m;
+}
+
+// ---- the 3D view -------------------------------------------------------------
+function drawEarth(ctx, w, h, sc, dpr) {
+  const [cx, cy] = project([0, 0, 0], w, h, sc);
+  ctx.fillStyle = colors.earth; ctx.beginPath(); ctx.arc(cx, cy, sc, 0, 2 * Math.PI); ctx.fill();
+  ctx.strokeStyle = colors["earth-line"]; ctx.lineWidth = 0.8 * dpr;
+  const line = pts => {   // the front half of a graticule line
+    let on = false; ctx.beginPath();
+    for (const p of pts) {
+      const [u, v] = project(p, w, h, sc);
+      if (depth(p) <= 0) { on ? ctx.lineTo(u, v) : ctx.moveTo(u, v); on = true; } else on = false;
+    }
+    ctx.stroke();
+  };
+  const N = 72;
+  for (let lat = -60; lat <= 60; lat += 30) {
+    const r = Math.cos(lat * Math.PI / 180), z = Math.sin(lat * Math.PI / 180);
+    line(Array.from({ length: N + 1 }, (_, k) => [r * Math.cos(2 * Math.PI * k / N), r * Math.sin(2 * Math.PI * k / N), z]));
+  }
+  for (let lon = 0; lon < 180; lon += 30) {
+    const c = Math.cos(lon * Math.PI / 180), s = Math.sin(lon * Math.PI / 180);
+    line(Array.from({ length: N + 1 }, (_, k) => { const a = 2 * Math.PI * k / N; return [c * Math.cos(a), s * Math.cos(a), Math.sin(a)]; }));
+  }
+}
+function polyline(ctx, pts, w, h, sc, pick) {   // the points with pick(p) true, as runs
+  let on = false; ctx.beginPath();
+  for (const p of pts) {
+    const [u, v] = project(p, w, h, sc);
+    if (pick(p)) { on ? ctx.lineTo(u, v) : ctx.moveTo(u, v); on = true; } else on = false;
+  }
+  ctx.stroke();
+}
+function drawPathHalf(ctx, d, upto, w, h, sc, dpr, big, front) {
+  // the transfer in chunks shaded blue to gold, bright up to index upto and faint after
+  const r = d.r, n = r.length, chunks = 32, pick = front ? (p => depth(p) <= 0) : (p => depth(p) > 0);
+  for (let c = 0; c < chunks; c++) {
+    const a = Math.floor(c * (n - 1) / chunks), b = Math.floor((c + 1) * (n - 1) / chunks) + 1;
+    const color = mix(colors.path0, colors.path1, c / (chunks - 1));
+    if (a < upto) {
+      ctx.strokeStyle = color; ctx.globalAlpha = front ? 1 : 0.55; ctx.lineWidth = (big ? 1.4 : 0.9) * dpr;
+      polyline(ctx, r.slice(a, Math.min(b, upto + 1)), w, h, sc, pick);
+    }
+    if (b > upto) {
+      ctx.strokeStyle = color; ctx.globalAlpha = 0.14; ctx.lineWidth = (big ? 1 : 0.7) * dpr;
+      polyline(ctx, r.slice(Math.max(a, upto), b), w, h, sc, pick);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawOrbitHalf(ctx, pts, color, w, h, sc, dpr, front, dash) {
+  ctx.strokeStyle = color; ctx.lineWidth = 1.2 * dpr; ctx.globalAlpha = front ? 0.9 : 0.4;
+  ctx.setLineDash(dash ? [5 * dpr, 4 * dpr] : []);
+  polyline(ctx, pts, w, h, sc, front ? (p => depth(p) <= 0) : (p => depth(p) > 0));
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
+function drawOrbit(cv, d, tau, big) {
+  const [w, h, dpr] = sizeCanvas(cv), ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  const sc = 0.46 * Math.min(w, h) / reach(d);
+  const solved = !!d.r, n = solved ? d.r.length : 0, upto = solved ? Math.round(tau * (n - 1)) : 0;
+  // behind the Earth's centre first, then the Earth, then in front of it
+  for (const front of [false, true]) {
+    if (front) drawEarth(ctx, w, h, sc, dpr);
+    drawOrbitHalf(ctx, d.start_orbit, colors.start, w, h, sc, dpr, front, false);
+    drawOrbitHalf(ctx, d.target_orbit, colors.target, w, h, sc, dpr, front, true);
+    if (solved) drawPathHalf(ctx, d, upto, w, h, sc, dpr, big, front);
+  }
+  if (solved && big) {
+    const p = d.r[upto], u = d.u[upto], len = 0.16 * reach(d);
+    const [x0, y0] = project(p, w, h, sc), [x1, y1] = project(p.map((v, k) => v + len * u[k]), w, h, sc);
+    const hidden = depth(p) > 0 && Math.hypot(x0 - w / 2, y0 - h / 2) < sc;
+    ctx.globalAlpha = hidden ? 0.35 : 1;
+    ctx.strokeStyle = colors.thrust; ctx.lineWidth = 2 * dpr;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    const a = Math.atan2(y1 - y0, x1 - x0), hd = 7 * dpr;
+    ctx.fillStyle = colors.thrust; ctx.beginPath(); ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - hd * Math.cos(a - 0.45), y1 - hd * Math.sin(a - 0.45));
+    ctx.lineTo(x1 - hd * Math.cos(a + 0.45), y1 - hd * Math.sin(a + 0.45)); ctx.fill();
+    ctx.fillStyle = colors.craft; ctx.beginPath(); ctx.arc(x0, y0, 3.2 * dpr, 0, 2 * Math.PI); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  if (!solved && big) {
+    ctx.fillStyle = colors.muted; ctx.font = `${13 * dpr}px system-ui, sans-serif`;
+    ctx.fillText("Not solved: start and target orbits only", 10 * dpr, h - 12 * dpr);
+  }
+}
+
+// ---- the elements over time ----------------------------------------------------
+function seriesRows(d) {
+  const E = d.elements, km = d.length_unit_km;
+  const rows = [
+    ["a", "semi-major axis, km", E.a.map(v => v * km), v => v.toFixed(0)],
+    ["e", "eccentricity", E.e, v => v.toFixed(3)],
+    ["i", "inclination, °", E.i, v => v.toFixed(2)],
+    ["m", "mass, of the initial", E.m, v => v.toFixed(4)],
+    ["alpha", "steering in plane, °", E.alpha, v => v.toFixed(0)],
+    ["beta", "steering out of plane, °", E.beta, v => v.toFixed(0)]];
+  if (E.throttle) rows.push(["throttle", "throttle", E.throttle, v => v.toFixed(2)]);
+  return rows;
+}
+function drawSeries(cv, d, tau) {
+  const [w, h, dpr] = sizeCanvas(cv), ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = `${12 * dpr}px system-ui, sans-serif`; ctx.textBaseline = "middle";
+  if (!d.elements) {
+    ctx.fillStyle = colors.muted; ctx.fillText("Not solved: " + (d.message || ""), 0, h / 2); return;
+  }
+  const rows = seriesRows(d), gap = 10 * dpr, left = 150 * dpr, right = 8 * dpr, bottom = 18 * dpr;
+  const rh = (h - bottom - gap * (rows.length - 1)) / rows.length, t = d.elements.t, T = t[t.length - 1];
+  const X = s => left + (w - left - right) * s / T;
+  rows.forEach(([key, label, ys, fmt], j) => {
+    const top = j * (rh + gap);
+    let lo = Math.min(...ys), hi = Math.max(...ys);
+    if (key === "alpha" || key === "beta") { lo = Math.min(lo, -1); hi = Math.max(hi, 1); }
+    if (hi - lo < 1e-9 * Math.max(1, Math.abs(hi))) { lo -= 0.5; hi += 0.5; }
+    const Y = v => top + rh - (v - lo) / (hi - lo) * rh;
+    ctx.fillStyle = colors.muted; ctx.fillText(label, 0, top + rh / 2);
+    ctx.textAlign = "right";
+    ctx.fillText(fmt(hi), left - 6 * dpr, top + 5 * dpr); ctx.fillText(fmt(lo), left - 6 * dpr, top + rh - 5 * dpr);
+    ctx.textAlign = "left";
+    ctx.strokeStyle = colors.grid; ctx.lineWidth = dpr;
+    ctx.beginPath(); ctx.moveTo(left, top); ctx.lineTo(w - right, top); ctx.moveTo(left, top + rh); ctx.lineTo(w - right, top + rh); ctx.stroke();
+    ctx.strokeStyle = colors.series; ctx.lineWidth = 1.4 * dpr; ctx.beginPath();
+    // an angle that wraps from +180 to -180 is not joined across
+    ys.forEach((v, k) => { const x = X(t[k]), y = Y(v), wrap = key === "alpha" && k && Math.abs(v - ys[k - 1]) > 180;
+      k && !wrap ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  });
+  const days = T * d.time_unit_s / 86400;
+  ctx.fillStyle = colors.muted; ctx.textAlign = "right";
+  ctx.fillText(`${days < 2 ? (days * 24).toFixed(1) + " h" : days.toFixed(1) + " days"}`, w - right, h - bottom / 2);
+  ctx.textAlign = "left"; ctx.fillText("0", left, h - bottom / 2);
+  const x = left + (w - left - right) * tau;
+  ctx.strokeStyle = colors.ink; ctx.lineWidth = dpr; ctx.globalAlpha = 0.5;
+  ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h - bottom); ctx.stroke(); ctx.globalAlpha = 1;
+}
+
+// ---- state -------------------------------------------------------------------
+let manifest = [], current = null, playing = true, speed = 1, last = performance.now();
+const filters = { family: "all", j2: "all", status: "all", sort: "name" };
+const cards = new Map(), visible = new Set();
+const fmtDays = (tf, unit) => { const d = tf * unit / 86400; return d < 2 ? `${(d * 24).toFixed(1)} h` : `${d.toFixed(1)} days`; };
+
+function fmtCase(c) {
+  return c.solved ? `<span class="st ok">${c.seconds?.toFixed?.(2) ?? "?"} s</span>` : `<span class="st bad">unsolved</span>`;
+}
+function summary() {
+  const n = manifest.length, solved = manifest.filter(c => c.solved);
+  const times = solved.map(c => c.seconds);
+  const mean = times.length ? times.reduce((a, b) => a + b, 0) / times.length : NaN;
+  const revs = Math.max(0, ...solved.map(c => c.revolutions || 0));
+  document.getElementById("summary").innerHTML = [
+    [`${solved.length} / ${n}`, "solved"], [solved.filter(c => c.seconds < 60).length, "under 60 s"],
+    [isNaN(mean) ? "–" : `${mean.toFixed(2)} s`, "mean solve time"], [revs.toFixed(1), "most revolutions solved"]]
+    .map(([b, s]) => `<div class="stat"><b>${b}</b><span>${s}</span></div>`).join("");
+  const fams = [...new Set(manifest.map(c => c.family))];
+  document.getElementById("families").textContent = fams.map(f => {
+    const part = manifest.filter(c => c.family === f);
+    return `${f}: ${part.filter(c => c.solved).length} of ${part.length} solved`;
+  }).join(" · ");
+}
+function buildFilters() {
+  const fams = [...new Set(manifest.map(c => c.family))];
+  const el = document.getElementById("filters");
+  const group = (key, opts) => opts.map(([v, label]) =>
+    `<button data-k="${key}" data-v="${v}" class="${filters[key] === v ? "on" : ""}">${label}</button>`).join("");
+  el.innerHTML = group("family", [["all", "All"], ...fams.map(f => [f, f])]) + `<span class="sep"></span>`
+    + group("j2", [["all", "Any gravity"], ["two", "Two-body"], ["j2", "With J2"]]) + `<span class="sep"></span>`
+    + group("status", [["all", "Any"], ["solved", "Solved"], ["unsolved", "Unsolved"]]) + `<span class="sep"></span>`
+    + group("sort", [["name", "By thrust"], ["seconds", "By solve time"], ["revs", "By revolutions"]]);
+  el.querySelectorAll("button").forEach(b => b.onclick = () => { filters[b.dataset.k] = b.dataset.v; buildFilters(); buildGrid(); });
+}
+function order(a, b) {
+  if (filters.sort === "seconds") return (a.solved ? a.seconds : 1e9) - (b.solved ? b.seconds : 1e9);
+  if (filters.sort === "revs") return (a.revolutions ?? 1e9) - (b.revolutions ?? 1e9);
+  const fam = f => f;
+  return fam(a.family).localeCompare(fam(b.family)) || a.index - b.index || (a.j2 ? 1 : 0) - (b.j2 ? 1 : 0);
+}
+const io = new IntersectionObserver(es => es.forEach(e => {
+  const name = e.target.dataset.name;
+  if (e.isIntersecting) {
+    visible.add(name);
+    const c = cards.get(name);
+    if (!c.data) load(c.meta.file).then(d => { c.data = d; drawCard(c); }); else drawCard(c);
+  } else visible.delete(name);
+}), { rootMargin: "200px" });
+function buildGrid() {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = ""; io.disconnect(); visible.clear();
+  const famOf = c => c.family;
+  const list = manifest.filter(c => (filters.family === "all" || famOf(c) === filters.family)
+    && (filters.j2 === "all" || (filters.j2 === "j2") === !!c.j2)
+    && (filters.status === "all" || (filters.status === "solved") === c.solved)).sort(order);
+  if (!list.length) { grid.innerHTML = `<div class="empty">No cases match.</div>`; return; }
+  for (const meta of list) {
+    const el = document.createElement("div");
+    el.className = "card" + (current && current.name === meta.name ? " sel" : "");
+    el.dataset.name = meta.name;
+    el.innerHTML = `<canvas></canvas><div class="row"><span class="name">${meta.name}</span>${fmtCase(meta)}</div>`
+      + `<div class="sub">${meta.setting}${meta.revolutions ? ` · ${meta.revolutions.toFixed(1)} rev` : ""}</div>`;
+    el.onclick = () => select(meta.name, true);
+    grid.appendChild(el);
+    const prev = cards.get(meta.name);
+    cards.set(meta.name, { meta, el, canvas: el.querySelector("canvas"), data: prev?.data });
+    io.observe(el);
+  }
+}
+function drawCard(c) { if (c.data) drawOrbit(c.canvas, c.data, 1, false); }
+function redrawAll() {
+  for (const n of visible) drawCard(cards.get(n));
+  if (current) drawViewer();
+}
+
+// ---- viewer ------------------------------------------------------------------
+let vt = 0;   // fraction of the transfer shown
+async function select(name, scroll) {
+  const meta = manifest.find(c => c.name === name);
+  if (!meta) return;
+  current = await load(meta.file);
+  vt = 0; playing = true; document.getElementById("play").textContent = "Pause";
+  document.getElementById("viewer").hidden = false;
+  document.getElementById("v-name").textContent = current.name;
+  const d = current, orb = o => `a ${(o.a * d.length_unit_km).toFixed(0)} km, e ${o.e.toFixed(3)}, i ${o.i}°`;
+  document.getElementById("v-meta").innerHTML = (d.solved
+    ? `<span class="ok">Solved</span> in ${d.seconds.toFixed(2)} s · transfer time ${fmtDays(d.tf, d.time_unit_s)}`
+      + ` · ${d.revolutions.toFixed(1)} revolutions · ${(100 * (1 - d.mass_final)).toFixed(2)}% of the mass spent`
+    : `<span class="bad">Not solved</span> · ${d.message ?? ""}`)
+    + `<br>thrust ${d.thrust} g (${d.thrust_mm_s2.toPrecision(3)} mm/s² at the start), Isp ${d.isp_s.toFixed(0)} s, `
+    + (d.j2 ? "with J2" : "two-body")
+    + `<br>from ${orb(d.from)} to ${orb(d.to)}`;
+  document.querySelectorAll(".card").forEach(e => e.classList.toggle("sel", e.dataset.name === name));
+  if (location.hash.slice(1) !== name) history.replaceState(null, "", "#" + encodeURIComponent(name));
+  if (scroll) document.getElementById("viewer").scrollIntoView({ behavior: "smooth", block: "start" });
+  drawViewer();
+}
+function drawViewer() {
+  drawOrbit(document.getElementById("orbit"), current, Math.min(1, vt), true);
+  drawSeries(document.getElementById("series"), current, Math.min(1, vt));
+  document.getElementById("scrub").value = Math.round(Math.min(1, vt) * 1000);
+}
+document.getElementById("play").onclick = e => { playing = !playing; e.target.textContent = playing ? "Pause" : "Play"; };
+document.getElementById("scrub").oninput = e => { vt = e.target.value / 1000; playing = false;
+  document.getElementById("play").textContent = "Play"; drawViewer(); };
+document.getElementById("speed").onchange = e => speed = +e.target.value;
+(() => {   // drag to turn the view
+  const cv = document.getElementById("orbit"); let drag = null;
+  cv.addEventListener("pointerdown", e => { drag = [e.clientX, e.clientY, view.yaw, view.pitch]; cv.setPointerCapture(e.pointerId); cv.style.cursor = "grabbing"; });
+  cv.addEventListener("pointermove", e => {
+    if (!drag) return;
+    view.yaw = drag[2] + (e.clientX - drag[0]) * 0.01;
+    view.pitch = Math.max(-1.5, Math.min(1.5, drag[3] + (e.clientY - drag[1]) * 0.01));
+    redrawAll();
+  });
+  cv.addEventListener("pointerup", () => { drag = null; cv.style.cursor = "grab"; });
+})();
+
+function tick(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (current && current.r && playing) {
+    vt += dt * speed / PLAY_SECONDS;
+    if (vt > 1.15) vt = 0;   // hold the end briefly
+    drawViewer();
+  }
+  requestAnimationFrame(tick);
+}
+window.addEventListener("resize", redrawAll);
+
+fetch(DATA + "manifest.json").then(r => r.json()).then(m => {
+  manifest = m.cases;
+  summary(); buildFilters(); buildGrid();
+  const want = decodeURIComponent(location.hash.slice(1));
+  const first = manifest.find(c => c.name === want) || manifest.filter(c => c.solved).sort(order)[0] || manifest[0];
+  if (first) select(first.name, false);
+  requestAnimationFrame(tick);
+}).catch(err => {
+  document.getElementById("grid").innerHTML =
+    `<div class="empty">Could not load the census data (${err}). Export it with
+     <code>benchmarks/orbit_census.py OUT --export docs/_static/orbit_census/data</code>.</div>`;
+});
+</script>
+</body>
+</html>

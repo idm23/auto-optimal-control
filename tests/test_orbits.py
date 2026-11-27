@@ -31,3 +31,19 @@ def test_a_transfer_in_equinoctial_elements_derives_and_thrusts_along_minus_b():
         assert np.linalg.norm(star) == pytest.approx(1, rel=1e-12)
         b = np.array([float(sp.diff(D.hamiltonian_full, c).subs(point)) for c in u])
         assert star == pytest.approx(-b / np.linalg.norm(b), rel=1e-10)
+
+
+def test_the_fuel_transfers_direction_does_not_depend_on_the_throttle():
+    """With a throttle the thrust's direction is still -b/|b| with the throttle, thrust and
+    mass cancelled: the throttle's law (with c and lam_m in it) is not substituted into
+    it, and the regularized problem (a Max and a Min in the throttle's law) derives."""
+    from auto_optimal_control.homotopy import regularize
+
+    P = low_thrust_transfer(objective="fuel", zonal_degree=1)
+    for problem in (P, regularize(P)[0]):
+        D = derive(problem)
+        names = {str(s) for c in list(P.controls)[:3] for s in D.control_law[c].free_symbols}
+        assert not names & {"delta", "c", "lam_m", "T_max", "eps_reg"}
+        assert "lam_p" in names
+        # and the throttle's own law is free of every control
+        assert not D.control_law[P.controls[3]].free_symbols & set(P.controls)

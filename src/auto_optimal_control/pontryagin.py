@@ -298,13 +298,43 @@ def _eliminate_unit_vector(H, cs):
         for u in cs.controls:
             if not _is_zero(sp.diff(bi, u)):
                 raise ValueError(f"H must be linear in the unit vector {cs.controls}")
+    # A large b (an orbit transfer's) is past simplify(), which would cancel its common
+    # factors (thrust, throttle, mass) between b and ||b||: take them out first, so the
+    # direction does not depend on the throttle (it was substituted in, and the law grew
+    # tenfold).
     # factor() exposes common factors (thrust, throttle, mass) that the
     # square root can then pull out by their sign assumptions.
     norm = sp.sqrt(sp.factor(sp.Add(*[bi ** 2 for bi in b])))
-    law = {u: _simplified(-bi / norm) for u, bi in zip(cs.controls, b)}
+    raw = [-bi / norm for bi in b]
+    if all(sp.count_ops(e) <= SIMPLIFY_LIMIT_OPS for e in raw):
+        law = {u: sp.simplify(e) for u, e in zip(cs.controls, raw)}
+    else:
+        common = _common_nonnegative_factor(b)
+        b_dir = [sp.factor_terms(bi) / common for bi in b]
+        unit_norm = sp.sqrt(sp.factor(sp.Add(*[bi ** 2 for bi in b_dir])))
+        norm = common * unit_norm
+        law = {u: _simplified(-bi / unit_norm) for u, bi in zip(cs.controls, b_dir)}
     # H is linear in u, so H(u*) = H(0) + b . u* = H(0) - ||b||.
     H_star = H.subs({u: 0 for u in cs.controls}) - norm
     return law, H_star
+
+
+def _common_nonnegative_factor(exprs):
+    """The product of the factors, known to be nonnegative, that every nonzero one of
+    ``exprs`` has once its common terms are taken out (``factor_terms``)."""
+    common = None
+    for e in exprs:
+        if e == 0:
+            continue
+        counts = {}
+        for f in sp.Mul.make_args(sp.factor_terms(e)):
+            base, n = f.as_base_exp()
+            if n.is_Integer and base.is_nonnegative:
+                counts[base] = counts.get(base, 0) + int(n)
+        common = counts if common is None else {
+            x: (min(n, common[x]) if n > 0 else max(n, common[x]))
+            for x, n in counts.items() if x in common and (n > 0) == (common[x] > 0)}
+    return sp.Mul(*[x ** n for x, n in (common or {}).items()])
 
 
 def _eliminate_box(H, cs):
@@ -323,12 +353,22 @@ def _eliminate_box(H, cs):
         raise ValueError(
             f"cannot show d2H/d{u}2 = {d2} is positive. Declare the symbols it depends on "
             f"with positive=True if it is (a negative value means H has no minimum in {u})")
-    u_free = _simplified(u - d1 / d2)
+    u_free = u - d1 / d2
+    if sp.count_ops(u_free) > SIMPLIFY_LIMIT_OPS:
+        # Past simplify(), u would stay in its own law: d1 is linear in u, so the
+        # minimizer is -d1(u = 0) / d2 exactly.
+        u_free = -d1.subs(u, 0) / d2
+    else:
+        u_free = sp.simplify(u_free)
     law = u_free
+    # Evaluating Max and Min compares their arguments (factor_terms on each), which on
+    # a large law (a regularized throttle under J2) ran for over an hour: built as
+    # they stand above the limit, as _simplified leaves a large expression alone.
+    evaluate = sp.count_ops(u_free) <= SIMPLIFY_LIMIT_OPS
     if cs.lower.is_finite is not False:
-        law = sp.Max(law, cs.lower)
+        law = sp.Max(law, cs.lower, evaluate=evaluate)
     if cs.upper.is_finite is not False:
-        law = sp.Min(law, cs.upper)
+        law = sp.Min(law, cs.upper, evaluate=evaluate)
     return {u: law}, None
 
 
@@ -367,6 +407,8 @@ def _resolve(law, controls):
     for _ in range(len(controls) + 1):
         changed = False
         for u, expr in resolved.items():
+            if not expr.free_symbols & resolved.keys():
+                continue          # subs() would only walk it: minutes on an orbit's law
             new = expr.subs(resolved)
             if new != expr:
                 resolved[u] = new
