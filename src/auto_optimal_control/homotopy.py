@@ -103,6 +103,23 @@ from auto_optimal_control.shooting import (MultiArcShooting, ShootingError, Sing
 PATH_JACOBIAN_RTOL = 1e-7
 SEED_ACCEPT = 100.0                # a seed is a guess: how far above tol a stalled Newton may stop
 
+#: Where the smoothing starts for a bang-bang control with a cost of its own, ``a u``:
+#: this fraction of ``|a| half`` (:meth:`Homotopy._first_eps`), so that at zero
+#: costates the control is past its bound (below 1 is enough). On nine minimum-fuel
+#: raises of the orbit census, 0.06 solved all nine and 0.5 seven (Observation O14).
+FIRST_EPS_FRACTION = 0.06
+
+#: A reading is ready for exact candidates when the stretches of a bang-bang control
+#: strictly between its bounds, other than those read as singular, take at most this
+#: share of the horizon; READY_EARLY with rule R91 (Lemma FX: what such a candidate
+#: converges to is an extremal however early it is tried).
+READY_RAMPS = 0.05
+READY_EARLY = 0.3
+
+#: An exact answer with bang-bang controls is rejected when its residual, evaluated
+#: again without the STM, exceeds this (or a hundred times the solve's own).
+REPLAY_TOLERANCE = 1e-6
+
 EPS = "eps_reg"
 RHO = "rho_reg_"
 OFF = "off_reg_"
@@ -531,6 +548,9 @@ class Homotopy:
         self.parallel = 0
         self.variants = 3
         self.candidate_seconds = 2.0
+        #: Rule R91: exact candidates from readings whose ramps take up to READY_EARLY of
+        #: the horizon, not READY_RAMPS (see :meth:`_candidates`).
+        self.early_candidates = False
         self.bang_bang = bang_bang_controls(problem)
         # A numeric secondary weight is a runtime parameter of the kernels, after the
         # problem's own: rule R24 walks it down to its value along the route.
@@ -1080,7 +1100,7 @@ class Homotopy:
                 # Ready: the ramps not read as singular are short.
                 rest = sum(b - a for u, subset in sing for a, b in ramps[u]
                            if (a, b) not in subset)
-                if rest > 0.05 * T:
+                if rest > (READY_EARLY if self.early_candidates else READY_RAMPS) * T:
                     continue
                 items = sorted(list(limits) + [("singular", u, a, b) for u, subset in sing
                                                for a, b in subset], key=lambda it: it[2])
@@ -1265,6 +1285,16 @@ class Homotopy:
         """None if an exact solution passes every check, else the check it fails."""
         if not sol.success or not np.isfinite(sol.residual_norm):
             return "not converged"
+        if getattr(shoot.kernels, "N_SWITCHING", 0):
+            # The solve's propagations carry the STM, whose error control takes shorter
+            # steps; the residual alone is what the answer is replayed with. A switch
+            # pair one of them steps over gives two different extremals (Observation O14).
+            try:
+                again = float(np.linalg.norm(shoot.residual(sol.v)))
+            except _FAILURES:
+                again = np.inf
+            if not again <= max(REPLAY_TOLERANCE, 100 * sol.residual_norm):
+                return "replay disagrees"
         if sol.max_violation > 1e-7:
             return "limit violated off its arcs"
         if not isinstance(shoot, MultiArcShooting) or not shoot.arcs:
@@ -3845,8 +3875,9 @@ class Homotopy:
 
         ``params`` are the values of the stated problem's parameters; the
         policy, if one applies, is handled here (see :class:`Homotopy`).
-        The options are those of :meth:`_solve`. Returns a
-        :class:`HomotopyResult`.
+        ``start``, an exact result of this problem at other parameters, is continued
+        to these first (:meth:`_from_neighbour`); the rest of the options are those of
+        :meth:`_solve`. Returns a :class:`HomotopyResult`.
         """
         params = np.asarray(params, dtype=float).reshape(-1)
         if len(params) != len(self.stated.params):
@@ -3863,8 +3894,14 @@ class Homotopy:
             # Every propagation fails past the budget, so one long draw or root-find
             # cannot carry the solve far beyond it (a 300 s cap ran to 551 s).
             SingleShooting.deadline = self._solve_end
+        start = options.pop("start", None)
         try:
-            if self._stages is None:
+            r = None
+            if start is not None and self._stages is None:
+                r = self._from_neighbour(start, params, options.get("tol", 1e-10))
+            if r is not None:
+                pass
+            elif self._stages is None:
                 r = self._solve(params, costates, final_time, **options)
                 left = None if self._solve_end is None else self._solve_end - time.perf_counter()
                 if not r.exact and self.reversal and (left is None or left > 0):
@@ -4033,7 +4070,7 @@ class Homotopy:
         r.message = (f"t_f = (1 + {self.policy.delta}) * {max(times):.12g}; " + r.message)
         return r
 
-    def _solve(self, params, costates, final_time=None, *, n_tries=200, seed=0, eps0=1.0,
+    def _solve(self, params, costates, final_time=None, *, n_tries=200, seed=0, eps0=None,
                s_max=10.0, max_steps=300, n_jitter=6, tol=1e-10):
         """The automatic solve of ``self.problem`` (the stated problem with its policy).
 
@@ -4044,7 +4081,8 @@ class Homotopy:
         likewise for ``t_f`` (required when it is free). At most ``n_tries``
         random draws are made, from ``seed`` (an int or a
         ``numpy.random.Generator``). ``eps0`` is the first smoothing weight
-        and ``s_max`` how many decades ``eps`` may fall; ``n_jitter`` is the
+        (by default :meth:`_first_eps`) and ``s_max`` how many decades ``eps`` may
+        fall; ``n_jitter`` is the
         number of extra seeds, with perturbed junction times, per candidate
         structure. Returns a :class:`HomotopyResult`.
         """
@@ -4054,6 +4092,8 @@ class Homotopy:
             raise ValueError(f"expected {len(self.problem.params)} parameters "
                              f"{[str(p) for p in self.problem.params]}, got {len(params)}")
         self.params = params
+        if eps0 is None:
+            eps0 = self._first_eps(params)
         if self.kr.FREE_FINAL_TIME and final_time is None:
             raise ValueError("the final time is free: give a final_time distribution")
         broken = self._limits_broken_at_the_ends()
@@ -4292,6 +4332,103 @@ class Homotopy:
         shoot, sol = best if best is not None else (shoot, state["sol"])
         return HomotopyResult(sol, shoot, (), False, np.nan, shoot.params, steps, tries,
                               "no exact structure accepted before the continuation ended")
+
+    def _first_eps(self, params):
+        """The first smoothing weight: 1, or less where a bang-bang control's own cost asks.
+
+        A control ``u`` in ``[lo, hi]`` whose running cost has a term ``a u`` is, with
+        the costates at zero, held at ``mid - a half^2 / eps`` by the smoothing
+        (:func:`regularize`). Far above ``|a| half`` that is ``mid`` whatever the
+        costates, so the regularized problem barely sees its cost: when holding ``u``
+        at ``mid`` already meets the ends, the costates shrink to zero and the
+        extremal is degenerate. The continuation stalled there for every
+        minimum-fuel transfer of the orbit census whose time to spare let a
+        constant throttle reach the target (Observation O14). From
+        ``FIRST_EPS_FRACTION |a| half``, ``u`` at zero costates is past its bound and
+        the ends must be met through the costates. ``a`` is taken at the parameters
+        and the initial state; a control without such a term leaves 1."""
+        cost = self.problem.running_cost
+        values = dict(zip(self.problem.params, params))
+        values.update({s: sp.sympify(e).subs(values)
+                       for s, e in self.problem.initial_state.items()})
+        values[self.problem.time] = sp.sympify(self.problem.initial_time).subs(values)
+        boxes = {cs.control: cs for cs in self.problem.control_sets if isinstance(cs, Box)}
+        eps = 1.0
+        for u in self.bang_bang:
+            a = sp.diff(cost, u)
+            if a == 0 or u in a.free_symbols:
+                continue
+            half = (boxes[u].upper - boxes[u].lower) / 2
+            try:
+                scale = abs(float((a * half).subs(values)))
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(scale) and scale > 0:
+                eps = min(eps, FIRST_EPS_FRACTION * scale)
+        return eps
+
+    def _from_neighbour(self, start, params, tol, min_step=1.0 / 64):
+        """The exact extremal at ``params`` continued from ``start``, an exact
+        :class:`HomotopyResult` of this problem at other parameters, or None.
+
+        The parameters move on the segment from ``start.params``' own (the problem's
+        part of them) to ``params``, the structure ``start.arcs`` held. Each step is an
+        exact solve from the last answer, its length halved on failure down to
+        ``min_step`` and grown after a success. The end is judged by :meth:`_verdict`.
+        A neighbour on a ladder (a thrust above, the same transfer without J2) is
+        within a few steps; one whose structure differs fails, and the solve goes on
+        from the costate draws."""
+        if start is None or not getattr(start, "exact", False) or start.solution is None:
+            return None
+        n_own = len(self.problem.params)
+        p0 = np.asarray(start.params, dtype=float)[:n_own]
+        p1 = np.asarray(params, dtype=float).reshape(-1)
+        if p0.shape != p1.shape:
+            return None
+        kx = self.exact_kernels
+        arcs = list(start.arcs or ())
+        v = np.asarray(start.solution.v, dtype=float).copy()
+        method = "lm" if kx.N_SWITCHING else "hybr"
+        sigma, ds, steps = 0.0, 1.0, 0
+
+        def shooting_at(s):
+            self.params = (1 - s) * p0 + s * p1
+            px = self.exact_params()
+            if arcs:
+                return self._multi_arc(kx, px, arcs, max_nfev=self.attempt_nfev, **self.options)
+            return SingleShooting(kx, px, **self.options)
+
+        try:
+            while sigma < 1.0:
+                if self._solve_end is not None and time.perf_counter() > self._solve_end:
+                    return None
+                s = min(1.0, sigma + ds)
+                try:
+                    sh = shooting_at(s)
+                    sol = sh.solve(v, method=method, tol=_scaled(tol, v),
+                                   options=_budget(method, self.attempt_evaluations))
+                except _FAILURES:
+                    sol = None
+                if sol is not None and sol.success:
+                    sigma, v, steps = s, sol.v, steps + 1
+                    ds = min(2 * ds, 1.0)
+                    continue
+                ds /= 2
+                if ds < min_step:
+                    self._say(f"from the neighbour: stalled at {sigma:.3f}")
+                    return None
+            self.params = p1
+            if not self._accept(sh, sol, _scaled(tol, v)):
+                return None
+            J = self.objective(sh, sol.v)
+        except _FAILURES:
+            return None
+        finally:
+            self.params = p1
+        self._say(f"from the neighbour in {steps} steps")
+        return HomotopyResult(sol, sh, tuple(arcs), True, J, sh.params,
+                              [Step(1.0, np.nan, np.zeros(0), sol.residual_norm)], 0,
+                              f"exact from a neighbour in {steps} steps")
 
     def _regularized_cost(self, shoot, v):
         x0, lam0, _, tf = shoot.unpack(v)

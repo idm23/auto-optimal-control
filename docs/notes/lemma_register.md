@@ -1908,6 +1908,123 @@ then probed where it stops. Measured on node-1 and core.
   answer that passes. It does not reach the event above. The other three cases are
   still unsolved.
 
+### ZC. Above its own cost's scale, the smoothing makes zero costates an extremal — proved (elementary), sketch (the degeneracy)
+
+*Setting.* A bang-bang control $u \in [\ell, h]$ (mid $c$, half-width $r$) enters the
+running cost as $a\,u$ with $a$ free of $u$, and the regularized problem adds
+$\varepsilon\,((u - c)/r)^2/2$ (`regularize`). Its law is
+$u^* = \mathrm{clip}(c - r^2 (a + \lambda^\top f_u)/\varepsilon)$.
+
+1. *At zero costates* $u^* = \mathrm{clip}(c - a r^2/\varepsilon)$, a constant. It is
+   strictly inside $[\ell, h]$ when $\varepsilon > |a|\,r$, and at the bound
+   $\ell$ ($a > 0$) or $h$ ($a < 0$) when $\varepsilon \le |a|\,r$. *Proof:*
+   $|a| r^2/\varepsilon < r$ exactly when $\varepsilon > |a| r$.
+2. *A minimum-fuel transfer* (`orbits.low_thrust_transfer(objective="fuel")`):
+   $a = T/c$, $r = 1/2$, the direction is $-b/\|b\|$ and $S = (T/c)(1 - \lambda_m)
+   - (T/m)\|b\|$, with $\lambda_m' = -\delta T\|b\|/m^2$ along an extremal. Then
+   $S' = -(T/m)\,\|b\|'$ exactly: the mass terms cancel. A throttle constant along an
+   extremal is $\|b\|$ constant.
+3. *Sketch (the degeneracy).* Where $\varepsilon > |a| r$ and the constant throttle of
+   (1), steered by any direction, meets the ends, a family of extremals has
+   $\|\lambda\| \to 0$: the direction depends only on $\lambda / \|\lambda\|$, the
+   throttle on $\|\lambda\|$ only at order $\|\lambda\| r^2/\varepsilon$. The shooting
+   map's Jacobian loses rank along $\|\lambda\|$ there, and the continuation in
+   $\varepsilon$ stalls where the throttle of (1) falls below what the ends need.
+   From $\varepsilon_0 \le |a| r$ the ends must be met through the costates, and
+   that branch does not arise.
+
+*Use.* `Homotopy._first_eps` starts the smoothing at `FIRST_EPS_FRACTION` $|a| r$ (0.06)
+for a control with such a term; others start at 1 as before (Observation O14).
+
+### FX. A free candidate's answer is an extremal however early it is tried — proved, relative to the kernels' switch events
+
+*Setting.* `Homotopy._attempt` builds, from a reading, candidates whose items are the
+special arcs (boundary, touch, singular) and, for a control with singular arcs, the
+switches between its held bounds. A candidate without items is the exact problem's
+single shooting, on kernels whose bang-bang controls switch at the zeros of their
+switching functions, located as events (`Switching`).
+
+*Claim.* An accepted answer satisfies the maximum principle's first-order conditions,
+and readiness (`READY_RAMPS`, `READY_EARLY`) changes only which readings are tried.
+*Proof.* Without items the control is the law $\arg\min_u H$ at every instant: the
+integration switches at each zero of $S$ it meets, whatever the reading said, and the
+residual is the boundary conditions. A converged solve is therefore an extremal. With
+items, the verdict (`_verdict`) checks the multipliers, the Legendre condition and
+the held signs, as for a late reading. Neither depends on when the reading was taken.
+$\square$
+
+*Cost.* A candidate tried before it is ready fails its exact solve and spends that
+solve's evaluations (`attempt_evaluations`); rule R91 is judged on that trade.
+
+### Observation O14: minimum fuel on the orbit census's raise (2026-11-27)
+
+The coplanar raise from 1.1 to 1.3 Earth radii (`orbit_census.py`, family `fuel`), with
+the throttle in $[0, 1]$ and $t_f$ fixed at 1.2, 1.5 and 2 times the minimum time, at
+0.05, 0.01 and 0.002 g. Measured on node-1, one case at a time, a 300 s cap.
+
+- **The first probe: 2 of 9.** The other seven stopped where the continuation in
+  $\varepsilon$ stalled. At the stall the throttle was constant along the whole
+  transfer, to every digit at 2001 samples: 0.4065 (0.05 g, 1.5 times), 0.2284
+  (0.05 g, 2 times), 0.4933 (0.01 g, 2 times), 0.49987 (0.002 g, 2 times). This is
+  Lemma ZC's degenerate branch: the smoothing started at $\varepsilon = 1$, above
+  $|a| r = T/(2c)$ (0.0067 at 0.05 g). The two that solved are the ones whose ends
+  need more than the constant throttle at the start.
+- **Where the smoothing starts.** $\varepsilon_0 = k\,T/c$, the same nine cases, each
+  case's time after the exact kernels were built:
+
+  | $\varepsilon_0$ | Solved | Mean of the solved |
+  |---|---|---|
+  | $1$ (before) | 2 of 9 | |
+  | $0.25\,T/c$ | 7 of 9 | 83 s |
+  | $0.03\,T/c$ | 9 of 9 | 127 s |
+  | $0.25\,T/c$ with R91 | 9 of 9 | 67 s |
+
+  `FIRST_EPS_FRACTION` is 0.06, i.e. $0.03\,T/c$ here.
+- **Where the time went.** Below $\varepsilon \approx 10^{-5}$, a continuation step
+  takes 10 to 75 s: MINPACK solves of about 60 propagations at 0.2 s each, the
+  smoothed throttle steeper at every step. Candidates came only near
+  $\varepsilon = 10^{-7}$. On one case (0.01 g, 1.2 times) the ramps still took 12.6% of
+  the horizon at $\varepsilon = 3 \times 10^{-8}$, so no candidate was ever read: the
+  switching function grazes zero there. Rule R91 reads candidates once the ramps take
+  under 30%; Lemma FX makes that safe.
+- **The first fuel solve paid for the exact kernels.** They are built on first use,
+  and their singular-arc derivation for the throttle took about 8 minutes on node-1,
+  inside the first case's cap. The census builds them before timing. The throttle has
+  no singular-arc kernels in the end (`SINGULAR_ARCS = [False]`).
+- **Three accepted answers missed their target.** The first census of the family (18
+  cases) accepted `fuel2`, `fuel7` and `jfuel4` with residuals of $10^{-13}$, but
+  replayed they ended 0.2, $4.6 \times 10^{-3}$ and 0.055 from the target. `fuel2`
+  replayed spent no propellant. Their residuals evaluated again were the same large
+  numbers. The solve converged on propagations with the STM. Without it, on the same
+  kernels, from the same point:
+
+  | Case | With the STM | Without it |
+  |---|---|---|
+  | `fuel2` | switches at 1.715, 2.493, 5.869, 6.601; 546 evaluations | none; 62 evaluations |
+  | `fuel7` | 14 switches | 12: the pair at 24.18, 24.81 missing |
+  | `jfuel4` | 1.913, 7.307, 7.802, 9.974 | 1.913, 11.06 |
+
+  On a coast the elements barely move, so without the STM's error control the steps grew
+  to over 1 time unit, and a whole burn fell inside one step. The switching functions'
+  guards were tested only at the steps' ends: the kernels tested inside every step only
+  when the problem had path constraints. They now test inside every step when it has
+  bang-bang controls too. `_verdict` now evaluates an exact answer's residual again
+  without the STM, and rejects one that disagrees ("replay disagrees",
+  `REPLAY_TOLERANCE`).
+- **The census of the family**, with all of the above and R91 (18 cases): 15 of 18,
+  every answer within $4.3 \times 10^{-8}$ of its target and spending 2.029 to 2.286% of
+  the mass (the Hohmann transfer: 2.028%). The three left were the 0.002 g cases with J2.
+  A step below $\varepsilon = 10^{-7}$ took 234 s on one of them. Starting each J2 case
+  from its two-body twin's exact answer (`Homotopy.solve(start=)`, a continuation in the
+  parameters with the structure held) solves two of them, in 24.5 and 31.2 s: 17 of 18,
+  a mean of 70.6 s. Where J2 changes the number of switches the continuation fails, and
+  the case goes on from the draws.
+- **What is not guaranteed.** Four interior tests per step find a switch pair whose
+  burn is longer than a fifth of the step. A shorter one could still be stepped over by
+  both propagations. Events on the switching functions' rates would split each step at
+  $S$'s extrema, as the path constraints' rates do for $g$; they cost a right-hand side
+  at every test.
+
 ### KD. With a diagonal control Hessian, the riding system is an $s \times s$ system — proved (elementary)
 
 - **Setting.** A riding solve (riding.py) for a set of $s$ limits, with the controls in

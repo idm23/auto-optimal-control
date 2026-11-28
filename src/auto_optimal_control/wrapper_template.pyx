@@ -904,7 +904,7 @@ cdef int _setup_options(fni_options* opt, double rtol, double atol, first_step,
     if n_interior < 0:
         raise ValueError("n_interior must be non-negative")
     fni_options_init(opt)
-    if NC and n_interior:
+    if (NC or NSW) and n_interior:
         opt.event_detection = FNI_EVENTS_INTERIOR
         opt.n_interior = n_interior
     opt.rtol = rtol
@@ -1000,11 +1000,13 @@ def propagate(double t0, z0, double t1, params=None, *, stm=False, param_sensiti
         status -4 and ``t`` is the time of the violation (``t0`` if ``z0``
         already violates one).
     n_interior : int
-        With path constraints, also test the guards' signs at this many
-        points inside every step (FNI's ``event_detection="interior"``), so a
-        peak and a trough of ``g`` in the same step are told apart. ``0``
-        tests only the ends of each step. The peaks and troughs of ``g`` are
-        guards too, so between test points ``g`` crosses zero at most once.
+        With path constraints or bang-bang controls, also test the guards' signs at
+        this many points inside every step (FNI's ``event_detection="interior"``), so a
+        peak and a trough of ``g`` in the same step are told apart, and so is a
+        switching function's pair of zeros: on a smooth coast the steps grow long,
+        and a whole burn of a minimum-fuel transfer fit inside one (Observation
+        O14). ``0`` tests only the ends of each step. The peaks and troughs of ``g``
+        are guards too, so between test points ``g`` crosses zero at most once.
     constraint_events : bool
         ``False`` ignores the path constraints: no crossings are located and
         their penalties stay off. Exact multi-arc shooting uses this on the

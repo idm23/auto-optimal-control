@@ -213,3 +213,33 @@ def test_saturation_kinks_restart_the_step(compiled):
     tr = k.trajectory(0.0, z0, 2.0, p, t_eval=[2.0], **KW)
     np.testing.assert_allclose(tr["z"][0, :2], [x, v], atol=1e-11)
     assert len(tr["switch_times"]) == 0
+
+
+def test_a_short_burn_inside_one_long_coast_step_is_found(kernel_cache):
+    """A minimum-fuel triple integrator coasts on polynomials, so the integrator's steps
+    grow long; its switching function ``S = 1 + lambda_a`` is a quadratic in time that
+    dips below zero on [3.7, 6.3] inside one such step. The guards are tested inside
+    every step (``n_interior``), with or without the STM, so both find the burn: tested
+    only at the ends, the plain propagation stepped over a minimum-fuel transfer's burn
+    that the STM's shorter steps found (Observation O14)."""
+    import sympy as sp
+
+    from auto_optimal_control.build import build_kernels
+    from auto_optimal_control.pontryagin import derive
+    from auto_optimal_control.problem import Box, OptimalControlProblem
+
+    t, x, v, a, u = sp.symbols("t x v a u", real=True)
+    problem = OptimalControlProblem(
+        name="triple_integrator_fuel", time=t, states=[x, v, a], controls=[u],
+        dynamics=[v, a, u], running_cost=u, initial_state=[0, 0, 0],
+        final_state={x: 1, v: 0, a: 0}, final_time=10, control_sets=[Box(u, 0, 1)])
+    k = build_kernels(derive(problem), cache_dir=kernel_cache)
+    # lambda_a(t) = lambda_a0 - lambda_v0 t + lambda_x0 t^2 / 2, so S = 0.01 (t - 5)^2 - 0.0169.
+    z0 = np.array([0.0, 0.0, 0.0, 0.02, 0.1, 0.25 - 0.0169 - 1.0])
+    runs = [k.propagate(0.0, z0, 10.0, None, stm=stm, rtol=1e-12, atol=1e-12)
+            for stm in (False, True)]
+    for r in runs:
+        np.testing.assert_allclose(r["switch_times"], [3.7, 6.3], atol=1e-9)
+    np.testing.assert_allclose(runs[0]["z"], runs[1]["z"], rtol=0, atol=1e-10)
+    # The burn's thrust is felt: a = the burn's length after it, 2.6.
+    assert runs[0]["z"][2] == pytest.approx(2.6, abs=1e-9)

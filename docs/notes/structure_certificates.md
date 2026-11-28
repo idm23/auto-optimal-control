@@ -3153,3 +3153,21 @@ Crossed junctions on the path are mostly transient. R10 lets the residual throug
 and the next step or R41's reorder puts them back in order. Retiring at the first
 crossing changes the structure where the route did not need to. On vgoal 0 at 70% itself
 the loop ends, but the route stalls later on a touch (O13) and the case stays unsolved.
+
+### Candidates read while the ramps are still wide: Rule R91
+
+*What it was.* A reading yields exact candidates only once each bang-bang control's
+ramps, its stretches strictly between its bounds that are not read as singular, take at
+most 5% of the horizon (`READY_RAMPS`). On a minimum-fuel orbit raise (Observation O14)
+that waits for $\varepsilon \approx 10^{-7}$, where a continuation step costs 10 to 75 s,
+and on one case the ramps never fall that far: the switching function grazes zero.
+
+*Rule R91* (`Homotopy.early_candidates`, Lemma FX). Candidates are read once the ramps
+take at most 30% of the horizon (`READY_EARLY`). A candidate with no special arcs is the
+exact single shooting, whose switches are the zeros of $S$ located as events, so what it
+converges to is an extremal however early it is tried; the verdict checks the others as
+before. A candidate tried too early costs its exact solve.
+
+*On the nine two-body raises of O14, with* $\varepsilon_0 = 0.25\,T/c$: 9 of 9 solve with
+R91, in 67 s on average, against 7 of 9 in 83 s without it. It is on in the orbit
+census's minimum-fuel cases (`FUEL_RULES`), and off by default.

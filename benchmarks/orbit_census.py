@@ -17,7 +17,8 @@ Each case is two-body; ``j`` before its name (``jraise3``) adds the Earth's J2. 
 speed is that of a 3000 s ion engine throughout. The final time is searched in [0.3, 4]
 times Edelbaum's estimate ``dv / T`` and the costates in a box of half-width ``1 / T``
 (a minimum-time costate is how the arrival time moves with the elements). The page's
-rule configuration (``RULES``) is the arm census's of 2026-11-25, before R90.
+rule configuration (``RULES``) is the arm census's of 2026-11-25, before R90, with R91
+(``FUEL_RULES``) on for minimum fuel.
 
 ``--cap`` is the wall-clock budget of a case (``Homotopy.solve_seconds``) and a case over
 it is a failure. ``--export`` writes each case for the census page
@@ -41,8 +42,10 @@ from orbitprop import EARTH, CanonicalUnits, keplerian_to_equinoctial
 sys.path.insert(0, str(Path(__file__).resolve().parent))   # importable from anywhere
 from orbit_export import export_case, write_manifest  # noqa: E402
 
-RULES = ("R1 R2 R15 R16 R20 R25 R26 R29 R32 R41 R43 R48 R50 R54 R55 R60 R61 R63 R64 R65 "
-         "R66 R28 R72 R74 R75 R78").split()
+RULES = tuple(("R1 R2 R15 R16 R20 R25 R26 R29 R32 R41 R43 R48 R50 R54 R55 R60 R61 R63 R64 R65 "
+               "R66 R28 R72 R74 R75 R78").split())
+# and for minimum fuel, the throttle's early candidates (R91, Observation O14)
+FUEL_RULES = ("R91",)
 UNITS = CanonicalUnits.of(EARTH)
 C = 3000 * 9.80665 / 1000 / UNITS.speed          # Isp 3000 s
 R = EARTH.radius
@@ -54,7 +57,17 @@ FAMILIES = {
     "gto": ((((2 * R + 250 + 35786) / 2 / R, (35786 - 250) / (2 * R + 250 + 35786), 7),
              (42164.137 / R, 0, 0)), (0.01, 0.003, 0.001, 0.0003)),
 }
-H = None
+# Minimum fuel: the coplanar raise at three of its rungs, with t_f fixed at multiples of
+# the rung's minimum time (the census of 2026-11-26, two-body and with J2).
+FUEL_RUNGS = (0, 2, 4)                  # raise0, raise2, raise4: 0.05, 0.01, 0.002 g
+FUEL_FACTORS = (1.2, 1.5, 2.0)
+MIN_TIME = {(0, False): 3.5836497325604464, (2, False): 7.776290810352053,
+            (4, False): 38.302137443747554, (0, True): 3.5877499037007574,
+            (2, True): 7.789408936905352, (4, True): 38.379028737254295}
+H = {}
+# Exact answers of this run, by case: a J2 minimum-fuel case starts from its two-body
+# twin's (``Homotopy.solve(start=)``), so the twin must come first.
+SOLVED = {}
 ARGS = None
 
 
@@ -67,17 +80,21 @@ def edelbaum(a0, i0, af, i_f):
 
 
 def case_names():
-    return [f"{j}{fam}{i}" for fam, (_, ladder) in FAMILIES.items() for j in ("", "j")
-            for i in range(len(ladder))]
+    sizes = {**{fam: len(ladder) for fam, (_, ladder) in FAMILIES.items()},
+             "fuel": len(FUEL_RUNGS) * len(FUEL_FACTORS)}
+    return [f"{j}{fam}{i}" for fam, n in sizes.items() for j in ("", "j") for i in range(n)]
 
 
 def case(name):
     """The census case ``name``: its family, J2, thrust, parameters and search boxes."""
-    j2 = name.startswith("j") and name[1:].rstrip("0123456789") in FAMILIES
+    known = set(FAMILIES) | {"fuel"}
+    j2 = name.startswith("j") and name[1:].rstrip("0123456789") in known
     base = name[1:] if j2 else name
     fam = base.rstrip("0123456789")
-    if fam not in FAMILIES or fam == base:
+    if fam not in known or fam == base:
         raise KeyError(f"no census case {name!r}")
+    if fam == "fuel":
+        return _fuel_case(int(base[len(fam):]), j2)
     (start, target), ladder = FAMILIES[fam]
     i = int(base[len(fam):])
     T = ladder[i]
@@ -95,41 +112,82 @@ def case(name):
             "final_time": (0.3 * est, 4 * est)}
 
 
+def _fuel_case(i, j2):
+    """``fuel<i>``: the raise at rung ``FUEL_RUNGS[i // 3]`` with the throttle free in [0, 1]
+    and ``t_f`` fixed at ``FUEL_FACTORS[i % 3]`` times that rung's minimum time. The
+    costates are in a box of half-width ``1 / c``: a minimum-fuel costate is how the
+    propellant spent moves with the elements, and the thrust's cost is ``T delta / c``."""
+    if not 0 <= i < len(FUEL_RUNGS) * len(FUEL_FACTORS):
+        raise KeyError(f"no census case {'j' if j2 else ''}fuel{i}")
+    rung, factor = FUEL_RUNGS[i // len(FUEL_FACTORS)], FUEL_FACTORS[i % len(FUEL_FACTORS)]
+    base = case(("j" if j2 else "") + f"raise{rung}")
+    t_min = MIN_TIME[(rung, j2)]
+    tf = factor * t_min
+    T = base["T"]
+    return {**base, "family": "fuel", "objective": "fuel",
+            "setting": f"T = {T:g} g, {factor:g}× the minimum time" + (", J2" if j2 else ""),
+            "params": [*base["params"], tf], "tf_min": t_min, "tf_factor": factor,
+            "mass_min_time": 1 - T * t_min / C, "tf_estimate": tf,
+            "costates": ([-1 / C] * 7, [1 / C] * 7), "final_time": None}
+
+
+def _homotopy(objective):
+    """The census's solver for ``objective``, built on first use (outside a case's time):
+    minimum fuel's exact kernels carry the throttle's singular arcs, minutes to
+    generate, so they are built here too."""
+    if objective not in H:
+        args = ARGS
+        h = Homotopy(low_thrust_transfer(objective=objective, zonal_degree=2),
+                     cache_dir=args.cache)
+        for r in RULES + (FUEL_RULES if objective == "fuel" else ()):
+            rules.set_rule(h, r, True)
+        for item in args.rule or []:
+            name, state = item.split("=", 1)
+            rules.set_rule(h, name, state.lower() in ("on", "1", "true"))
+        h.solve_seconds = args.cap
+        h.active_set_seconds = args.cap
+        h.parallel_routes = args.parallel_routes
+        if h.bang_bang:
+            h.exact_kernels
+        H[objective] = h
+        print(f"{objective}: rules on:",
+              ", ".join(n for n, on in rules.enabled(h).items() if on), flush=True)
+    return H[objective]
+
+
 def setup(args):
-    global H, ARGS
+    global ARGS
     ARGS = args
     warnings.simplefilter("ignore")
-    H = Homotopy(low_thrust_transfer(objective="time", zonal_degree=2), cache_dir=args.cache)
-    for r in RULES:
-        rules.set_rule(H, r, True)
-    for item in args.rule or []:
-        name, state = item.split("=", 1)
-        rules.set_rule(H, name, state.lower() in ("on", "1", "true"))
-    H.solve_seconds = args.cap
-    H.active_set_seconds = args.cap
-    H.parallel_routes = args.parallel_routes
-    print("rules on:", ", ".join(n for n, on in rules.enabled(H).items() if on), flush=True)
 
 
 def run(name):
     c, r = None, None
     try:
         c = case(name)
-        H.snapshot_tag = name
+        h = _homotopy(c["objective"])
+        h.snapshot_tag = name
         t0 = time.time()
-        r = H.solve(c["params"], c["costates"], c["final_time"])
+        twin = SOLVED.get(name[1:]) if c["objective"] == "fuel" and c["j2"] else None
+        r = h.solve(c["params"], c["costates"], c["final_time"], start=twin)
+        if r.exact:
+            SOLVED[name] = r
         row = {"name": name, "exact": bool(r.exact), "sec": round(time.time() - t0, 3),
                "tf": float(r.solution.tf) if r.exact else None, "msg": r.message[:80],
                "tf_estimate": c["tf_estimate"], "diagnostics": r.diagnostics}
         if row["exact"] and row["sec"] > ARGS.cap:
             row.update(exact=False, tf=None, msg=f"over the {ARGS.cap:g} s cap (solved in {row['sec']} s)")
         if row["exact"]:
-            tr = r.shooting.trajectory(r.solution.v, n_points=200)
-            z = np.asarray(tr["z"])
+            tr = r.shooting.trajectory(r.solution.v, n_points=2000)
+            z, u = np.asarray(tr["z"]), np.asarray(tr["u"])
             row.update(revolutions=float((z[-1, 5] - z[0, 5]) / (2 * np.pi)),
                        mass_final=float(z[-1, 6]),
                        end_error=float(np.abs(z[-1, :5] - np.asarray(c["xf"])).max()),
                        days=float(r.solution.tf) * UNITS.time / 86400)
+            if c["objective"] == "fuel":
+                on = u[:, 3] > 0.5
+                row.update(switches=int(np.count_nonzero(on[1:] != on[:-1])),
+                           mass_min_time=c["mass_min_time"])
     except Exception as exc:          # a case that raises is a result too
         row = {"name": name, "exact": False, "sec": 0.0, "tf": None, "msg": repr(exc)[:80],
                "diagnostics": {}}
@@ -146,7 +204,7 @@ def summary(rows):
     secs = sorted(r["sec"] for r in ok)
     print(f"solved {len(ok)} of {len(rows)}; under 60 s: {sum(s < 60 for s in secs)}; "
           f"mean {sum(secs) / len(secs) if secs else float('nan'):.3f} s")
-    for fam in FAMILIES:
+    for fam in (*FAMILIES, "fuel"):
         for j in ("", "j"):
             part = [r for r in rows if r["name"].rstrip("0123456789") == j + fam]
             if part:
