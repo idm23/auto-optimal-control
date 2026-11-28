@@ -130,7 +130,7 @@ def test_orbit_census_cases_ladder_down_in_thrust_between_fixed_orbits():
     import numpy as np
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
-    from orbit_census import FAMILIES, FUEL_FACTORS, FUEL_RUNGS, case, case_names
+    from orbit_census import FAMILIES, FUEL_FACTORS, FUEL_RUNGS, case, case_names, neighbours
     from orbitprop import EARTH, equinoctial_to_keplerian
 
     names = case_names()
@@ -152,6 +152,12 @@ def test_orbit_census_cases_ladder_down_in_thrust_between_fixed_orbits():
             assert 0 < fuel["mass_min_time"] < 1
     with pytest.raises(KeyError):
         case(f"fuel{n_fuel}")
+    # Each case starts from its neighbours, which the census runs before it.
+    assert neighbours("raise0") == [] and neighbours("raise3") == ["raise2"]
+    assert neighbours("jincl2") == ["incl2", "jincl1"]
+    assert neighbours("fuel3") == [] and neighbours("jfuel4") == ["fuel4", "jfuel3"]
+    order = {n: k for k, n in enumerate(names)}
+    assert all(order[m] < order[n] for n in names for m in neighbours(n))
     for fam, ((start, target), ladder) in FAMILIES.items():
         assert list(ladder) == sorted(ladder, reverse=True)
         for i in range(len(ladder)):

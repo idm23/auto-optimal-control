@@ -41,36 +41,32 @@ and a cap of 300 s a case.
 
 ## Results
 
-The census of 2026-11-26 on homebox-node-1 (six cores, `--parallel-routes`, a 300 s
-cap) solves 31 of the 36 cases, 22 of them within 60 s; the mean over the solved is
-51.7 s. Every answer ends on its target orbit to 5e-11 or better.
+The census of 2026-11-27 on homebox-node-1 (six cores, `--parallel-routes`, a 300 s cap)
+solves 53 of the 54 cases, 46 within 60 s; the mean over the solved is 26.3 s. Every
+answer ends on its target orbit to 1.2e-8 or better (2e-10 at minimum time). Each case
+starts from its neighbours' answers (`Homotopy.solve(start=)`, `neighbours` in the
+script): a J2 case from its two-body twin, every case from the one before it on its
+ladder. The answer is continued in the parameters, a secant predicting each step; where
+that fails (the structure changes on the way), the case is solved from the costate
+draws. `--no-seed` solves every case from the draws, as the census of 2026-11-26 did:
+31 of the 36 minimum-time cases, in a mean of 51.7 s.
 
-- **`raise`: 17 of 18**, down to 0.0001 g (0.98 mm/s²): 92.5 revolutions over 7.1 days
-  in 24 s (`raise8`), 92.8 with J2 in 242 s (`jraise8`). J2 lengthens the transfer by 0.1
-  to 0.3%. Edelbaum's estimate is within 1% from 0.005 g down. `raise7` (46
-  revolutions) fails at the random draws; an earlier run of the census solved it in 46 s,
-  before a change to the thrust direction's law that left its value the same but its
-  arithmetic not. The draws decide it.
-- **`incl`: 6 of 10.** Down to 0.003 g (9.7 revolutions), two-body and J2. The four
-  failures (`incl3`, `incl4`, `jincl3`, `jincl4`, 30 and 120 revolutions) are all at the
-  first stage, the random draws of the costates and the final time: none solved the
-  regularized problem within the cap. Before the cap held (see below) a probe solved
-  `incl3` in 1407 s, so these fail on the budget, not for want of an answer. `incl2`
-  solved here in 294 s and failed in the earlier run: the same luck of the draws.
-- **`gto`: all 8**, down to 0.0003 g (2.9 mm/s²): 14.7 revolutions over 8.8 days. Two of
-  the two-body answers are local extrema, not the minimum: `gto1` and `gto2` take 126
-  and 361 time units where their J2 twins take 91 and 275, in both runs. The product
-  `T t_f` (the delta-v a constant-thrust transfer spends) is 0.27 to 0.29 for the other
-  six and 0.36 to 0.38 for these two. Each has more revolutions than its twin (2.2
-  against 1.6, 7.7 against 3.3), and J2 is far too weak to explain the gap.
-  Edelbaum's estimate, taken from the perigee, is twice the answer here; the final-time
-  box still holds it.
-- **`fuel`: 17 of 18** (2026-11-27, node-1, one case at a time, no parallel routes):
-  all nine two-body cases and eight of the nine with J2, 10 under 60 s, a mean of 70.6 s.
-  Every answer ends on its target to 4e-8 or better. A J2 case starts from its two-body
-  twin's answer (`Homotopy.solve(start=)`), continued in the parameters with the
-  twin's switches held; where J2 changes the switching, that fails in a few steps and
-  the case is solved from the costate draws as before.
+- **Minimum time: all 36**, a mean of 14.7 s, 25 under 5 s.
+  - **`raise`** down to 0.0001 g (0.98 mm/s²): 92.5 revolutions over 7.1 days in 82 s
+    (`raise8`), 92.8 with J2 in 6.7 s (`jraise8`, from its twin in one step; 242 s from
+    the draws). J2 lengthens the transfer by 0.1 to 0.3%. Edelbaum's estimate is within
+    1% from 0.005 g down.
+  - **`incl`** down to 0.0003 g: 98 revolutions over 7.7 days (`incl4`, 263 s, in 7
+    steps from `incl3`). The draws solved none of the four cases from 30 revolutions
+    down.
+  - **`gto`** down to 0.0003 g: 11.3 revolutions over 8.5 days.
+- **The extremum depends on the path.** Many extremals reach the target, one per
+  number of revolutions and more, and a case lands on the one its route reaches. From
+  the draws, `gto1` took 125.7 time units and `gto2` 361.0. Seeded, they take 89.8 and
+  263.9, and `gto3` 904.7 against 945.3. A seeded answer is not always the least either:
+  without the secant predictor, `gto3` reached 892.2, `jgto1` 91.1 (94.3 here) and
+  `incl2` 82.59 (82.83 here).
+- **Minimum fuel: 17 of 18**, a mean of 51.0 s.
   - **Propellant.** Given time to spare, the raise spends 2.029 to 2.033% of the mass at
     every thrust, against 4.8% at minimum time at 0.05 g and 2.06 to 2.09% at the lower
     thrusts. The impulsive (Hohmann) transfer, a delta-v of 0.0763, spends 2.028%: the
@@ -79,11 +75,13 @@ cap) solves 31 of the 36 cases, 22 of them within 60 s; the mean over the solved
   - **Switches.** The engine burns near the perigee and the apogee of each
     revolution: 2 switches at 0.05 g and 1.2 times, up to 18 at 0.002 g and 2 times
     (9.4 revolutions).
-  - **From the twin.** `jfuel7` and `jfuel8` (7 and 9.4 revolutions), at the cap from
-    the draws, solve from their twins in 24.5 and 31.2 s, and `jfuel0` in 0.013 s. The
-    others' switching differs from their twins' (3 switches against 4 at 0.01 g).
+  - **From the neighbours.** Eight of the seventeen come from a neighbour, in 0.01 to 6.3 s:
+    the longer `t_f`s from the shorter at the same thrust, and `jfuel7`, `jfuel8` (at the
+    cap from the draws) from their twins. The others' switching differs from their
+    neighbours' (3 switches against 4 at 0.01 g with J2), and they come from the draws,
+    in up to 215 s.
   - **Unsolved: `jfuel6`** (0.002 g, 1.2 times, 5.7 revolutions), at the cap. Its twin
-    has 6 switches, and with J2 the continuation from the draws reads 6 but none of its
+    has 6 switches; with J2 the continuation from the draws reads 6 too, but none of its
     exact solves converges.
 
 The census found these bugs on its way:
@@ -122,18 +120,18 @@ The census found these bugs on its way:
 
 What comes next, in the order the results ask for it:
 
-- **Costates from the rung above.** Down a ladder the answers change smoothly with the
-  thrust, and a minimum-time costate scales roughly as `1 / T`; seeding each case from
-  the one above would replace the random draws that fail on `incl`.
-- **Telling a local extremum from the minimum** (`gto1`, `gto2`): the number of
-  revolutions is the discrete choice, and a second solve from the J2 twin's answer, or
-  from one revolution fewer, would show it.
-- **Faster minimum fuel.** Below `eps = 1e-5` a continuation step takes 10 to 75 s, in
-  MINPACK solves of about 60 propagations each, and the exact structure comes near
-  `eps = 1e-7`. `solve(start=)` from a neighbour skips all of that when the switching
-  carries over: from the shorter `t_f`, or from the rung's minimum-time answer (the fuel
-  answer at `t_f = t_min`), a continuation that lets switch pairs be born would do it for
-  every case.
+- **Choosing among the extrema.** Seeding reaches better extrema than the draws, but which
+  one depends on the path (`gto3`: 892.2 or 904.7). Trying every neighbour and keeping
+  the least, or a second solve from one revolution fewer, would choose rather than
+  inherit.
+- **Switches born on the way.** A continuation from a neighbour holds its structure, so
+  a fuel case whose switches differ from its neighbour's goes back to the draws (up to
+  215 s). Following the switching function through a birth, as the active-set route
+  follows a limit's, would let every case start from its neighbour, and from its rung's
+  minimum-time answer (the fuel answer at `t_f = t_min`).
+- **Faster minimum fuel from the draws.** Below `eps = 1e-5` a continuation step takes
+  10 to 75 s, in MINPACK solves of about 60 propagations each, and the exact structure
+  comes near `eps = 1e-7`.
 - **More of minimum fuel:** the plane change and GTO to GEO.
 - **More forces** in `orbitprop`: higher zonals are a parameter away (`zonal_degree`),
   then drag, solar radiation pressure and third bodies.
@@ -148,9 +146,7 @@ minimum fuel, the throttle. The page is drawn from the data in
 
 ```bash
 python benchmarks/orbit_census.py orbit_census.jsonl --cap 300 --parallel-routes \
-    --export docs/_static/orbit_census/data --cases raise0 ...   # the minimum-time cases
-python benchmarks/orbit_census.py fuel_census.jsonl --cap 300 \
-    --export docs/_static/orbit_census/data --cases fuel0 ...    # and the fuel cases
+    --export docs/_static/orbit_census/data
 ```
 
 <iframe src="_static/orbit_census/index.html" title="Orbit transfer census" loading="lazy"
