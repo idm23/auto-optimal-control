@@ -2025,6 +2025,31 @@ the throttle in $[0, 1]$ and $t_f$ fixed at 1.2, 1.5 and 2 times the minimum tim
   $S$'s extrema, as the path constraints' rates do for $g$; they cost a right-hand side
   at every test.
 
+### Observation O15: the orbit census from its neighbours (2026-11-27)
+
+`Homotopy.solve(start=)` continues an exact answer at other parameters to these, its
+structure held, before the costate draws; `orbit_census.py` gives each case its two-body
+twin and the case before it on its ladder. Node-1, six cores, a 300 s cap.
+
+| | From the draws (2026-11-26) | From the neighbours |
+|---|---|---|
+| Minimum time | 31 of 36, mean 51.7 s, 22 under 60 s | 36 of 36, mean 14.7 s, 34 under 60 s |
+| Minimum fuel | 17 of 18 (twins only), mean 70.6 s | 17 of 18, mean 51.0 s |
+
+- **Most continuations take one to five steps.** A J2 case from its twin takes one
+  (`jraise8`, 92.8 revolutions: 6.7 s against 242 s from the draws). Down a ladder the
+  revolutions grow with $1/T$, and a step's Newton starts from the secant through the
+  last two answers: without it `incl2` took 13 steps (65 s), with it 4 (17.8 s). `incl4`
+  (98 revolutions, from 30) takes 7 steps and 263 s, of which 82 s go to the first,
+  failed, full steps.
+- **A structure that changes on the way ends the continuation.** Minimum fuel at 0.01 g
+  switches 4 times two-body and 3 times with J2: those continuations fail and the cases
+  go to the draws.
+- **The extremum reached depends on the route.** Every answer passes; which extremal it
+  is varies. From the draws, `gto1` and `gto2` took 125.7 and 361.0 time units;
+  continued, 89.8 and 263.9. With and without the secant, `gto3` reached 904.7 and
+  892.2, `jgto1` 94.3 and 91.1, `incl2` 82.83 and 82.59.
+
 ### KD. With a diagonal control Hessian, the riding system is an $s \times s$ system — proved (elementary)
 
 - **Setting.** A riding solve (riding.py) for a set of $s$ limits, with the controls in

@@ -3875,8 +3875,9 @@ class Homotopy:
 
         ``params`` are the values of the stated problem's parameters; the
         policy, if one applies, is handled here (see :class:`Homotopy`).
-        ``start``, an exact result of this problem at other parameters, is continued
-        to these first (:meth:`_from_neighbour`); the rest of the options are those of
+        ``start``, an exact result of this problem at other parameters (or a list of
+        them, tried in order), is continued to these first (:meth:`_from_neighbour`);
+        the rest of the options are those of
         :meth:`_solve`. Returns a :class:`HomotopyResult`.
         """
         params = np.asarray(params, dtype=float).reshape(-1)
@@ -3895,10 +3896,14 @@ class Homotopy:
             # cannot carry the solve far beyond it (a 300 s cap ran to 551 s).
             SingleShooting.deadline = self._solve_end
         start = options.pop("start", None)
+        starts = [s for s in (start if isinstance(start, (list, tuple)) else [start])
+                  if s is not None]
         try:
             r = None
-            if start is not None and self._stages is None:
-                r = self._from_neighbour(start, params, options.get("tol", 1e-10))
+            for s in starts if self._stages is None else ():
+                r = self._from_neighbour(s, params, options.get("tol", 1e-10))
+                if r is not None:
+                    break
             if r is not None:
                 pass
             elif self._stages is None:
@@ -4389,7 +4394,8 @@ class Homotopy:
         arcs = list(start.arcs or ())
         v = np.asarray(start.solution.v, dtype=float).copy()
         method = "lm" if kx.N_SWITCHING else "hybr"
-        sigma, ds, steps = 0.0, 1.0, 0
+        sigma, ds, steps, prev = 0.0, 1.0, 0, None
+        began = time.perf_counter()
 
         def shooting_at(s):
             self.params = (1 - s) * p0 + s * p1
@@ -4403,14 +4409,21 @@ class Homotopy:
                 if self._solve_end is not None and time.perf_counter() > self._solve_end:
                     return None
                 s = min(1.0, sigma + ds)
+                # The secant through the last two answers predicts the next one: down a
+                # ladder of thrust the revolutions, and with them the final time and the
+                # costates, grow by much more than Newton's radius at one step.
+                guess = v if prev is None else v + (v - prev[1]) * (s - sigma) / (sigma - prev[0])
                 try:
                     sh = shooting_at(s)
-                    sol = sh.solve(v, method=method, tol=_scaled(tol, v),
+                    sol = sh.solve(guess, method=method, tol=_scaled(tol, guess),
                                    options=_budget(method, self.attempt_evaluations))
                 except _FAILURES:
                     sol = None
                 if sol is not None and sol.success:
+                    prev = (sigma, v)
                     sigma, v, steps = s, sol.v, steps + 1
+                    self._detail(f"from the neighbour: {sigma:.4f} after {steps} steps, "
+                                 f"{time.perf_counter() - began:.1f} s")
                     ds = min(2 * ds, 1.0)
                     continue
                 ds /= 2

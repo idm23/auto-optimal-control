@@ -1,7 +1,8 @@
 """The orbit transfer census: low-thrust transfers around the Earth, with what each ran into.
 
     python benchmarks/orbit_census.py OUT.jsonl [--cases raise3 jgto1 ...] [--cap 300]
-        [--parallel-routes] [--cache DIR] [--rule R2=on ...] [--export DIR]
+        [--parallel-routes] [--cache DIR] [--rule R2=on ...] [--export DIR] [--no-seed]
+        [--verbose 1]
 
 A ladder of minimum-time transfers (:func:`auto_optimal_control.orbits.low_thrust_transfer`),
 each family in order of falling thrust, so of more and more revolutions:
@@ -10,7 +11,12 @@ each family in order of falling thrust, so of more and more revolutions:
   Earth radii (638 to 1913 km up);
 - ``incl<i>``: the same raise with a 10 degree plane change;
 - ``gto<i>``: from a geostationary transfer orbit (perigee 250 km, apogee 35,786 km,
-  7 degrees) to the geostationary orbit.
+  7 degrees) to the geostationary orbit;
+- ``fuel<i>``: the raise at minimum propellant, with ``t_f`` fixed (:func:`_fuel_case`).
+
+Each case starts from the exact answers of its :func:`neighbours` solved before it in the
+run (its two-body twin, the case before it on its ladder), and from the costate draws
+when none continues to it; ``--no-seed`` uses the draws alone.
 
 Each case is two-body; ``j`` before its name (``jraise3``) adds the Earth's J2. The thrust
 ``T`` is the initial thrust acceleration in units of surface gravity, and the exhaust
@@ -65,8 +71,8 @@ MIN_TIME = {(0, False): 3.5836497325604464, (2, False): 7.776290810352053,
             (4, False): 38.302137443747554, (0, True): 3.5877499037007574,
             (2, True): 7.789408936905352, (4, True): 38.379028737254295}
 H = {}
-# Exact answers of this run, by case: a J2 minimum-fuel case starts from its two-body
-# twin's (``Homotopy.solve(start=)``), so the twin must come first.
+# Exact answers of this run, by case: each case starts from its neighbours' answers
+# (``Homotopy.solve(start=)``, :func:`neighbours`) when they were solved before it.
 SOLVED = {}
 ARGS = None
 
@@ -112,6 +118,26 @@ def case(name):
             "final_time": (0.3 * est, 4 * est)}
 
 
+def neighbours(name):
+    """The cases ``name`` starts from, nearest first: for a J2 case its two-body twin,
+    then the case before it on its ladder (the thrust above; for minimum fuel the
+    shorter ``t_f`` at the same thrust). A census runs each family's ladder in order,
+    two-body first, so these come before ``name``."""
+    case(name)                                   # a KeyError for no such case
+    j = "j" if name.startswith("j") and name[1:].rstrip("0123456789") in (*FAMILIES, "fuel") \
+        else ""
+    base = name[len(j):]
+    fam = base.rstrip("0123456789")
+    i = int(base[len(fam):])
+    out = [base] if j else []
+    if fam == "fuel":
+        if i % len(FUEL_FACTORS):
+            out.append(f"{j}fuel{i - 1}")
+    elif i:
+        out.append(f"{j}{fam}{i - 1}")
+    return out
+
+
 def _fuel_case(i, j2):
     """``fuel<i>``: the raise at rung ``FUEL_RUNGS[i // 3]`` with the throttle free in [0, 1]
     and ``t_f`` fixed at ``FUEL_FACTORS[i % 3]`` times that rung's minimum time. The
@@ -147,6 +173,7 @@ def _homotopy(objective):
         h.solve_seconds = args.cap
         h.active_set_seconds = args.cap
         h.parallel_routes = args.parallel_routes
+        h.verbose = args.verbose
         if h.bang_bang:
             h.exact_kernels
         H[objective] = h
@@ -168,8 +195,8 @@ def run(name):
         h = _homotopy(c["objective"])
         h.snapshot_tag = name
         t0 = time.time()
-        twin = SOLVED.get(name[1:]) if c["objective"] == "fuel" and c["j2"] else None
-        r = h.solve(c["params"], c["costates"], c["final_time"], start=twin)
+        starts = [] if ARGS.no_seed else [SOLVED[n] for n in neighbours(name) if n in SOLVED]
+        r = h.solve(c["params"], c["costates"], c["final_time"], start=starts)
         if r.exact:
             SOLVED[name] = r
         row = {"name": name, "exact": bool(r.exact), "sec": round(time.time() - t0, 3),
@@ -234,6 +261,9 @@ def main(argv=None):
                          "(docs/_static/orbit_census/data)")
     ap.add_argument("--parallel-routes", action="store_true",
                     help="run R15's routes at once (one core per route)")
+    ap.add_argument("--verbose", type=int, default=0, help="the solver's narration: 1 or 2")
+    ap.add_argument("--no-seed", action="store_true",
+                    help="solve every case from the costate draws, not from its neighbours")
     args = ap.parse_args(argv)
     setup(args)
     names = args.cases or case_names()

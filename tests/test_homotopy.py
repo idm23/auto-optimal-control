@@ -4,6 +4,7 @@ Every solve here is given only the problem, its parameters and a box (or a
 function) to draw initial costates (and ``t_f``) from.
 """
 
+import dataclasses
 from types import SimpleNamespace
 
 import pytest
@@ -119,6 +120,10 @@ def test_a_solve_starts_from_a_neighbours_answer(kernel_cache):
     assert r.exact and r.message.startswith("exact from a neighbour"), r.message
     assert r.arcs == near.arcs
     assert abs(r.solution.tf - (D / V + V / umax)) < 1e-9
+    # A list is tried in order, past the ones that are no exact answer.
+    inexact = dataclasses.replace(near, exact=False)
+    listed = h.solve([V, D, umax], ([-3, -3], [0, 3]), (1.0, 20.0), start=[None, inexact, near])
+    assert listed.exact and listed.message.startswith("exact from a neighbour"), listed.message
     plain = h.solve([V, D, umax], ([-3, -3], [0, 3]), (1.0, 20.0), start=None)
     assert plain.exact and not plain.message.startswith("exact from a neighbour")
     assert abs(plain.solution.tf - r.solution.tf) < 1e-9
