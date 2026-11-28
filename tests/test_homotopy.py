@@ -4,11 +4,16 @@ Every solve here is given only the problem, its parameters and a box (or a
 function) to draw initial costates (and ``t_f``) from.
 """
 
+from types import SimpleNamespace
+
 import pytest
 import sympy as sp
 
 from auto_optimal_control import examples
-from auto_optimal_control.homotopy import EPS, OFF, RHO, Homotopy, exact, regularize
+from auto_optimal_control.examples import GODDARD_PARAMS
+from auto_optimal_control.homotopy import (EPS, FIRST_EPS_FRACTION, OFF, RHO, Homotopy, exact,
+                                           regularize)
+from auto_optimal_control.pontryagin import bang_bang_controls
 from auto_optimal_control.problem import OptimalControlProblem, PathConstraint
 
 
@@ -18,6 +23,22 @@ def bryson_denham_cost(ell):
     a, b = -4 + 12 * ell, 4 - 16 * ell
     c0, c1, T = 2 * a, 6 * b, 0.5
     return c0 ** 2 * T + c0 * c1 * T ** 2 + c1 ** 2 * T ** 3 / 3
+
+
+def test_the_smoothing_starts_where_a_controls_own_cost_holds_it_past_its_bound():
+    # Minimum fuel: the throttle's cost is T_max delta / c, so a = T_max / c and
+    # half = 1/2; minimum time and Goddard's rocket have no such term and start at 1.
+    fuel = examples.planar_low_thrust_fuel()
+    params = dict(mu=1.0, T_max=0.05, c=2.0, m_0=1.0, r_0=1.0, r_f=1.5, t_f=6.0)
+    stub = SimpleNamespace(problem=fuel, bang_bang=bang_bang_controls(fuel))
+    eps = Homotopy._first_eps(stub, [params[str(p)] for p in fuel.params])
+    assert eps == pytest.approx(FIRST_EPS_FRACTION * 0.05 / 2.0 / 2)
+    # At zero costates the smoothed throttle, mid - a half^2 / eps, is below 0.
+    assert 0.5 - (0.05 / 2.0) * 0.25 / eps < 0
+    for problem, values in ((examples.double_integrator_min_time(), [1.0, 1.0, 0.0]),
+                            (examples.goddard(), list(GODDARD_PARAMS))):
+        stub = SimpleNamespace(problem=problem, bang_bang=bang_bang_controls(problem))
+        assert Homotopy._first_eps(stub, values) == 1.0
 
 
 def test_regularize_adds_smoothing_and_penalties():
@@ -83,6 +104,24 @@ def test_speed_limit_bang_bang_with_boundary_arc(kernel_cache, V, D, umax):
     r = h.solve([V, D, umax], ([-3, -3], [0, 3]), (1.0, 20.0))
     assert r.exact and r.arcs == (("boundary", "v_max"),), r.message
     assert abs(r.solution.tf - (D / V + V / umax)) < 1e-9
+
+
+@pytest.mark.slow
+def test_a_solve_starts_from_a_neighbours_answer(kernel_cache):
+    """``solve(start=)``: the exact answer at nearby parameters is continued to these,
+    its structure (here a boundary arc on the speed limit) held, without the costate
+    draws; a start with another structure, or none, leaves the solve as it was."""
+    h = Homotopy(examples.speed_limited_min_time(), cache_dir=kernel_cache)
+    near = h.solve([1.0, 3.0, 1.0], ([-3, -3], [0, 3]), (1.0, 20.0))
+    assert near.exact
+    V, D, umax = 1.1, 3.4, 0.9
+    r = h.solve([V, D, umax], ([-3, -3], [0, 3]), (1.0, 20.0), start=near)
+    assert r.exact and r.message.startswith("exact from a neighbour"), r.message
+    assert r.arcs == near.arcs
+    assert abs(r.solution.tf - (D / V + V / umax)) < 1e-9
+    plain = h.solve([V, D, umax], ([-3, -3], [0, 3]), (1.0, 20.0), start=None)
+    assert plain.exact and not plain.message.startswith("exact from a neighbour")
+    assert abs(plain.solution.tf - r.solution.tf) < 1e-9
 
 
 @pytest.mark.slow

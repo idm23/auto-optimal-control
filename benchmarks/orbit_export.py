@@ -89,6 +89,10 @@ def export_case(out_dir, name, case, row, result=None):
             "start_orbit": _round(orbit_curve(x0[:5])), "target_orbit": _round(orbit_curve(xf))}
     if case["objective"] == "fuel":
         data["tf_fixed"] = float(p[-1])
+        for key in ("tf_min", "tf_factor", "mass_min_time"):
+            if key in case:
+                data[key] = case[key]
+        data["switches"] = row.get("switches")
     if result is not None and row.get("exact"):
         tr = result.shooting.trajectory(result.solution.v, n_points=2)
         revs = abs(float(tr["z"][-1][5] - tr["z"][0][5])) / (2 * np.pi)

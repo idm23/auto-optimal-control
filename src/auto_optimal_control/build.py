@@ -376,7 +376,7 @@ class Kernels:
             status = mod.STATUS_VIOLATED
         else:
             detection = ({"event_detection": "interior", "n_interior": int(n_interior)}
-                         if nc and n_interior else {})
+                         if (nc or nsw) and n_interior else {})
             events = ([mod.Switching(k, p, True, 0.0) for k in range(nsw)]
                       + [mod.Constraint(c, p, True, 0.0) for c in range(nc)]
                       + kinks + rates)

@@ -69,13 +69,14 @@ input[type=range] { flex: 1; min-width: 120px; accent-color: var(--accent); }
 <body>
 <main>
 <h1>Orbit transfer census</h1>
-<p class="lede">Minimum-time low-thrust transfers around the Earth, as the solver finds them, in
+<p class="lede">Low-thrust transfers around the Earth, as the solver finds them, at minimum time unless marked, in
 modified equinoctial elements with the thrust direction a unit vector. Each family runs down a ladder of
 falling thrust, so of more and more revolutions: <code>raise</code> lifts a circular equatorial orbit from
 1.1 to 1.3 Earth radii, <code>incl</code> does the same with a 10° plane change, and <code>gto</code> goes from
 a geostationary transfer orbit to the geostationary orbit. A <code>j</code> in front of a name adds the
-Earth's J2. The engine is a 3000 s ion engine throughout. The spiral runs from blue to gold; the red arrow
-is the thrust.</p>
+Earth's J2. <code>fuel</code> is the raise again at minimum propellant, its time fixed at 1.2, 1.5 or 2
+times the minimum, so the engine may coast. The engine is a 3000 s ion engine throughout. The spiral runs
+from blue to gold, dashed where it coasts; the red arrow is the thrust.</p>
 <div class="summary" id="summary"></div>
 <div class="families" id="families"></div>
 
@@ -99,6 +100,7 @@ is the thrust.</p>
       <span><i class="sw" style="background:var(--start)"></i>start orbit</span>
       <span><i class="sw" style="background:var(--target)"></i>target orbit</span>
       <span><i class="sw" style="background:linear-gradient(90deg,var(--path0),var(--path1))"></i>transfer</span>
+      <span><i class="sw" style="background:repeating-linear-gradient(90deg,var(--path0) 0 3px,transparent 3px 6px)"></i>coast</span>
       <span><i class="sw" style="background:var(--thrust)"></i>thrust direction</span>
     </div>
   </div>
@@ -193,22 +195,41 @@ function polyline(ctx, pts, w, h, sc, pick) {   // the points with pick(p) true,
   }
   ctx.stroke();
 }
+function polylineIdx(ctx, r, i0, i1, w, h, sc, pick) {   // points i0..i1-1 with pick(i), as runs
+  let on = false; ctx.beginPath();
+  for (let i = i0; i < i1; i++) {
+    const [u, v] = project(r[i], w, h, sc);
+    if (pick(i)) { on ? ctx.lineTo(u, v) : ctx.moveTo(u, v); on = true; } else on = false;
+  }
+  ctx.stroke();
+}
+function burning(d, i) { return !d.throttle || d.throttle[i] > 0.5; }
 function drawPathHalf(ctx, d, upto, w, h, sc, dpr, big, front) {
-  // the transfer in chunks shaded blue to gold, bright up to index upto and faint after
-  const r = d.r, n = r.length, chunks = 32, pick = front ? (p => depth(p) <= 0) : (p => depth(p) > 0);
+  // the transfer in chunks shaded blue to gold, bright up to index upto and faint after;
+  // a minimum-fuel transfer's coasts are dashed
+  const r = d.r, n = r.length, chunks = 32, side = i => front ? depth(r[i]) <= 0 : depth(r[i]) > 0;
+  // a run of one kind takes the segment into the next sample, so the two kinds meet
+  const kind = coast => i => side(i) && (coast
+    ? !burning(d, i) || (i > 0 && !burning(d, i - 1)) : burning(d, i) || (i > 0 && burning(d, i - 1)));
+  const kinds = d.throttle ? [false, true] : [false];
   for (let c = 0; c < chunks; c++) {
     const a = Math.floor(c * (n - 1) / chunks), b = Math.floor((c + 1) * (n - 1) / chunks) + 1;
     const color = mix(colors.path0, colors.path1, c / (chunks - 1));
-    if (a < upto) {
-      ctx.strokeStyle = color; ctx.globalAlpha = front ? 1 : 0.55; ctx.lineWidth = (big ? 1.4 : 0.9) * dpr;
-      polyline(ctx, r.slice(a, Math.min(b, upto + 1)), w, h, sc, pick);
-    }
-    if (b > upto) {
-      ctx.strokeStyle = color; ctx.globalAlpha = 0.14; ctx.lineWidth = (big ? 1 : 0.7) * dpr;
-      polyline(ctx, r.slice(Math.max(a, upto), b), w, h, sc, pick);
+    for (const coast of kinds) {
+      ctx.setLineDash(coast ? [2.5 * dpr, 3 * dpr] : []);
+      const fade = coast ? 0.7 : 1;
+      if (a < upto) {
+        ctx.strokeStyle = color; ctx.globalAlpha = (front ? 1 : 0.55) * fade;
+        ctx.lineWidth = (big ? 1.4 : 0.9) * (coast ? 0.8 : 1) * dpr;
+        polylineIdx(ctx, r, a, Math.min(b, upto + 1), w, h, sc, kind(coast));
+      }
+      if (b > upto) {
+        ctx.strokeStyle = color; ctx.globalAlpha = 0.14 * fade; ctx.lineWidth = (big ? 1 : 0.7) * dpr;
+        polylineIdx(ctx, r, Math.max(a, upto), b, w, h, sc, kind(coast));
+      }
     }
   }
-  ctx.globalAlpha = 1;
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
 }
 function drawOrbitHalf(ctx, pts, color, w, h, sc, dpr, front, dash) {
   ctx.strokeStyle = color; ctx.lineWidth = 1.2 * dpr; ctx.globalAlpha = front ? 0.9 : 0.4;
@@ -233,12 +254,14 @@ function drawOrbit(cv, d, tau, big) {
     const [x0, y0] = project(p, w, h, sc), [x1, y1] = project(p.map((v, k) => v + len * u[k]), w, h, sc);
     const hidden = depth(p) > 0 && Math.hypot(x0 - w / 2, y0 - h / 2) < sc;
     ctx.globalAlpha = hidden ? 0.35 : 1;
-    ctx.strokeStyle = colors.thrust; ctx.lineWidth = 2 * dpr;
-    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-    const a = Math.atan2(y1 - y0, x1 - x0), hd = 7 * dpr;
-    ctx.fillStyle = colors.thrust; ctx.beginPath(); ctx.moveTo(x1, y1);
-    ctx.lineTo(x1 - hd * Math.cos(a - 0.45), y1 - hd * Math.sin(a - 0.45));
-    ctx.lineTo(x1 - hd * Math.cos(a + 0.45), y1 - hd * Math.sin(a + 0.45)); ctx.fill();
+    if (burning(d, upto)) {               // no arrow while the engine is off
+      ctx.strokeStyle = colors.thrust; ctx.lineWidth = 2 * dpr;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      const a = Math.atan2(y1 - y0, x1 - x0), hd = 7 * dpr;
+      ctx.fillStyle = colors.thrust; ctx.beginPath(); ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 - hd * Math.cos(a - 0.45), y1 - hd * Math.sin(a - 0.45));
+      ctx.lineTo(x1 - hd * Math.cos(a + 0.45), y1 - hd * Math.sin(a + 0.45)); ctx.fill();
+    }
     ctx.fillStyle = colors.craft; ctx.beginPath(); ctx.arc(x0, y0, 3.2 * dpr, 0, 2 * Math.PI); ctx.fill();
     ctx.globalAlpha = 1;
   }
@@ -387,7 +410,13 @@ async function select(name, scroll) {
   document.getElementById("v-meta").innerHTML = (d.solved
     ? `<span class="ok">Solved</span> in ${d.seconds.toFixed(2)} s · transfer time ${fmtDays(d.tf, d.time_unit_s)}`
       + ` · ${d.revolutions.toFixed(1)} revolutions · ${(100 * (1 - d.mass_final)).toFixed(2)}% of the mass spent`
+      + (d.objective === "fuel" && d.mass_min_time != null
+        ? ` against ${(100 * (1 - d.mass_min_time)).toFixed(2)}% at minimum time · ${d.switches} throttle switches`
+        : "")
     : `<span class="bad">Not solved</span> · ${d.message ?? ""}`)
+    + (d.objective === "fuel" && d.tf_min != null
+      ? `<br>minimum fuel, t<sub>f</sub> fixed at ${d.tf_factor}× the minimum time (${fmtDays(d.tf_fixed, d.time_unit_s)})`
+      : "")
     + `<br>thrust ${d.thrust} g (${d.thrust_mm_s2.toPrecision(3)} mm/s² at the start), Isp ${d.isp_s.toFixed(0)} s, `
     + (d.j2 ? "with J2" : "two-body")
     + `<br>from ${orb(d.from)} to ${orb(d.to)}`;

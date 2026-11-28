@@ -130,11 +130,28 @@ def test_orbit_census_cases_ladder_down_in_thrust_between_fixed_orbits():
     import numpy as np
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
-    from orbit_census import FAMILIES, case, case_names
+    from orbit_census import FAMILIES, FUEL_FACTORS, FUEL_RUNGS, case, case_names
     from orbitprop import EARTH, equinoctial_to_keplerian
 
     names = case_names()
-    assert len(names) == len(set(names)) == 2 * sum(len(t) for _, t in FAMILIES.values())
+    n_fuel = len(FUEL_RUNGS) * len(FUEL_FACTORS)
+    assert len(names) == len(set(names)) == 2 * (sum(len(t) for _, t in FAMILIES.values())
+                                                 + n_fuel)
+    # Minimum fuel: the raise's rung with t_f fixed (a parameter) at a multiple of its
+    # minimum time, so the throttle has time to spare and the propellant beats the
+    # minimum time's.
+    for i in range(n_fuel):
+        for j in ("", "j"):
+            fuel = case(f"{j}fuel{i}")
+            rung = case(f"{j}raise{FUEL_RUNGS[i // len(FUEL_FACTORS)]}")
+            factor = FUEL_FACTORS[i % len(FUEL_FACTORS)]
+            assert fuel["objective"] == "fuel" and fuel["final_time"] is None
+            assert fuel["params"][:-1] == rung["params"]
+            assert fuel["params"][-1] == pytest.approx(factor * fuel["tf_min"])
+            assert rung["final_time"][0] < fuel["tf_min"] < rung["final_time"][1]
+            assert 0 < fuel["mass_min_time"] < 1
+    with pytest.raises(KeyError):
+        case(f"fuel{n_fuel}")
     for fam, ((start, target), ladder) in FAMILIES.items():
         assert list(ladder) == sorted(ladder, reverse=True)
         for i in range(len(ladder)):
